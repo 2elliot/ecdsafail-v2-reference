@@ -1,0 +1,794 @@
+[
+ {
+  "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
+  "q": 13,
+  "curve_order": 7,
+  "addend": [
+   7,
+   5
+  ],
+  "n": 4,
+  "wires": 50,
+  "ops": 8782,
+  "counts": {
+   "X": 1287,
+   "CX": 4823,
+   "CCX": 2668,
+   "SWAP": 4
+  },
+  "lanes": 14,
+  "failures": 0,
+  "first_failures": [],
+  "seconds": 0.0
+ },
+ {
+  "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
+  "q": 13,
+  "curve_order": 7,
+  "addend": [
+   7,
+   8
+  ],
+  "n": 4,
+  "wires": 50,
+  "ops": 8786,
+  "counts": {
+   "X": 1287,
+   "CX": 4827,
+   "CCX": 2668,
+   "SWAP": 4
+  },
+  "lanes": 14,
+  "failures": 0,
+  "first_failures": [],
+  "seconds": 0.0
+ },
+ {
+  "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
+  "q": 43,
+  "curve_order": 31,
+  "addend": [
+   2,
+   12
+  ],
+  "n": 6,
+  "wires": 68,
+  "ops": 16846,
+  "counts": {
+   "X": 2409,
+   "CX": 9259,
+   "CCX": 5172,
+   "SWAP": 6
+  },
+  "lanes": 62,
+  "failures": 0,
+  "first_failures": [],
+  "seconds": 0.01
+ },
+ {
+  "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
+  "q": 43,
+  "curve_order": 31,
+  "addend": [
+   2,
+   31
+  ],
+  "n": 6,
+  "wires": 68,
+  "ops": 16834,
+  "counts": {
+   "X": 2409,
+   "CX": 9247,
+   "CCX": 5172,
+   "SWAP": 6
+  },
+  "lanes": 62,
+  "failures": 0,
+  "first_failures": [],
+  "seconds": 0.01
+ },
+ {
+  "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
+  "q": 61,
+  "curve_order": 61,
+  "addend": [
+   2,
+   25
+  ],
+  "n": 6,
+  "wires": 70,
+  "ops": 18189,
+  "counts": {
+   "X": 2483,
+   "CX": 10116,
+   "CCX": 5584,
+   "SWAP": 6
+  },
+  "lanes": 122,
+  "failures": 0,
+  "first_failures": [],
+  "seconds": 0.01
+ },
+ {
+  "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
+  "q": 61,
+  "curve_order": 61,
+  "addend": [
+   2,
+   36
+  ],
+  "n": 6,
+  "wires": 70,
+  "ops": 18193,
+  "counts": {
+   "X": 2483,
+   "CX": 10120,
+   "CCX": 5584,
+   "SWAP": 6
+  },
+  "lanes": 122,
+  "failures": 0,
+  "first_failures": [],
+  "seconds": 0.01
+ },
+ {
+  "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
+  "q": 67,
+  "curve_order": 79,
+  "addend": [
+   2,
+   22
+  ],
+  "n": 7,
+  "wires": 78,
+  "ops": 22577,
+  "counts": {
+   "X": 3442,
+   "CX": 12168,
+   "CCX": 6960,
+   "SWAP": 7
+  },
+  "lanes": 158,
+  "failures": 0,
+  "first_failures": [],
+  "seconds": 0.02
+ },
+ {
+  "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
+  "q": 67,
+  "curve_order": 79,
+  "addend": [
+   2,
+   45
+  ],
+  "n": 7,
+  "wires": 78,
+  "ops": 22573,
+  "counts": {
+   "X": 3442,
+   "CX": 12164,
+   "CCX": 6960,
+   "SWAP": 7
+  },
+  "lanes": 158,
+  "failures": 0,
+  "first_failures": [],
+  "seconds": 0.01
+ },
+ {
+  "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
+  "q": 79,
+  "curve_order": 67,
+  "addend": [
+   1,
+   18
+  ],
+  "n": 7,
+  "wires": 78,
+  "ops": 22597,
+  "counts": {
+   "X": 3138,
+   "CX": 12492,
+   "CCX": 6960,
+   "SWAP": 7
+  },
+  "lanes": 134,
+  "failures": 0,
+  "first_failures": [],
+  "seconds": 0.02
+ },
+ {
+  "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
+  "q": 79,
+  "curve_order": 67,
+  "addend": [
+   1,
+   61
+  ],
+  "n": 7,
+  "wires": 78,
+  "ops": 22585,
+  "counts": {
+   "X": 3138,
+   "CX": 12480,
+   "CCX": 6960,
+   "SWAP": 7
+  },
+  "lanes": 134,
+  "failures": 0,
+  "first_failures": [],
+  "seconds": 0.04
+ },
+ {
+  "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
+  "q": 97,
+  "curve_order": 79,
+  "addend": [
+   1,
+   28
+  ],
+  "n": 7,
+  "wires": 80,
+  "ops": 24142,
+  "counts": {
+   "X": 3706,
+   "CX": 12991,
+   "CCX": 7438,
+   "SWAP": 7
+  },
+  "lanes": 158,
+  "failures": 0,
+  "first_failures": [],
+  "seconds": 0.02
+ },
+ {
+  "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
+  "q": 97,
+  "curve_order": 79,
+  "addend": [
+   1,
+   69
+  ],
+  "n": 7,
+  "wires": 80,
+  "ops": 24142,
+  "counts": {
+   "X": 3706,
+   "CX": 12991,
+   "CCX": 7438,
+   "SWAP": 7
+  },
+  "lanes": 158,
+  "failures": 0,
+  "first_failures": [],
+  "seconds": 0.04
+ },
+ {
+  "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
+  "q": 127,
+  "curve_order": 127,
+  "addend": [
+   1,
+   32
+  ],
+  "n": 7,
+  "wires": 80,
+  "ops": 24119,
+  "counts": {
+   "X": 3056,
+   "CX": 13632,
+   "CCX": 7424,
+   "SWAP": 7
+  },
+  "lanes": 254,
+  "failures": 0,
+  "first_failures": [],
+  "seconds": 0.02
+ },
+ {
+  "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
+  "q": 127,
+  "curve_order": 127,
+  "addend": [
+   1,
+   95
+  ],
+  "n": 7,
+  "wires": 80,
+  "ops": 24099,
+  "counts": {
+   "X": 3056,
+   "CX": 13612,
+   "CCX": 7424,
+   "SWAP": 7
+  },
+  "lanes": 254,
+  "failures": 0,
+  "first_failures": [],
+  "seconds": 0.01
+ },
+ {
+  "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
+  "q": 163,
+  "curve_order": 139,
+  "addend": [
+   2,
+   34
+  ],
+  "n": 8,
+  "wires": 88,
+  "ops": 29168,
+  "counts": {
+   "X": 4315,
+   "CX": 15833,
+   "CCX": 9012,
+   "SWAP": 8
+  },
+  "lanes": 278,
+  "failures": 0,
+  "first_failures": [],
+  "seconds": 0.03
+ },
+ {
+  "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
+  "q": 163,
+  "curve_order": 139,
+  "addend": [
+   2,
+   129
+  ],
+  "n": 8,
+  "wires": 88,
+  "ops": 29168,
+  "counts": {
+   "X": 4315,
+   "CX": 15833,
+   "CCX": 9012,
+   "SWAP": 8
+  },
+  "lanes": 278,
+  "failures": 0,
+  "first_failures": [],
+  "seconds": 0.02
+ },
+ {
+  "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
+  "q": 211,
+  "curve_order": 199,
+  "addend": [
+   3,
+   33
+  ],
+  "n": 8,
+  "wires": 90,
+  "ops": 30936,
+  "counts": {
+   "X": 4395,
+   "CX": 16977,
+   "CCX": 9556,
+   "SWAP": 8
+  },
+  "lanes": 398,
+  "failures": 0,
+  "first_failures": [],
+  "seconds": 0.02
+ },
+ {
+  "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
+  "q": 211,
+  "curve_order": 199,
+  "addend": [
+   3,
+   178
+  ],
+  "n": 8,
+  "wires": 90,
+  "ops": 30928,
+  "counts": {
+   "X": 4395,
+   "CX": 16969,
+   "CCX": 9556,
+   "SWAP": 8
+  },
+  "lanes": 398,
+  "failures": 0,
+  "first_failures": [],
+  "seconds": 0.02
+ },
+ {
+  "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
+  "q": 349,
+  "curve_order": 313,
+  "addend": [
+   2,
+   109
+  ],
+  "n": 9,
+  "wires": 98,
+  "ops": 36614,
+  "counts": {
+   "X": 5066,
+   "CX": 20211,
+   "CCX": 11328,
+   "SWAP": 9
+  },
+  "lanes": 626,
+  "failures": 0,
+  "first_failures": [],
+  "seconds": 0.02
+ },
+ {
+  "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
+  "q": 349,
+  "curve_order": 313,
+  "addend": [
+   2,
+   240
+  ],
+  "n": 9,
+  "wires": 98,
+  "ops": 36618,
+  "counts": {
+   "X": 5066,
+   "CX": 20215,
+   "CCX": 11328,
+   "SWAP": 9
+  },
+  "lanes": 626,
+  "failures": 0,
+  "first_failures": [],
+  "seconds": 0.04
+ },
+ {
+  "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
+  "q": 397,
+  "curve_order": 397,
+  "addend": [
+   3,
+   35
+  ],
+  "n": 9,
+  "wires": 100,
+  "ops": 38584,
+  "counts": {
+   "X": 5568,
+   "CX": 21069,
+   "CCX": 11938,
+   "SWAP": 9
+  },
+  "lanes": 794,
+  "failures": 0,
+  "first_failures": [],
+  "seconds": 0.05
+ },
+ {
+  "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
+  "q": 397,
+  "curve_order": 397,
+  "addend": [
+   3,
+   362
+  ],
+  "n": 9,
+  "wires": 100,
+  "ops": 38576,
+  "counts": {
+   "X": 5568,
+   "CX": 21061,
+   "CCX": 11938,
+   "SWAP": 9
+  },
+  "lanes": 794,
+  "failures": 0,
+  "first_failures": [],
+  "seconds": 0.05
+ },
+ {
+  "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
+  "q": 433,
+  "curve_order": 397,
+  "addend": [
+   1,
+   21
+  ],
+  "n": 9,
+  "wires": 100,
+  "ops": 38575,
+  "counts": {
+   "X": 5562,
+   "CX": 21066,
+   "CCX": 11938,
+   "SWAP": 9
+  },
+  "lanes": 794,
+  "failures": 0,
+  "first_failures": [],
+  "seconds": 0.04
+ },
+ {
+  "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
+  "q": 433,
+  "curve_order": 397,
+  "addend": [
+   1,
+   412
+  ],
+  "n": 9,
+  "wires": 100,
+  "ops": 38567,
+  "counts": {
+   "X": 5562,
+   "CX": 21058,
+   "CCX": 11938,
+   "SWAP": 9
+  },
+  "lanes": 794,
+  "failures": 0,
+  "first_failures": [],
+  "seconds": 0.03
+ },
+ {
+  "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
+  "q": 547,
+  "curve_order": 547,
+  "addend": [
+   2,
+   62
+  ],
+  "n": 10,
+  "wires": 108,
+  "ops": 44857,
+  "counts": {
+   "X": 6731,
+   "CX": 24208,
+   "CCX": 13908,
+   "SWAP": 10
+  },
+  "lanes": 1094,
+  "failures": 0,
+  "first_failures": [],
+  "seconds": 0.05
+ },
+ {
+  "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
+  "q": 547,
+  "curve_order": 547,
+  "addend": [
+   2,
+   485
+  ],
+  "n": 10,
+  "wires": 108,
+  "ops": 44853,
+  "counts": {
+   "X": 6731,
+   "CX": 24204,
+   "CCX": 13908,
+   "SWAP": 10
+  },
+  "lanes": 1094,
+  "failures": 0,
+  "first_failures": [],
+  "seconds": 0.07
+ },
+ {
+  "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
+  "q": 577,
+  "curve_order": 613,
+  "addend": [
+   1,
+   68
+  ],
+  "n": 10,
+  "wires": 108,
+  "ops": 44868,
+  "counts": {
+   "X": 6959,
+   "CX": 23991,
+   "CCX": 13908,
+   "SWAP": 10
+  },
+  "lanes": 1226,
+  "failures": 0,
+  "first_failures": [],
+  "seconds": 0.05
+ },
+ {
+  "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
+  "q": 577,
+  "curve_order": 613,
+  "addend": [
+   1,
+   509
+  ],
+  "n": 10,
+  "wires": 108,
+  "ops": 44844,
+  "counts": {
+   "X": 6959,
+   "CX": 23967,
+   "CCX": 13908,
+   "SWAP": 10
+  },
+  "lanes": 1226,
+  "failures": 0,
+  "first_failures": [],
+  "seconds": 0.06
+ },
+ {
+  "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
+  "q": 733,
+  "curve_order": 691,
+  "addend": [
+   6,
+   174
+  ],
+  "n": 10,
+  "wires": 110,
+  "ops": 47071,
+  "counts": {
+   "X": 6403,
+   "CX": 26074,
+   "CCX": 14584,
+   "SWAP": 10
+  },
+  "lanes": 1382,
+  "failures": 0,
+  "first_failures": [],
+  "seconds": 0.05
+ },
+ {
+  "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
+  "q": 733,
+  "curve_order": 691,
+  "addend": [
+   6,
+   559
+  ],
+  "n": 10,
+  "wires": 110,
+  "ops": 47067,
+  "counts": {
+   "X": 6403,
+   "CX": 26070,
+   "CCX": 14584,
+   "SWAP": 10
+  },
+  "lanes": 1382,
+  "failures": 0,
+  "first_failures": [],
+  "seconds": 0.05
+ },
+ {
+  "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
+  "q": 823,
+  "curve_order": 829,
+  "addend": [
+   1,
+   255
+  ],
+  "n": 10,
+  "wires": 110,
+  "ops": 47058,
+  "counts": {
+   "X": 6413,
+   "CX": 26051,
+   "CCX": 14584,
+   "SWAP": 10
+  },
+  "lanes": 1658,
+  "failures": 0,
+  "first_failures": [],
+  "seconds": 0.05
+ },
+ {
+  "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
+  "q": 823,
+  "curve_order": 829,
+  "addend": [
+   1,
+   568
+  ],
+  "n": 10,
+  "wires": 110,
+  "ops": 47074,
+  "counts": {
+   "X": 6413,
+   "CX": 26067,
+   "CCX": 14584,
+   "SWAP": 10
+  },
+  "lanes": 1658,
+  "failures": 0,
+  "first_failures": [],
+  "seconds": 0.1
+ },
+ {
+  "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
+  "q": 907,
+  "curve_order": 967,
+  "addend": [
+   2,
+   165
+  ],
+  "n": 10,
+  "wires": 110,
+  "ops": 47055,
+  "counts": {
+   "X": 6629,
+   "CX": 25832,
+   "CCX": 14584,
+   "SWAP": 10
+  },
+  "lanes": 1934,
+  "failures": 0,
+  "first_failures": [],
+  "seconds": 0.05
+ },
+ {
+  "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
+  "q": 907,
+  "curve_order": 967,
+  "addend": [
+   2,
+   742
+  ],
+  "n": 10,
+  "wires": 110,
+  "ops": 47047,
+  "counts": {
+   "X": 6629,
+   "CX": 25824,
+   "CCX": 14584,
+   "SWAP": 10
+  },
+  "lanes": 1934,
+  "failures": 0,
+  "first_failures": [],
+  "seconds": 0.07
+ },
+ {
+  "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
+  "q": 967,
+  "curve_order": 907,
+  "addend": [
+   1,
+   88
+  ],
+  "n": 10,
+  "wires": 110,
+  "ops": 47077,
+  "counts": {
+   "X": 6419,
+   "CX": 26064,
+   "CCX": 14584,
+   "SWAP": 10
+  },
+  "lanes": 1814,
+  "failures": 0,
+  "first_failures": [],
+  "seconds": 0.04
+ },
+ {
+  "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
+  "q": 967,
+  "curve_order": 907,
+  "addend": [
+   1,
+   879
+  ],
+  "n": 10,
+  "wires": 110,
+  "ops": 47057,
+  "counts": {
+   "X": 6419,
+   "CX": 26044,
+   "CCX": 14584,
+   "SWAP": 10
+  },
+  "lanes": 1814,
+  "failures": 0,
+  "first_failures": [],
+  "seconds": 0.03
+ }
+]

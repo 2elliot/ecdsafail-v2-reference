@@ -1,0 +1,84 @@
+# Exact controlled point addition for ecdsafail-v2
+
+This directory holds a generator for the arithmetic kernel that the `secp256k1-controlled-exact-v1` profile asks for: |c>|R>|0> -> |c>|R + c*A>|0> for a fixed public point A. It covers every R on secp256k1, including infinity and R in {A, -A, -2A}. It is built from the exact core of Schrottenloher's dialog Euclid and Bezout multiplier (arXiv 2606.02235). It is emitted in the challenge's own `ArithmeticCircuit` JSON and checked with the challenge's own executor.
+
+**It does not pass the challenge at 256 bits.** It is exact and complete, and it runs correctly on the challenge's executor. The service rejects it on size: it has 2.77x the operation cap and 11.5x the upload cap. No route to qualification exists in the repository today in any case. See "Unresolved gates" below.
+
+`DESIGN.md` records the contract reading, the three designs compared, the data shape, and the completeness argument.
+
+## Run
+
+```sh
+scripts/run_all.sh            # about 2 to 3 minutes; rewrites everything in receipts/ and artifacts/
+```
+
+Individual steps:
+
+```sh
+PY=~/ecdsa_venv/bin/python
+$PY -I scripts/model_check.py                                  # classical dialog model, exhaustive at small q
+$PY -I scripts/check.py --toy-bits 4 6 7 8 9 10 --toy-per-size 6   # gate-level exhaustive check on toy curves
+$PY -I scripts/mutation_control.py                             # negative control for the checker
+$PY -I scripts/component_check.py                              # 256-bit components on boundary inputs
+$PY -I scripts/check.py --secp --secp-random 120               # 256-bit full circuit, sampled
+$PY -I scripts/emit.py --out artifacts/secp256k1_G_circuit.json.gz
+gzip -dc artifacts/secp256k1_G_circuit.json.gz | harness/target/release/qec-harness --circuit - --cases artifacts/secp256k1_cases.json
+```
+
+Python is stdlib only. The harness is a Rust crate whose dependencies are path references into `~/ecdsa_venv/ecdsafail-v2`. It builds offline into `harness/target` and writes nothing into the sibling repo. Receipts were produced against sibling `HEAD 9152f4d` with its existing uncommitted diff (sha256 prefix `4bb9a39a50ba33ce`).
+
+## Layout
+
+- `qec/model.py` is the classical integer model of the multiplier, the proven iteration bound, and the Euclid width schedule.
+- `qec/builder.py` holds the circuit, allocator, and recordable blocks that replay forward or reversed under wire remapping.
+- `qec/arith.py` holds exact CDKM add, subtract and compare, plus modular add, double and negate.
+- `qec/point_add.py` holds the dialog multiplier, the gen-controlled kernel, and the four-case completeness wrapper.
+- `qec/sim.py` is an independent bit-sliced simulator. `qec/curve.py` is a reference curve law. `qec/emit.py` streams challenge-format JSON.
+- `harness/` runs an emitted circuit through `v2_ir` parsing and validation, `v2_runtime::BitSlicedExecutor`, a `SubmittedMethod` round trip, `QualificationGraph::evaluate`, and `v2_lowering`.
+- `artifacts/` holds the emitted circuits, test lanes, and the toy `SubmittedMethod`. `receipts/` holds every measured result quoted below.
+
+## Results
+
+All numbers are measured unless marked as estimates.
+
+| | toy q=127 | secp256k1, A = G | cap |
+|---|---|---|---|
+| wires | 80 | 2,570 | 4,096 |
+| ops | 24,087 | 27,653,121 | 10,000,000 |
+| CCX | 7,424 | 8,686,084 | |
+| T + T-dagger from repo lowering | 51,968 (7.0 per CCX) | 60,802,588 (7 x CCX) | |
+| measurements, R or Hmr | 0 | 0 | 0 |
+| SubmittedMethod JSON bytes | 957,384 | 1,206,801,383 | 104,857,600 |
+| `v2_ir` validator, service caps | PASS | REJECT, ops | |
+| challenge executor lanes | 254 of 254 correct (exhaustive) | 510 of 510 correct (sampled) | |
+| dirty scratch or phase lanes | 0 | 0 | |
+| `is_qualified` | false | false | |
+
+Where the 256-bit CCX go (`receipts/secp256k1_breakdown.json`). One dialog multiplier is 3,742,208 CCX: two Euclid passes of 886,400 each and one Bezout pass of 1,969,152. The kernel uses it twice. The lambda-squared subtraction is 1,182,720 CCX. Flags and constant adds make up the remaining 18,948.
+
+Exactness evidence, strongest first:
+
+1. **Exhaustive gate-level check.** `receipts/toy_exhaustive.json` covers 36 instances: 9 primes from 4 to 10 bits, 2 addends each, every curve point plus infinity, and both control values. It finds 0 failures, with all scratch returned to zero. The same generator code emits the 256-bit circuit. Only the constants and the bound-derived width schedule differ.
+2. **Challenge executor.** `receipts/harness_toy127.json` and `receipts/harness_secp256k1.json` replay the emitted JSON on `v2_runtime::BitSlicedExecutor`. Expected values come from `qec/curve.py`, which shares no code with the generator.
+3. **256-bit boundary components.** `receipts/secp256k1_components.json` covers modadd on edge-by-edge pairs around q and 2^255, plus moddbl, cneg, and the multiplier on x = 0 and on x values whose Euclid run takes 511 of the proven 512 iterations. All pass.
+4. **Proven iteration bound.** u*v at least halves per active Euclid step, so bitlen(q(q-1)) iterations always suffice. That is 512 at secp256k1. `receipts/model_check.jsonl` shows observed worst cases one below the bound at every tested q.
+5. **Checker sensitivity.** A must-fail control (an extra X on the output) fails every lane. Exhaustively, 134 of 200 random CCX-to-CX demotions are caught, and the survivors are correct on the whole promise domain, so they are equivalent circuits. At 256 bits with 28 random lanes, only 10 of 24 are caught. Most CCX in constant adders and idle Euclid tails fire only on rare carries. Random 256-bit sampling cannot separate an exact circuit from an approximate one, which is why items 1, 3 and 4 carry the exactness claim.
+
+The circuit is pure X, CX, CCX and SWAP, so it is a phase-free permutation. Basis exactness with clean scratch on the promise domain therefore gives the exact unitary on superpositions and entangled references (QNT-04). Outside the promise it is still a permutation, which satisfies QNT-06.
+
+## Unresolved gates
+
+These are listed in the order they would block a 256-bit submission.
+
+1. **Operation cap.** 27,653,121 ops against a cap of 10,000,000 (`MAX_DECLARED_RECORDS`). One multiplier alone is 11,891,700 ops. The paper reports about 2^24 total gates per addition even for its approximate circuits, so no published point addition fits this cap.
+2. **Upload cap.** The service parses plain JSON, at about 44 bytes per op. 100 MiB therefore holds about 2.4M ops, roughly 11x fewer than this circuit needs. This also binds before the operation cap does.
+3. **Whole-attack T budget (estimate).** DEF-02's binary wrapper makes 512 controlled additions, which comes to about 3.1e10 T against the 3.25e9 cap. A w = 16 windowed interface (QNT-02) would need about 32 additions plus exact lookups, roughly 2.0e9 T. That would fit, but it means a coherent-addend kernel, which is not built here.
+4. **Qualification route.** `QualificationGraph` requires a universal secp256k1 certificate checked by a `SoundTheoremChecker`, a Shor wrapper certificate, a schedule, observations, and a retry model. The production registry holds no sound checker, so every artifact ends `is_qualified: false` with `No sound theorem checker exists`. This candidate supplies none of those artifacts.
+5. **Formal proof.** Exactness rests on exhaustive toy verification of a size-parametric generator, full-size boundary tests, and the proven iteration bound. That is strong evidence, not a machine-checked proof.
+
+## Optimization headroom (estimates, not built)
+
+- The dialog garbage compression from the paper's Fig. 1 saves qubits, not ops.
+- A 3w controlled adder instead of the AND-register 4w version, and sparse-constant adders for q = 2^256 - f, would cut perhaps 20 to 30% of CCX.
+- The exact equivalent of the paper's pseudo-Mersenne reduction still needs a full-width carry, so that saving is smaller here than in the paper.
+- Even a 2x reduction would leave the circuit above both caps. The binding constraints are the caps themselves, not this implementation.

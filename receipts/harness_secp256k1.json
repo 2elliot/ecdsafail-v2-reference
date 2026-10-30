@@ -1,0 +1,36 @@
+{
+  "ccx": 8686084,
+  "circuit_json_bytes": 1206800888,
+  "execution": {
+    "executor": "v2_runtime::BitSlicedExecutor::execute_block",
+    "failures": 0,
+    "first_failures": [],
+    "lanes": 510,
+    "lanes_with_dirty_scratch": 0,
+    "lanes_with_phase": 0
+  },
+  "num_wires": 2570,
+  "operations": 27653121,
+  "qualification": {
+    "board_status": "CLOSED",
+    "failure_reasons": [
+      "Universal secp256k1 certificate missing (ADM-01, ADM-02): samples cannot substitute for universal proof",
+      "Missing dependency (ADM-01, GOT-03): ShorWrapperCertificate",
+      "Missing dependency (ADM-01, GOT-03): ScheduledCircuit",
+      "Missing dependency (ADM-01, GOT-03): Observation",
+      "Unreserved statistical claim (STA-04, REC-03, GOT-05): statistical claim requires pre-observation global sequence index",
+      "Missing dependency (ADM-01, GOT-03): RetryModel",
+      "No sound theorem checker exists for profile secp256k1-controlled-exact-v1 (ADM-01, ADM-05): structural lints alone never qualify"
+    ],
+    "is_qualified": false
+  },
+  "submission": {
+    "bytes": 1206801383,
+    "emitted_circuit_digest": "Sha256Digest(8d1778ba60134357f8d9de6e8965efacad9d836ac61b9563cd58700c9c7de27a)",
+    "service_parse": "PARSED",
+    "upload_limit_bytes": 104857600,
+    "within_upload_limit": false
+  },
+  "validator_default_ingestion_limits": "REJECT: Exceeded max operations: 27653121 > 1000000",
+  "validator_service_caps": "REJECT: Exceeded max operations: 27653121 > 10000000"
+}

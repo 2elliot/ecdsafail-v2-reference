@@ -1,0 +1,29 @@
+[
+ {
+  "mode": "SAMPLED_256",
+  "q": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f",
+  "addend": "secp256k1 G",
+  "n": 256,
+  "wires": 2570,
+  "ops": 27653121,
+  "counts": {
+   "X": 3075823,
+   "CX": 15890958,
+   "CCX": 8686084,
+   "SWAP": 256
+  },
+  "lanes": 252,
+  "special_cases": [
+   "inf",
+   "A",
+   "-A",
+   "-2A",
+   "2A",
+   "3A"
+  ],
+  "failures": 0,
+  "first_failures": [],
+  "build_seconds": 7.6,
+  "sim_seconds": 1.8
+ }
+]

@@ -1,0 +1,34 @@
+{
+ "q": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f",
+ "iteration_bound": 512,
+ "longest_euclid_run_in_inputs": 511,
+ "modadd": {
+  "ops": 7181,
+  "wires": 771,
+  "lanes": 229,
+  "failures": 0,
+  "first": []
+ },
+ "moddbl": {
+  "ops": 3604,
+  "wires": 516,
+  "lanes": 53,
+  "failures": 0,
+  "first": []
+ },
+ "cneg": {
+  "ops": 2286,
+  "wires": 514,
+  "lanes": 104,
+  "failures": 0,
+  "first": []
+ },
+ "dialog_mul": {
+  "ops": 11891700,
+  "wires": 2563,
+  "lanes": 57,
+  "failures": 0,
+  "first": [],
+  "seconds": 5.4
+ }
+}
