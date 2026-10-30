@@ -24,11 +24,11 @@
   "first": []
  },
  "dialog_mul": {
-  "ops": 11891700,
-  "wires": 2563,
+  "ops": 11563764,
+  "wires": 2308,
   "lanes": 57,
   "failures": 0,
   "first": [],
-  "seconds": 5.4
+  "seconds": 3.8
  }
 }
