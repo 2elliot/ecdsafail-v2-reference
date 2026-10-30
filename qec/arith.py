@@ -15,8 +15,22 @@ def _uma(C, c, b, a):
     C.cx(c, b)
 
 
-def add(C, a, b, cout=None):
-    """b += a mod 2^w (CDKM). cout ^= carry out."""
+def _cuma(C, ctrl, c, b, a):
+    C.ccx(c, b, a)
+    C.ccx(ctrl, c, b)
+    C.cx(a, c)
+    C.cx(a, b)
+
+
+def _cx(C, ctrl, src, dst):
+    if ctrl is None:
+        C.cx(src, dst)
+    else:
+        C.ccx(ctrl, src, dst)
+
+
+def add(C, a, b, cout=None, ctrl=None):
+    """b += ctrl*a mod 2^w (CDKM). cout ^= ctrl*carry out."""
     w = len(a)
     assert len(b) == w
     if w == 0:
@@ -26,23 +40,26 @@ def add(C, a, b, cout=None):
     for i in range(w):
         _maj(C, carries[i], b[i], a[i])
     if cout is not None:
-        C.cx(a[-1], cout)
+        _cx(C, ctrl, a[-1], cout)
     for i in reversed(range(w)):
-        _uma(C, carries[i], b[i], a[i])
+        if ctrl is None:
+            _uma(C, carries[i], b[i], a[i])
+        else:
+            _cuma(C, ctrl, carries[i], b[i], a[i])
     C.free([cin])
 
 
-def sub(C, a, b, borrow=None):
-    """b -= a mod 2^w. borrow ^= [a > b]."""
+def sub(C, a, b, borrow=None, ctrl=None):
+    """b -= ctrl*a mod 2^w. borrow ^= ctrl*[a > b]."""
     for w in b:
         C.x(w)
-    add(C, a, b, borrow)
+    add(C, a, b, borrow, ctrl)
     for w in b:
         C.x(w)
 
 
-def gt_into(C, a, b, t):
-    """t ^= [a > b], a and b restored. Carry out of (~b + a) is [a > b]."""
+def gt_into(C, a, b, t, ctrl=None):
+    """t ^= ctrl*[a > b], a and b restored. Carry out of (~b + a) is [a > b]."""
     w = len(a)
     if w == 0:
         return
@@ -52,7 +69,7 @@ def gt_into(C, a, b, t):
     carries = [cin] + a[:-1]
     for i in range(w):
         _maj(C, carries[i], b[i], a[i])
-    C.cx(a[-1], t)
+    _cx(C, ctrl, a[-1], t)
     for i in reversed(range(w)):
         C.ccx(carries[i], b[i], a[i])
         C.cx(a[i], carries[i])
@@ -60,11 +77,6 @@ def gt_into(C, a, b, t):
     for x in b:
         C.x(x)
     C.free([cin])
-
-
-def and_reg(C, ctrl, a, t):
-    for ai, ti in zip(a, t):
-        C.ccx(ctrl, ai, ti)
 
 
 def load_const(C, reg, value, ctrl=None):
@@ -95,15 +107,6 @@ def cswap(C, ctrl, a, b):
         C.cx(bi, ai)
 
 
-def csub(C, ctrl, a, b):
-    """b -= ctrl*a mod 2^w."""
-    t = C.alloc(len(a))
-    and_reg(C, ctrl, a, t)
-    sub(C, t, b)
-    and_reg(C, ctrl, a, t)
-    C.free(t)
-
-
 class Mod:
     """Arithmetic modulo an odd q < 2^n on canonical values in [0, q)."""
 
@@ -111,15 +114,15 @@ class Mod:
         self.q = q
         self.n = q.bit_length()
 
-    def modadd(self, C, a, b):
-        """b = (a + b) mod q."""
+    def modadd(self, C, a, b, ctrl=None):
+        """b = (b + ctrl*a) mod q."""
         q, n = self.q, self.n
         (top,) = C.alloc(1)
-        add(C, a, b, top)
+        add(C, a, b, top, ctrl)
         ext = b + [top]
         add_const(C, ext, (1 << (n + 1)) - q)
         add_const(C, b, q, ctrl=top)
-        gt_into(C, a, b, top)
+        gt_into(C, a, b, top, ctrl)
         C.x(top)
         C.free([top])
 
@@ -136,14 +139,6 @@ class Mod:
         C.cx(ext[0], wrap)
         C.free([wrap, ext[n]])
         s[:] = ext[:n]
-
-    def cmodadd(self, C, ctrl, a, b):
-        """b = (b + ctrl*a) mod q."""
-        t = C.alloc(len(a))
-        and_reg(C, ctrl, a, t)
-        self.modadd(C, t, b)
-        and_reg(C, ctrl, a, t)
-        C.free(t)
 
     def cmodadd_const(self, C, ctrl, value, b):
         """b = (b + ctrl*value) mod q."""

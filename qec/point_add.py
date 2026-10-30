@@ -1,7 +1,7 @@
 """Exact, complete, controlled fixed-addend point addition:
 |c>|R>|0> -> |c>|R + c*A>|0> for every R in E(F_q) encoded as little-endian
 affine (x, y) with infinity = (0, 0)."""
-from .arith import Mod, cswap, csub, gt_into, load_const
+from .arith import Mod, cswap, gt_into, load_const, sub
 from .builder import Circuit
 from .curve import Curve
 from .model import iteration_bound, width_schedule
@@ -33,7 +33,7 @@ class DialogMultiplier:
                 gt_into(C, U[:w], V[:w], t)
                 C.free([t])
                 cswap(C, g1, U[:w], V[:w])
-                csub(C, g0, U[:w], V[:w])
+                sub(C, U[:w], V[:w], ctrl=g0)
                 V[:] = V[1:] + V[:1]
 
             n = self.mod.n
@@ -47,7 +47,7 @@ class DialogMultiplier:
             def step(g, R, S):
                 g0, g1 = g
                 mod.moddbl(C, S)
-                mod.cmodadd(C, g0, R, S)
+                mod.modadd(C, R, S, ctrl=g0)
                 cswap(C, g1, R, S)
 
             self._bezout_step = C.record_shape(step, [2, n, n])
@@ -125,7 +125,7 @@ class ControlledPointAdd:
         for y, t in zip(Yr, T):
             C.cx(y, t)
         if self._cmodadd is None:
-            self._cmodadd = C.record_shape(lambda k, a, b: mod.cmodadd(C, k[0], a, b), [1, n, n])
+            self._cmodadd = C.record_shape(lambda k, a, b: mod.modadd(C, a, b, ctrl=k[0]), [1, n, n])
             self._dbl = C.record_shape(lambda s: mod.moddbl(C, s), [n])
         for i in range(n):
             (k,) = C.alloc(1)
