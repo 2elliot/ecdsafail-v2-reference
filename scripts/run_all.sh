@@ -15,6 +15,8 @@ $PY -I scripts/breakdown.py > receipts/secp256k1_breakdown.json
 
 $PY -I scripts/emit.py --curve toy:127 --addend-index 5 --out artifacts/toy127_circuit.json
 $PY -I scripts/emit.py --out artifacts/secp256k1_G_circuit.json.gz
+$PY -I scripts/emit.py --curve toy:127 --addend-index 5 --hier --out artifacts/toy127_circuit.hier.json
+$PY -I scripts/emit.py --hier --out artifacts/secp256k1_G_circuit.hier.json
 $PY -I scripts/make_cases.py --curve toy:127 --addend-index 5 --out artifacts/toy127_cases.json
 $PY -I scripts/make_cases.py --random 250 --out artifacts/secp256k1_cases.json
 

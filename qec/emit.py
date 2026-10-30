@@ -16,8 +16,53 @@ def _op(op, a, b, c):
     return f'{{"op":"SWAP","wire1":{a},"wire2":{b}}}'
 
 
+def definitions(C):
+    """Blocks the top level reaches, each after every block it calls."""
+    order = []
+    seen = set()
+
+    def visit(calls):
+        for call in calls:
+            if call.block not in seen:
+                seen.add(call.block)
+                visit(call.block.calls)
+                order.append(call.block)
+
+    visit(C.calls)
+    return order
+
+
+def _instr_chunks(ops, calls, ids, local=None):
+    def prims(lo, hi):
+        for start in range(4 * lo, 4 * hi, 4 * CHUNK):
+            it = iter(ops[start:min(start + 4 * CHUNK, 4 * hi)])
+            if local is None:
+                yield ",".join(_op(*t) for t in zip(it, it, it, it))
+            else:
+                yield ",".join(_op(op, local[a], local[b], local[c]) for op, a, b, c in zip(it, it, it, it))
+
+    pos = 0
+    for call in calls:
+        yield from prims(pos, call.pos)
+        args = call.wires if local is None else [local[w] for w in call.wires]
+        yield f'{{"call":{ids[call.block]},"wires":[{",".join(map(str, args))}],"inverse":{"true" if call.inverse else "false"}}}'
+        pos = call.pos
+    yield from prims(pos, len(ops) // 4)
+
+
+def _write_list(fh, pieces):
+    total = fh.write("[")
+    first = True
+    for piece in pieces:
+        if piece:
+            total += fh.write(piece if first else "," + piece)
+            first = False
+    return total + fh.write("]")
+
+
 def write_circuit(fh, C, layout):
-    """Writes the JSON text to a text-mode handle and returns bytes written."""
+    """Writes the JSON text to a text-mode handle and returns bytes written. A
+    hierarchical circuit also gets `definitions`, one per reachable block."""
     live = set(layout["control"]) | set(layout["x"]) | set(layout["y"])
     regs = [
         ("control", "CONTROL", layout["control"]),
@@ -25,15 +70,20 @@ def write_circuit(fh, C, layout):
         ("scratch", "SCRATCH", [w for w in range(C.num_wires) if w not in live]),
     ]
     reg_json = ",".join(f'{{"name":"{n}","role":"{r}","wires":[{",".join(map(str, ws))}]}}' for n, r, ws in regs)
-    head = f'{{"num_wires":{C.num_wires},"registers":[{reg_json}],"operations":['
-    total = fh.write(head)
-    ops = C.ops
-    first = True
-    for start in range(0, len(ops), 4 * CHUNK):
-        it = iter(ops[start:start + 4 * CHUNK])
-        body = ",".join(_op(*t) for t in zip(it, it, it, it))
-        if body:
-            total += fh.write(body if first else "," + body)
-            first = False
-    total += fh.write("]}")
+    total = fh.write(f'{{"num_wires":{C.num_wires},"registers":[{reg_json}],')
+    calls, ids = [], {}
+    if C.calls is not None:
+        calls = C.calls
+        total += fh.write('"definitions":[')
+        for i, block in enumerate(definitions(C)):
+            order = sorted(block.wires)
+            local = {w: k for k, w in enumerate(order)}
+            total += fh.write(("," if i else "") + f'{{"arity":{len(order)},"operations":')
+            total += _write_list(fh, _instr_chunks(block.ops, block.calls, ids, local))
+            total += fh.write("}")
+            ids[block] = i
+        total += fh.write("],")
+    total += fh.write('"operations":')
+    total += _write_list(fh, _instr_chunks(C.ops, calls, ids))
+    total += fh.write("}")
     return total

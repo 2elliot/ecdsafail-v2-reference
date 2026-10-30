@@ -153,8 +153,8 @@ class ControlledPointAdd:
         mod.cmodadd_const(C, gen, q - b, Yr)
         mod.cmodadd_const(C, gen, a, Xr)
 
-    def build(self):
-        self.C = C = Circuit()
+    def build(self, hierarchical=False):
+        self.C = C = Circuit(hierarchical)
         n = self.n
         (c,) = C.alloc(1)
         Xr, Yr = C.alloc(n), C.alloc(n)

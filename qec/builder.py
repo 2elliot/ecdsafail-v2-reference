@@ -2,11 +2,24 @@
 
 An op is four int32 values (opcode, a, b, c). Unused operand slots repeat the
 last used wire so wire remapping can treat every slot uniformly.
+
+In hierarchical mode a body is its primitive op array plus a list of Calls,
+each run just before primitive op `pos`. `wires` holds the body's own wire for
+each of sorted(block.wires), so applying a block never remaps the calls inside
+it.
 """
 from array import array
+from typing import NamedTuple
 
 X, CX, CCX, SWAP = 0, 1, 2, 3
 OPNAMES = {X: "X", CX: "CX", CCX: "CCX", SWAP: "SWAP"}
+
+
+class Call(NamedTuple):
+    pos: int
+    block: "Block"
+    wires: list
+    inverse: bool
 
 
 class Block:
@@ -14,11 +27,14 @@ class Block:
     register layout of the same shape. Wires outside the layout are zero at the
     block's start and end and are mapped onto fresh ancillas."""
 
-    def __init__(self, ops, flat_in, flat_out):
+    def __init__(self, ops, flat_in, flat_out, calls=()):
         self.ops = ops
         self.flat_in = flat_in
         self.flat_out = flat_out
+        self.calls = calls
         self.wires = set(ops[1::4]) | set(ops[2::4]) | set(ops[3::4])
+        for call in calls:
+            self.wires.update(call.wires)
 
 
 def flatten(regs):
@@ -33,8 +49,9 @@ def unflatten_into(regs, flat):
 
 
 class Circuit:
-    def __init__(self):
+    def __init__(self, hierarchical=False):
         self.ops = array("i")
+        self.calls = [] if hierarchical else None
         self.num_wires = 0
         self.free_stack = []
 
@@ -80,20 +97,25 @@ class Circuit:
         circuit, the allocator, and regs exactly as they were."""
         flat_in = flatten(regs)
         start = len(self.ops)
+        first_call = len(self.calls) if self.calls is not None else 0
         saved_stack, saved_hw = list(self.free_stack), self.num_wires
         fn(*regs)
         flat_out = flatten(regs)
         ops = self.ops[start:]
         del self.ops[start:]
+        calls = ()
+        if self.calls is not None:
+            calls = [call._replace(pos=call.pos - start // 4) for call in self.calls[first_call:]]
+            del self.calls[first_call:]
         self.free_stack, self.num_wires = saved_stack, saved_hw
         unflatten_into(regs, flat_in)
-        return Block(ops, flat_in, flat_out)
+        return Block(ops, flat_in, flat_out, calls)
 
     def apply(self, block, regs, inverse=False):
         src_live, dst_live = (block.flat_out, block.flat_in) if inverse else (block.flat_in, block.flat_out)
         cur = flatten(regs)
         assert len(cur) == len(src_live)
-        if len(block.ops) == 0:
+        if not block.wires:
             unflatten_into(regs, [dict(zip(src_live, cur))[w] for w in dst_live])
             return
         size = max(max(block.wires), max(src_live, default=0), max(dst_live, default=0)) + 1
@@ -105,6 +127,16 @@ class Circuit:
         fresh = self.alloc(len(scratch))
         for w, v in zip(scratch, fresh):
             table[w] = v
+        if self.calls is None:
+            self._replay(block, table, inverse)
+        else:
+            self.calls.append(Call(len(self), block, [table[w] for w in sorted(block.wires)], inverse))
+        new_live = [table[w] for w in dst_live]
+        live = set(new_live)
+        self.free([w for w in list(cur) + fresh if w not in live])
+        unflatten_into(regs, new_live)
+
+    def _replay(self, block, table, inverse):
         src = block.ops
         out = array("i", bytes(len(src) * src.itemsize))
         if inverse:
@@ -118,10 +150,6 @@ class Circuit:
         for k, slot in enumerate(slots, 1):
             out[k::4] = array("i", map(get, slot))
         self.ops.extend(out)
-        new_live = [table[w] for w in dst_live]
-        live = set(new_live)
-        self.free([w for w in list(cur) + fresh if w not in live])
-        unflatten_into(regs, new_live)
 
     def record_shape(self, fn, sizes):
         """Record fn on fresh placeholder registers of the given sizes."""
