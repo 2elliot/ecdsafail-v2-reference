@@ -1,6 +1,6 @@
 {
-  "ccx": 6941,
-  "circuit_json_bytes": 927839,
+  "ccx": 5099,
+  "circuit_json_bytes": 585932,
   "execution": {
     "executor": "v2_runtime::BitSlicedExecutor::execute_block",
     "failures": 0,
@@ -10,14 +10,14 @@
     "lanes_with_phase": 0
   },
   "lowering": {
-    "clifford": 72135,
+    "clifford": 50594,
     "measurements": 0,
-    "t": 27764,
+    "t": 20396,
     "t_plus_tdg_per_ccx": 7.0,
-    "tdg": 20823
+    "tdg": 15297
   },
-  "num_wires": 74,
-  "operations": 23534,
+  "num_wires": 70,
+  "operations": 14887,
   "qualification": {
     "board_status": "CLOSED",
     "failure_reasons": [
@@ -32,8 +32,8 @@
     "is_qualified": false
   },
   "submission": {
-    "bytes": 928334,
-    "emitted_circuit_digest": "Sha256Digest(c126a6a8a2c7a739830cad9f30b8c27c2fb824cde66b665be2c0e7240950eec9)",
+    "bytes": 586427,
+    "emitted_circuit_digest": "Sha256Digest(7522172e799cdaa3a4ee2bc50fb88ce26ce5249fa60f29116a0a59af6a3b349f)",
     "service_parse": "PARSED",
     "upload_limit_bytes": 104857600,
     "within_upload_limit": true

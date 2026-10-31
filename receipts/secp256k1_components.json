@@ -3,32 +3,32 @@
  "iteration_bound": 512,
  "longest_euclid_run_in_inputs": 511,
  "modadd": {
-  "ops": 7181,
-  "wires": 771,
-  "lanes": 229,
+  "ops": 4383,
+  "wires": 768,
+  "lanes": 285,
   "failures": 0,
   "first": []
  },
  "moddbl": {
-  "ops": 3604,
-  "wires": 516,
-  "lanes": 53,
+  "ops": 782,
+  "wires": 508,
+  "lanes": 55,
   "failures": 0,
   "first": []
  },
  "cneg": {
-  "ops": 2286,
-  "wires": 514,
-  "lanes": 104,
+  "ops": 1045,
+  "wires": 508,
+  "lanes": 108,
   "failures": 0,
   "first": []
  },
  "dialog_mul": {
-  "ops": 11563764,
-  "wires": 2308,
+  "ops": 8686324,
+  "wires": 2304,
   "lanes": 57,
   "failures": 0,
   "first": [],
-  "seconds": 3.8
+  "seconds": 3.2
  }
 }
