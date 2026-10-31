@@ -54,7 +54,9 @@ All numbers are measured unless marked as estimates.
 | dirty scratch or phase lanes | 0 | 0 | |
 | `is_qualified` | false | false | |
 
-Where the 256-bit CCX go (`receipts/secp256k1_breakdown.json`). One dialog multiplier is 3,415,296 CCX: two Euclid passes of 787,968 each and one Bezout pass of 1,839,104. The kernel uses it twice. The lambda-squared subtraction is 1,117,696 CCX. Flags and constant adds make up the remaining 18,948.
+Where the 256-bit CCX go (`receipts/secp256k1_breakdown.json`). One dialog multiplier is 3,415,296 CCX: two Euclid passes of 787,968 each, one Bezout pass of 1,839,104, and 256 for the n-bit controlled swap between them. The kernel uses it twice. The lambda-squared subtraction is 1,117,696 CCX. Flags and constant adds make up the remaining 18,948.
+
+The controlled subtract and the controlled modular add run a controlled CDKM ripple instead of copying `ctrl*a` into an AND register. A controlled subtract costs 3w CCX instead of 4w, and a controlled modular add costs 9n + 4 instead of 10n + 2. That took the 256-bit point addition from 8,686,084 to 7,967,236 CCX, 8.3% fewer.
 
 Exactness evidence, strongest first:
 
@@ -79,6 +81,6 @@ These are listed in the order they would block a 256-bit submission.
 ## Optimization headroom (estimates, not built)
 
 - The dialog garbage compression from the paper's Fig. 1 saves qubits, not ops.
-- Sparse-constant adders for q = 2^256 - f would cut more CCX. The 3w controlled adder that replaced the AND-register 4w version cut 8.3% (measured).
+- Sparse-constant adders for q = 2^256 - f would cut more CCX.
 - The exact equivalent of the paper's pseudo-Mersenne reduction still needs a full-width carry, so that saving is smaller here than in the paper.
 - Even a 2x reduction would leave the circuit above both caps. The binding constraints are the caps themselves, not this implementation.
