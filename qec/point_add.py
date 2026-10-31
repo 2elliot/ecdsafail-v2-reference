@@ -124,13 +124,13 @@ class ControlledPointAdd:
         T = C.alloc(n)
         for y, t in zip(Yr, T):
             C.cx(y, t)
-        if self._cmodadd is None:
-            self._cmodadd = C.record_shape(lambda k, a, b: mod.modadd(C, a, b, ctrl=k[0]), [1, n, n])
+        if self._modadd_blk is None:
+            self._modadd_blk = C.record_shape(lambda k, a, b: mod.modadd(C, a, b, ctrl=k[0]), [1, n, n])
             self._dbl = C.record_shape(lambda s: mod.moddbl(C, s), [n])
         for i in range(n):
             (k,) = C.alloc(1)
             C.ccx(gen, Yr[i], k)
-            C.apply(self._cmodadd, [[k], T, Xr], inverse=True)
+            C.apply(self._modadd_blk, [[k], T, Xr], inverse=True)
             C.ccx(gen, Yr[i], k)
             C.free([k])
             C.apply(self._dbl, [T])
@@ -160,7 +160,7 @@ class ControlledPointAdd:
         Xr, Yr = C.alloc(n), C.alloc(n)
         declared = Xr + Yr
         self.M = DialogMultiplier(C, self.mod)
-        self._cmodadd = None
+        self._modadd_blk = None
 
         flags = C.alloc(4)
         for f, (e, _) in zip(flags, self.exceptions):

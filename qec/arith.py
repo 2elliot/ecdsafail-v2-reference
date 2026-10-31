@@ -19,6 +19,7 @@ def _cuma(C, ctrl, c, b, a):
     C.ccx(c, b, a)
     C.ccx(ctrl, c, b)
     C.cx(a, c)
+    # Left ungated because it restores b when ctrl is 0, so _cuma must not become a gated _uma.
     C.cx(a, b)
 
 
@@ -33,6 +34,7 @@ def add(C, a, b, cout=None, ctrl=None):
     """b += ctrl*a mod 2^w (CDKM). cout ^= ctrl*carry out."""
     w = len(a)
     assert len(b) == w
+    assert ctrl is None or ctrl not in (*a, *b, cout)
     if w == 0:
         return
     (cin,) = C.alloc(1)
@@ -60,6 +62,7 @@ def sub(C, a, b, borrow=None, ctrl=None):
 
 def gt_into(C, a, b, t, ctrl=None):
     """t ^= ctrl*[a > b], a and b restored. Carry out of (~b + a) is [a > b]."""
+    assert ctrl is None or ctrl not in (*a, *b, t)
     w = len(a)
     if w == 0:
         return
@@ -115,13 +118,14 @@ class Mod:
         self.n = q.bit_length()
 
     def modadd(self, C, a, b, ctrl=None):
-        """b = (b + ctrl*a) mod q."""
+        """b = (b + ctrl*a) mod q, for b < q, and a < q when ctrl is 1."""
         q, n = self.q, self.n
         (top,) = C.alloc(1)
         add(C, a, b, top, ctrl)
         ext = b + [top]
         add_const(C, ext, (1 << (n + 1)) - q)
         add_const(C, b, q, ctrl=top)
+        # ctrl = 0 leaves top = 1 after the reduction (b < q) and gates off gt_into, so x(top) clears it.
         gt_into(C, a, b, top, ctrl)
         C.x(top)
         C.free([top])

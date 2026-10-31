@@ -40,7 +40,7 @@ def bezout_only(C, Y, S, G):
 
 
 def mulsub(C, g, X, Y):
-    gen.C, gen._cmodadd = C, None
+    gen.C, gen._modadd_blk = C, None
     gen._mulsub(g[0], Y, X)
 
 
