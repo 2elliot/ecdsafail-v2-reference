@@ -51,7 +51,8 @@ def main():
     n = q.bit_length()
     mod = Mod(q)
     rng = random.Random(5)
-    edge = [0, 1, 2, 3, q - 1, q - 2, (q - 1) // 2, (q + 1) // 2, 2**255, 2**255 - 1, 2**32 + 977, q - 2**32, 2**256 - 2**33 - 1954 - q % 7]
+    f = 2**256 - q
+    edge = [0, 1, 2, 3, q - 1, q - 2, (q - 1) // 2, (q + 1) // 2, 2**255, 2**255 - 1, f, q - f, 2**256 - 1, q - 2**32, 2**256 - 2**33 - 1954 - q % 7]
     edge = [e % q for e in edge]
     pool = edge + [rng.randrange(q) for _ in range(40)]
     cands = [rng.randrange(1, q) for _ in range(20000)] + [1, 2, q - 1] + [2**k for k in range(256)]
