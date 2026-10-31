@@ -61,8 +61,9 @@ def _write_list(fh, pieces):
 
 
 def write_circuit(fh, C, layout):
-    """Writes the JSON text to a text-mode handle and returns bytes written. A
-    hierarchical circuit also gets `definitions`, one per reachable block."""
+    """Writes the JSON text to a text-mode handle and returns the counts it
+    wrote: json_bytes, plus definitions, call_sites and primitive_ops for a
+    hierarchical circuit, which also gets `definitions`, one per reachable block."""
     live = set(layout["control"]) | set(layout["x"]) | set(layout["y"])
     regs = [
         ("control", "CONTROL", layout["control"]),
@@ -71,7 +72,7 @@ def write_circuit(fh, C, layout):
     ]
     reg_json = ",".join(f'{{"name":"{n}","role":"{r}","wires":[{",".join(map(str, ws))}]}}' for n, r, ws in regs)
     total = fh.write(f'{{"num_wires":{C.num_wires},"registers":[{reg_json}],')
-    calls, ids = [], {}
+    calls, ids, counts = [], {}, {}
     if C.calls is not None:
         calls = C.calls
         total += fh.write('"definitions":[')
@@ -83,7 +84,9 @@ def write_circuit(fh, C, layout):
             total += fh.write("}")
             ids[block] = i
         total += fh.write("],")
+        counts = {"definitions": len(ids), "call_sites": len(calls) + sum(len(b.calls) for b in ids),
+                  "primitive_ops": (len(C.ops) + sum(len(b.ops) for b in ids)) // 4}
     total += fh.write('"operations":')
     total += _write_list(fh, _instr_chunks(C.ops, calls, ids))
     total += fh.write("}")
-    return total
+    return {**counts, "json_bytes": total}
