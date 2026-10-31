@@ -158,6 +158,9 @@ def add_const(C, reg, value, ctrl=None, cout=None):
 
 def gt_const_into(C, value, b, t, ctrl=None):
     """t ^= ctrl*[value > b], b restored. Carry out of (~b + value) is [value > b]."""
+    assert ctrl is None or ctrl not in (*b, t)
+    assert t not in b
+    assert value < 1 << len(b)
     for x in b:
         C.x(x)
     cs = _carries(C, b, value, ctrl)
@@ -173,6 +176,7 @@ def _reduce(C, r, value):
     carry into it are never both 1. Leaves (s + flag*value) mod 2^(m-1) in
     r[:-1] and flag = [s + value >= 2^m] in r[-1]. One carry chain serves both
     the comparison and the conditional add."""
+    assert value >> (len(r) - 1) & 1
     cs = _carries(C, r, value)
     flag = r[-1]
     if cs[-1] is not None:
@@ -216,13 +220,8 @@ class Mod:
     def moddbl(self, C, s):
         """s = 2s mod q. 2s is a relabel with a zero low bit, so the reduction
         runs on s against _wrap() >> 1, and the low bit of the result is the flag."""
-        (lsb,) = C.alloc(1)
         _reduce(C, s, self._wrap() >> 1)
-        flag = s[-1]
-        C.cx(flag, lsb)
-        C.cx(lsb, flag)
-        C.free([flag])
-        s[:] = [lsb] + s[:-1]
+        s[:] = s[-1:] + s[:-1]
 
     def cmodadd_const(self, C, ctrl, value, b):
         """b = (b + ctrl*value) mod q."""
