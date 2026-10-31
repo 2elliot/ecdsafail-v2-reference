@@ -1,6 +1,7 @@
 harness/target/
 artifacts/*.json.gz
 artifacts/*.hier.json
+artifacts/*.hier.meta.json
 __pycache__/
 .DS_Store
 .audit/

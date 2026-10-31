@@ -1,1 +1,0 @@
-{"curve": "y^2=x^3+0x+7 mod 127", "q": "0x7f", "addend": ["0x3", "0x3e"], "n": 7, "num_wires": 80, "definitions": 12, "call_sites": 53, "primitive_ops": 3090, "json_bytes": 128108, "layout": {"control": [0], "x": [1, 2, 3, 4, 5, 6, 7], "y": [8, 9, 10, 11, 12, 13, 14]}}
