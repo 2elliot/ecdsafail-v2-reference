@@ -21,7 +21,7 @@ $PY -I scripts/emit.py --hier --out artifacts/secp256k1_G_circuit.hier.json
 $PY -I scripts/make_cases.py --curve toy:127 --addend-index 5 --out artifacts/toy127_cases.json
 $PY -I scripts/make_cases.py --random 250 --out artifacts/secp256k1_cases.json
 
-(cd harness && CARGO_TARGET_DIR="$PWD/target" cargo build --release --offline)
+(cd harness && CARGO_TARGET_DIR="$PWD/target" cargo build --release --offline --quiet)
 H=harness/target/release/qec-harness
 $H --circuit artifacts/toy127_circuit.json --cases artifacts/toy127_cases.json --lower --write-submission artifacts/toy127_submission.json > receipts/harness_toy127.json
 gzip -dc artifacts/secp256k1_G_circuit.json.gz | /usr/bin/time -l -o receipts/harness_secp256k1.time $H --circuit - --cases artifacts/secp256k1_cases.json --lower > receipts/harness_secp256k1.json
