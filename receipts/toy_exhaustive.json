@@ -459,7 +459,7 @@
   "lanes": 794,
   "failures": 0,
   "first_failures": [],
-  "seconds": 0.01
+  "seconds": 0.02
  },
  {
   "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
