@@ -9,6 +9,13 @@
     "lanes_with_dirty_scratch": 0,
     "lanes_with_phase": 0
   },
+  "lowering": {
+    "clifford": 82702877,
+    "measurements": 0,
+    "t": 31868944,
+    "t_plus_tdg_per_ccx": 7.0,
+    "tdg": 23901708
+  },
   "num_wires": 2315,
   "operations": 26931713,
   "qualification": {

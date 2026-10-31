@@ -1,8 +1,6 @@
-{"curve": "y^2=x^3+0x+7 mod 127", "q": "0x7f", "addend": ["0x3", "0x3e"], "n": 7, "num_wires": 80, "ops": 24087, "ccx": 7424, "json_bytes": 956889}
-{"curve": "secp256k1", "q": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f", "addend": ["0x79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798", "0x483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8"], "n": 256, "num_wires": 2570, "ops": 27653121, "ccx": 8686084, "json_bytes": 1206800888}
+{"curve": "y^2=x^3+0x+7 mod 127", "q": "0x7f", "addend": ["0x3", "0x3e"], "n": 7, "num_wires": 74, "ops": 23534, "ccx": 6941, "json_bytes": 927839}
+{"curve": "secp256k1", "q": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f", "addend": ["0x79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798", "0x483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8"], "n": 256, "num_wires": 2315, "ops": 26931713, "ccx": 7967236, "json_bytes": 1155124697}
 254 lanes
 510 lanes
-    Finished `release` profile [optimized] target(s) in 0.12s
-all receipts written
-       99.73 real        94.76 user         2.28 sys
-exit=0
+    Finished `release` profile [optimized] target(s) in 0.14s
+all receipts written in 95s
