@@ -50,7 +50,7 @@ def unflatten_into(regs, flat):
 
 class Circuit:
     def __init__(self, hierarchical=False):
-        self.ops = array("i")
+        self.prims = array("i")
         self.calls = [] if hierarchical else None
         self.num_wires = 0
         self.free_stack = []
@@ -73,19 +73,25 @@ class Circuit:
     # gates
 
     def x(self, a):
-        self.ops.extend((X, a, a, a))
+        self.prims.extend((X, a, a, a))
 
     def cx(self, a, b):
-        self.ops.extend((CX, a, b, b))
+        self.prims.extend((CX, a, b, b))
 
     def ccx(self, a, b, c):
         if a == b:
-            self.ops.extend((CX, a, c, c))
+            self.prims.extend((CX, a, c, c))
         else:
-            self.ops.extend((CCX, a, b, c))
+            self.prims.extend((CCX, a, b, c))
 
     def swap(self, a, b):
-        self.ops.extend((SWAP, a, b, b))
+        self.prims.extend((SWAP, a, b, b))
+
+    @property
+    def ops(self):
+        if self.calls is not None:
+            raise TypeError("a hierarchical Circuit holds only its top-level primitives; expand it with qec.flatten")
+        return self.prims
 
     def __len__(self):
         return len(self.ops) // 4
@@ -96,13 +102,13 @@ class Circuit:
         """Run fn(*regs) without emitting it. Returns a Block and leaves the
         circuit, the allocator, and regs exactly as they were."""
         flat_in = flatten(regs)
-        start = len(self.ops)
+        start = len(self.prims)
         first_call = len(self.calls) if self.calls is not None else 0
         saved_stack, saved_hw = list(self.free_stack), self.num_wires
         fn(*regs)
         flat_out = flatten(regs)
-        ops = self.ops[start:]
-        del self.ops[start:]
+        ops = self.prims[start:]
+        del self.prims[start:]
         calls = ()
         if self.calls is not None:
             calls = [call._replace(pos=call.pos - start // 4) for call in self.calls[first_call:]]
@@ -130,7 +136,10 @@ class Circuit:
         if self.calls is None:
             self._replay(block, table, inverse)
         else:
-            self.calls.append(Call(len(self), block, [table[w] for w in sorted(block.wires)], inverse))
+            wires = [table[w] for w in sorted(block.wires)]
+            if len(set(wires)) != len(wires):
+                raise ValueError(f"call wires are not distinct: {wires}")
+            self.calls.append(Call(len(self.prims) // 4, block, wires, inverse))
         new_live = [table[w] for w in dst_live]
         live = set(new_live)
         self.free([w for w in list(cur) + fresh if w not in live])
@@ -149,7 +158,7 @@ class Circuit:
         get = table.__getitem__
         for k, slot in enumerate(slots, 1):
             out[k::4] = array("i", map(get, slot))
-        self.ops.extend(out)
+        self.prims.extend(out)
 
     def record_shape(self, fn, sizes):
         """Record fn on fresh placeholder registers of the given sizes."""

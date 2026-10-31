@@ -85,8 +85,8 @@ def write_circuit(fh, C, layout):
             ids[block] = i
         total += fh.write("],")
         counts = {"definitions": len(ids), "call_sites": len(calls) + sum(len(b.calls) for b in ids),
-                  "primitive_ops": (len(C.ops) + sum(len(b.ops) for b in ids)) // 4}
+                  "primitive_ops": (len(C.prims) + sum(len(b.ops) for b in ids)) // 4}
     total += fh.write('"operations":')
-    total += _write_list(fh, _instr_chunks(C.ops, calls, ids))
+    total += _write_list(fh, _instr_chunks(C.prims, calls, ids))
     total += fh.write("}")
     return {**counts, "json_bytes": total}
