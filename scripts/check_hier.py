@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 import sys
+import traceback
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -17,6 +18,7 @@ from qec.emit import _op, write_circuit
 from qec.point_add import ControlledPointAdd
 
 TOY_BITS, TOY_PER_SIZE = (4, 6, 7, 8, 9, 10), 6
+PINNED = ("toy127", "secp256k1")
 
 
 def baseline():
@@ -62,23 +64,26 @@ def instances(all_toys):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--all-toys", action="store_true", help="also every toy curve and addend that scripts/check.py runs")
-    ap.add_argument("--only", choices=["toy127", "secp256k1"])
+    ap.add_argument("--only", choices=PINNED)
     ap.add_argument("--file", type=Path, help="with --only, check this hierarchical JSON instead of emitting one")
     args = ap.parse_args()
-    assert not args.file or args.only, "--file needs --only"
+    if args.file and not args.only:
+        ap.error("--file needs --only")
     pinned = baseline()
     bad = 0
     for name, curve, A in instances(args.all_toys):
         if args.only and name != args.only:
             continue
-        gen = ControlledPointAdd(curve, A)
-        text = args.file.read_text() if args.file else hier_text(gen)
-        want = pinned[name] if name in pinned else flat_digest(gen)
+        want = None
         try:
+            gen = ControlledPointAdd(curve, A)
+            text = args.file.read_text() if args.file else hier_text(gen)
+            want = pinned[name] if name in PINNED else flat_digest(gen)
             got, shape = hier_digest(text)
-        except (AssertionError, IndexError, KeyError, ValueError) as e:
-            got, shape = None, {"error": repr(e)[:200]}
-        ok = got == want
+            ok = got == want
+        except Exception as e:
+            traceback.print_exc()
+            ok, got, shape = False, None, {"error": repr(e)[:200]}
         bad += not ok
         print(f"{name}: hier {'==' if ok else '!='} flat {json.dumps({'digest': got, 'want': want, **shape})}", flush=True)
     sys.exit(1 if bad else 0)
