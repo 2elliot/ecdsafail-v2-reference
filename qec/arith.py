@@ -91,16 +91,98 @@ def load_const(C, reg, value, ctrl=None):
                 C.cx(ctrl, w)
 
 
+def _carry_into(C, b, bit, c, t, ctrl=None):
+    """t ^= MAJ(b, ctrl*bit, c), where c is a wire or None for 0. With ctrl, c
+    must imply ctrl, which holds for every carry of reg + ctrl*value."""
+    if not bit:
+        if c is not None:
+            C.ccx(b, c, t)
+    elif c is None:
+        _cx(C, ctrl, b, t)
+    elif ctrl is None:
+        C.ccx(b, c, t)
+        C.cx(b, t)
+        C.cx(c, t)
+    else:
+        # MAJ(b, ctrl, c) = c ^ b*(ctrl ^ c) when c implies ctrl.
+        C.cx(c, ctrl)
+        C.ccx(b, ctrl, t)
+        C.cx(c, ctrl)
+        C.cx(c, t)
+
+
+def _carries(C, reg, value, ctrl=None):
+    """cs[i] is the carry into reg[i] of reg + ctrl*value. Each entry is None
+    when the carry is always 0, reg[i - 1] itself when it equals that bit, or a
+    fresh wire. Release the fresh wires with _uncarry."""
+    cs = [None]
+    for i in range(len(reg) - 1):
+        bit, c = value >> i & 1, cs[i]
+        if c is None and not bit:
+            cs.append(None)
+        elif c is None and ctrl is None:
+            cs.append(reg[i])
+        else:
+            (t,) = C.alloc(1)
+            _carry_into(C, reg[i], bit, c, t, ctrl)
+            cs.append(t)
+    return cs
+
+
+def _uncarry(C, reg, value, cs, i, ctrl=None):
+    """Clear and free cs[i]. reg[i - 1] and cs[i - 1] must still hold what they held in _carries."""
+    if i and cs[i] is not None and cs[i] != reg[i - 1]:
+        _carry_into(C, reg[i - 1], value >> (i - 1) & 1, cs[i - 1], cs[i], ctrl)
+        C.free([cs[i]])
+
+
 def add_const(C, reg, value, ctrl=None, cout=None):
-    """reg += ctrl*value mod 2^w."""
-    value %= 1 << len(reg)
-    if value == 0 and cout is None:
-        return
-    k = C.alloc(len(reg))
-    load_const(C, k, value, ctrl)
-    add(C, k, reg, cout)
-    load_const(C, k, value, ctrl)
-    C.free(k)
+    """reg += ctrl*value mod 2^w, cout ^= ctrl*carry out. The carry chain reads
+    the constant's bits, so 0 bits below the first 1 cost nothing."""
+    w = len(reg)
+    value %= 1 << w
+    assert ctrl is None or ctrl not in (*reg, cout)
+    cs = _carries(C, reg, value, ctrl)
+    if cout is not None:
+        _carry_into(C, reg[-1], value >> (w - 1) & 1, cs[-1], cout, ctrl)
+    for i in reversed(range(w)):
+        if value >> i & 1:
+            if ctrl is None:
+                C.x(reg[i])
+            else:
+                C.cx(ctrl, reg[i])
+        if cs[i] is not None:
+            C.cx(cs[i], reg[i])
+        _uncarry(C, reg, value, cs, i, ctrl)
+
+
+def gt_const_into(C, value, b, t, ctrl=None):
+    """t ^= ctrl*[value > b], b restored. Carry out of (~b + value) is [value > b]."""
+    for x in b:
+        C.x(x)
+    cs = _carries(C, b, value, ctrl)
+    _carry_into(C, b[-1], value >> (len(b) - 1) & 1, cs[-1], t, ctrl)
+    for i in reversed(range(len(b))):
+        _uncarry(C, b, value, cs, i, ctrl)
+    for x in b:
+        C.x(x)
+
+
+def _reduce(C, r, value):
+    """r holds s on m wires, value has bit m - 1 set, and s's top bit and the
+    carry into it are never both 1. Leaves (s + flag*value) mod 2^(m-1) in
+    r[:-1] and flag = [s + value >= 2^m] in r[-1]. One carry chain serves both
+    the comparison and the conditional add."""
+    cs = _carries(C, r, value)
+    flag = r[-1]
+    if cs[-1] is not None:
+        C.cx(cs[-1], flag)
+    for i in reversed(range(len(r) - 1)):
+        _uncarry(C, r, value, cs, i + 1)
+        if cs[i] is not None:
+            C.ccx(flag, cs[i], r[i])
+        if value >> i & 1:
+            C.cx(flag, r[i])
 
 
 def cswap(C, ctrl, a, b):
@@ -117,47 +199,45 @@ class Mod:
         self.q = q
         self.n = q.bit_length()
 
+    def _wrap(self):
+        """2^(n+1) - q, so s + _wrap() carries out of n + 1 bits exactly when s >= q."""
+        return (1 << (self.n + 1)) - self.q
+
     def modadd(self, C, a, b, ctrl=None):
         """b = (b + ctrl*a) mod q, for b < q, and a < q when ctrl is 1."""
-        q, n = self.q, self.n
         (top,) = C.alloc(1)
         add(C, a, b, top, ctrl)
-        ext = b + [top]
-        add_const(C, ext, (1 << (n + 1)) - q)
-        add_const(C, b, q, ctrl=top)
-        # ctrl = 0 leaves top = 1 after the reduction (b < q) and gates off gt_into, so x(top) clears it.
+        # s = b + ctrl*a < 2q, so s's top bit and the carry into it are never both 1.
+        _reduce(C, b + [top], self._wrap())
+        # top = [q was subtracted] = ctrl*[a > b]; ctrl = 0 means s = b < q and top = 0.
         gt_into(C, a, b, top, ctrl)
-        C.x(top)
         C.free([top])
 
     def moddbl(self, C, s):
-        """s = 2s mod q, as a relabel plus one conditional subtraction."""
-        q, n = self.q, self.n
+        """s = 2s mod q. 2s is a relabel with a zero low bit, so the reduction
+        runs on s against _wrap() >> 1, and the low bit of the result is the flag."""
         (lsb,) = C.alloc(1)
-        ext = [lsb] + s[:-1] + [s[-1]]
-        (wrap,) = C.alloc(1)
-        add_const(C, ext, (1 << (n + 1)) - q, cout=wrap)
-        C.x(wrap)
-        add_const(C, ext, q, ctrl=wrap)
-        C.x(wrap)
-        C.cx(ext[0], wrap)
-        C.free([wrap, ext[n]])
-        s[:] = ext[:n]
+        _reduce(C, s, self._wrap() >> 1)
+        flag = s[-1]
+        C.cx(flag, lsb)
+        C.cx(lsb, flag)
+        C.free([flag])
+        s[:] = [lsb] + s[:-1]
 
     def cmodadd_const(self, C, ctrl, value, b):
         """b = (b + ctrl*value) mod q."""
         value %= self.q
         if value == 0:
             return
-        k = C.alloc(self.n)
-        load_const(C, k, value, ctrl)
-        self.modadd(C, k, b)
-        load_const(C, k, value, ctrl)
-        C.free(k)
+        (top,) = C.alloc(1)
+        add_const(C, b, value, ctrl, top)
+        _reduce(C, b + [top], self._wrap())
+        gt_const_into(C, value, b, top, ctrl)
+        C.free([top])
 
     def cneg(self, C, ctrl, b):
         """b = q - b when ctrl, valid for b in [1, q). A bijection on all of
-        {0,1}^n either way, since it is ~b + (q + 1) mod 2^n."""
+        {0,1}^n either way, since it is ~(b + 2^n - q - 1) mod 2^n."""
+        add_const(C, b, (1 << self.n) - self.q - 1, ctrl=ctrl)
         for w in b:
             C.cx(ctrl, w)
-        add_const(C, b, self.q + 1, ctrl=ctrl)
