@@ -5,10 +5,10 @@
   "addend": "secp256k1 G",
   "n": 256,
   "wires": 2311,
-  "ops": 18998533,
+  "ops": 18995461,
   "counts": {
    "X": 3026330,
-   "CX": 8762528,
+   "CX": 8759456,
    "CCX": 7209419,
    "SWAP": 256
   },
@@ -23,7 +23,7 @@
   ],
   "failures": 0,
   "first_failures": [],
-  "build_seconds": 5.8,
-  "sim_seconds": 1.3
+  "build_seconds": 6.5,
+  "sim_seconds": 1.6
  }
 ]

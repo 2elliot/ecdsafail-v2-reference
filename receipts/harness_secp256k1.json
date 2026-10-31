@@ -1,6 +1,6 @@
 {
   "ccx": 7209419,
-  "circuit_json_bytes": 822278558,
+  "circuit_json_bytes": 822274423,
   "execution": {
     "executor": "v2_runtime::BitSlicedExecutor::execute_block",
     "failures": 0,
@@ -10,14 +10,14 @@
     "lanes_with_phase": 0
   },
   "lowering": {
-    "clifford": 69464978,
+    "clifford": 69461906,
     "measurements": 0,
     "t": 28837676,
     "t_plus_tdg_per_ccx": 7.0,
     "tdg": 21628257
   },
   "num_wires": 2311,
-  "operations": 18998533,
+  "operations": 18995461,
   "qualification": {
     "board_status": "CLOSED",
     "failure_reasons": [
@@ -32,12 +32,12 @@
     "is_qualified": false
   },
   "submission": {
-    "bytes": 822279053,
-    "emitted_circuit_digest": "Sha256Digest(4b636a7971f7146f522a69f417d004b1c1aa551ca4d6a1e5e6b80ff98c27ed4b)",
+    "bytes": 822274918,
+    "emitted_circuit_digest": "Sha256Digest(ec737fed82288de327428ace6af0402b6ae3b230dad7d5f6a588b293cf364c9d)",
     "service_parse": "PARSED",
     "upload_limit_bytes": 104857600,
     "within_upload_limit": false
   },
-  "validator_default_ingestion_limits": "REJECT: Exceeded max operations: 18998533 > 1000000",
-  "validator_service_caps": "REJECT: Exceeded max operations: 18998533 > 10000000"
+  "validator_default_ingestion_limits": "REJECT: Exceeded max operations: 18995461 > 1000000",
+  "validator_service_caps": "REJECT: Exceeded max operations: 18995461 > 10000000"
 }

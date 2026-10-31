@@ -10,8 +10,8 @@
   "first": []
  },
  "moddbl": {
-  "ops": 782,
-  "wires": 508,
+  "ops": 780,
+  "wires": 507,
   "lanes": 55,
   "failures": 0,
   "first": []
@@ -23,12 +23,327 @@
   "failures": 0,
   "first": []
  },
+ "modadd_ctrl": {
+  "ops": 4639,
+  "wires": 769,
+  "lanes": 570,
+  "failures": 0,
+  "first": []
+ },
+ "cmodadd_const_ctrl[q-a_G]": {
+  "ops": 4154,
+  "wires": 513,
+  "lanes": 122,
+  "failures": 0,
+  "first": []
+ },
+ "gt_const_into_ctrl[q-a_G]": {
+  "ops": 1746,
+  "wires": 513,
+  "lanes": 248,
+  "failures": 0,
+  "first": []
+ },
+ "gt_const_into[q-a_G]": {
+  "ops": 1503,
+  "wires": 511,
+  "lanes": 124,
+  "failures": 0,
+  "first": []
+ },
+ "add_const_ctrl_cout[q-a_G]": {
+  "ops": 1611,
+  "wires": 513,
+  "lanes": 248,
+  "failures": 0,
+  "first": []
+ },
+ "cmodadd_const_ctrl[q-b_G]": {
+  "ops": 4362,
+  "wires": 513,
+  "lanes": 122,
+  "failures": 0,
+  "first": []
+ },
+ "gt_const_into_ctrl[q-b_G]": {
+  "ops": 1842,
+  "wires": 513,
+  "lanes": 248,
+  "failures": 0,
+  "first": []
+ },
+ "gt_const_into[q-b_G]": {
+  "ops": 1567,
+  "wires": 511,
+  "lanes": 124,
+  "failures": 0,
+  "first": []
+ },
+ "add_const_ctrl_cout[q-b_G]": {
+  "ops": 1723,
+  "wires": 513,
+  "lanes": 248,
+  "failures": 0,
+  "first": []
+ },
+ "cmodadd_const_ctrl[3a_G]": {
+  "ops": 4108,
+  "wires": 513,
+  "lanes": 122,
+  "failures": 0,
+  "first": []
+ },
+ "gt_const_into_ctrl[3a_G]": {
+  "ops": 1725,
+  "wires": 513,
+  "lanes": 248,
+  "failures": 0,
+  "first": []
+ },
+ "gt_const_into[3a_G]": {
+  "ops": 1489,
+  "wires": 511,
+  "lanes": 124,
+  "failures": 0,
+  "first": []
+ },
+ "add_const_ctrl_cout[3a_G]": {
+  "ops": 1586,
+  "wires": 513,
+  "lanes": 248,
+  "failures": 0,
+  "first": []
+ },
+ "cmodadd_const_ctrl[a_G]": {
+  "ops": 4314,
+  "wires": 513,
+  "lanes": 122,
+  "failures": 0,
+  "first": []
+ },
+ "gt_const_into_ctrl[a_G]": {
+  "ops": 1821,
+  "wires": 510,
+  "lanes": 248,
+  "failures": 0,
+  "first": []
+ },
+ "gt_const_into[a_G]": {
+  "ops": 1551,
+  "wires": 508,
+  "lanes": 124,
+  "failures": 0,
+  "first": []
+ },
+ "add_const_ctrl_cout[a_G]": {
+  "ops": 1696,
+  "wires": 510,
+  "lanes": 248,
+  "failures": 0,
+  "first": []
+ },
+ "cmodadd_const_ctrl[1]": {
+  "ops": 2587,
+  "wires": 513,
+  "lanes": 110,
+  "failures": 0,
+  "first": []
+ },
+ "gt_const_into_ctrl[1]": {
+  "ops": 1023,
+  "wires": 513,
+  "lanes": 228,
+  "failures": 0,
+  "first": []
+ },
+ "gt_const_into[1]": {
+  "ops": 1021,
+  "wires": 511,
+  "lanes": 114,
+  "failures": 0,
+  "first": []
+ },
+ "add_const_ctrl_cout[1]": {
+  "ops": 767,
+  "wires": 513,
+  "lanes": 228,
+  "failures": 0,
+  "first": []
+ },
+ "cmodadd_const_ctrl[f]": {
+  "ops": 2665,
+  "wires": 513,
+  "lanes": 114,
+  "failures": 0,
+  "first": []
+ },
+ "gt_const_into_ctrl[f]": {
+  "ops": 1059,
+  "wires": 513,
+  "lanes": 236,
+  "failures": 0,
+  "first": []
+ },
+ "gt_const_into[f]": {
+  "ops": 1045,
+  "wires": 511,
+  "lanes": 118,
+  "failures": 0,
+  "first": []
+ },
+ "add_const_ctrl_cout[f]": {
+  "ops": 809,
+  "wires": 513,
+  "lanes": 236,
+  "failures": 0,
+  "first": []
+ },
+ "cmodadd_const_ctrl[2^255]": {
+  "ops": 1312,
+  "wires": 513,
+  "lanes": 118,
+  "failures": 0,
+  "first": []
+ },
+ "gt_const_into_ctrl[2^255]": {
+  "ops": 513,
+  "wires": 258,
+  "lanes": 228,
+  "failures": 0,
+  "first": []
+ },
+ "gt_const_into[2^255]": {
+  "ops": 513,
+  "wires": 257,
+  "lanes": 114,
+  "failures": 0,
+  "first": []
+ },
+ "add_const_ctrl_cout[2^255]": {
+  "ops": 2,
+  "wires": 258,
+  "lanes": 228,
+  "failures": 0,
+  "first": []
+ },
+ "cmodadd_const_ctrl[q-1]": {
+  "ops": 5800,
+  "wires": 513,
+  "lanes": 110,
+  "failures": 0,
+  "first": []
+ },
+ "gt_const_into_ctrl[q-1]": {
+  "ops": 2506,
+  "wires": 512,
+  "lanes": 236,
+  "failures": 0,
+  "first": []
+ },
+ "gt_const_into[q-1]": {
+  "ops": 2009,
+  "wires": 510,
+  "lanes": 118,
+  "failures": 0,
+  "first": []
+ },
+ "add_const_ctrl_cout[q-1]": {
+  "ops": 2497,
+  "wires": 512,
+  "lanes": 236,
+  "failures": 0,
+  "first": []
+ },
+ "cmodadd_const_ctrl[q-2]": {
+  "ops": 5805,
+  "wires": 513,
+  "lanes": 112,
+  "failures": 0,
+  "first": []
+ },
+ "gt_const_into_ctrl[q-2]": {
+  "ops": 2508,
+  "wires": 513,
+  "lanes": 240,
+  "failures": 0,
+  "first": []
+ },
+ "gt_const_into[q-2]": {
+  "ops": 2011,
+  "wires": 511,
+  "lanes": 120,
+  "failures": 0,
+  "first": []
+ },
+ "add_const_ctrl_cout[q-2]": {
+  "ops": 2500,
+  "wires": 513,
+  "lanes": 240,
+  "failures": 0,
+  "first": []
+ },
+ "cmodadd_const_ctrl[2^255-1]": {
+  "ops": 5889,
+  "wires": 513,
+  "lanes": 118,
+  "failures": 0,
+  "first": []
+ },
+ "gt_const_into_ctrl[2^255-1]": {
+  "ops": 2547,
+  "wires": 513,
+  "lanes": 236,
+  "failures": 0,
+  "first": []
+ },
+ "gt_const_into[2^255-1]": {
+  "ops": 2037,
+  "wires": 511,
+  "lanes": 118,
+  "failures": 0,
+  "first": []
+ },
+ "add_const_ctrl_cout[2^255-1]": {
+  "ops": 2545,
+  "wires": 513,
+  "lanes": 236,
+  "failures": 0,
+  "first": []
+ },
+ "cmodadd_const_ctrl[2^256-1 mod q]": {
+  "ops": 2632,
+  "wires": 513,
+  "lanes": 116,
+  "failures": 0,
+  "first": []
+ },
+ "gt_const_into_ctrl[2^256-1 mod q]": {
+  "ops": 1045,
+  "wires": 509,
+  "lanes": 240,
+  "failures": 0,
+  "first": []
+ },
+ "gt_const_into[2^256-1 mod q]": {
+  "ops": 1033,
+  "wires": 507,
+  "lanes": 120,
+  "failures": 0,
+  "first": []
+ },
+ "add_const_ctrl_cout[2^256-1 mod q]": {
+  "ops": 790,
+  "wires": 509,
+  "lanes": 240,
+  "failures": 0,
+  "first": []
+ },
  "dialog_mul": {
-  "ops": 8686324,
+  "ops": 8685300,
   "wires": 2304,
   "lanes": 57,
   "failures": 0,
   "first": [],
-  "seconds": 3.2
+  "seconds": 3.7
  }
 }
