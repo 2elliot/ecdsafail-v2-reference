@@ -4,6 +4,9 @@
 set -eu
 cd "$(dirname "$0")/../../../.."
 [ $# -ge 1 ] || { echo "usage: $0 <label> [extra file ...]" >&2; exit 2; }
+if command -v sha256sum > /dev/null; then sha256() { sha256sum "$1"; }
+elif command -v shasum > /dev/null; then sha256() { shasum -a 256 "$1"; }
+else echo "evidence.sh needs sha256sum or shasum on PATH" >&2; exit 1; fi
 label=$1; shift
 dest=verify-out/evidence/$label-$(date -u +%Y%m%dT%H%M%SZ)
 mkdir -p "$dest"
@@ -12,7 +15,7 @@ mkdir -p "$dest"
 for f in verify-out/accept/*.json; do [ -f "$f" ] && cp "$f" "$dest/"; done
 if [ -d verify-out/accept/emit ]; then
   for f in verify-out/accept/emit/*; do
-    printf '%s  %s bytes  %s\n' "$(shasum -a 256 "$f" | cut -d' ' -f1)" "$(wc -c < "$f" | tr -d ' ')" "$f"
+    printf '%s  %s bytes  %s\n' "$(sha256 "$f" | cut -d' ' -f1)" "$(wc -c < "$f" | tr -d ' ')" "$f"
   done > "$dest/emitted.sha256"
 fi
 for f in "$@"; do cp "$f" "$dest/"; done
