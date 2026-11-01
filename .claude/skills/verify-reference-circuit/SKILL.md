@@ -20,7 +20,13 @@ python3 --version                                   # 3.9 or newer
 .claude/skills/verify-reference-circuit/scripts/doctor.sh
 ```
 
-The checkout is ready when `doctor.sh` exits 0. The harness alone needs a build, and only when the benchmark checkout exists at `../ecdsafail-v2` (see `features/benchmark-harness.md`).
+The checkout is ready when `doctor.sh` exits 0. A fresh clone has no `verify-out/`, and `scripts/emit.py` does not create directories, so make the scratch directories once:
+
+```sh
+mkdir -p verify-out/emit
+```
+
+The recipes below and in `features/` also create what they write into, so each one runs on its own. The harness alone needs a build, and only when the benchmark checkout exists at `../ecdsafail-v2` (see `features/benchmark-harness.md`).
 
 Teardown is the Cleanup section. Each command is a short-lived process that exits on its own.
 
@@ -41,12 +47,12 @@ Don't run two gates in one checkout at the same time. Each run deletes and rewri
 The gate is the main driver. Every check has an id, and `--only` runs a subset.
 
 ```sh
-python3 scripts/accept.py --quick                     # about 20 s; every check except I2.secp, 7 addends
-python3 scripts/accept.py                             # about 40 s; adds I2.secp and 19 addends
-python3 scripts/accept.py --only I5 I6 --sample 8 --seed 7
+python3 scripts/accept.py --quick                     # about 12 s; every check except I2.secp-flat, 9 addends, 2 simulated
+python3 scripts/accept.py                             # about 95 s; adds I2.secp-flat, 24 addends, all simulated
+python3 scripts/accept.py --quick --only I5 I6 --sample 4 --seed 7
 ```
 
-The ids are `I1`, `I2.model`, `I2.toy`, `I2.toy-hier`, `I2.components`, `I2.mutation`, `I2.secp`, `I3`, `I5`, `I6`, `I7`, `I7.charge` and `R1`. Each prints a row with `PASS`, `FAIL` or `PENDING` and a one-line note. The last line starts with `gate PASS` or `gate FAIL`. The exit code is 0 only when no check fails. `I7.charge` stays `PENDING` until the benchmark is published, and that is expected.
+The ids are `I1`, `I2.model`, `I2.toy`, `I2.toy-hier`, `I2.components`, `I2.mutation`, `I2.secp`, `I2.secp-flat`, `I3`, `I5`, `I6`, `I7`, `I7.charge` and `R1`. Each prints a row with `PASS`, `FAIL` or `PENDING` and a one-line note. The last line starts with `gate PASS` or `gate FAIL`. The exit code is 0 only when no check fails. `I7.charge` stays `PENDING` until the benchmark is published, and that is expected.
 
 The feature files in `features/` give the exact commands for each user-facing feature. Start from `features/README.md`.
 
@@ -55,7 +61,7 @@ The feature files in `features/` give the exact commands for each user-facing fe
 A proof is the command, its full output, its exit code, and the files it wrote. Capture it like this after any gate run:
 
 ```sh
-python3 scripts/accept.py --quick > verify-out/gate.log 2>&1; echo "exit $?" >> verify-out/gate.log
+mkdir -p verify-out; python3 scripts/accept.py --quick > verify-out/gate.log 2>&1; echo "exit $?" >> verify-out/gate.log
 .claude/skills/verify-reference-circuit/scripts/evidence.sh <feature-id> verify-out/gate.log
 ```
 
@@ -66,7 +72,7 @@ Proof standards:
 - Drive the real path a user runs, `scripts/emit.py` and `scripts/accept.py`. Don't call `qec` functions in a one-off script and report that as the proof.
 - Capture the action and the resulting state. For emission, that is the meta line it printed and the file it wrote. For a check, that is the row and the evidence in `accept.json`.
 - Check the side effects. `R1` in `accept.json` confirms the run changed no file git tracks. An emitted file has the byte count and sha256 that `evidence.sh` recorded.
-- A pass of `I2.secp` alone proves little. Random 256-bit points cannot tell an exact circuit from an approximate one. Exactness rests on `I2.toy`, `I2.components` and `I2.model`.
+- A pass of `I2.secp` alone proves little. Random 256-bit points cannot tell an exact circuit from an approximate one. Exactness rests on `I2.toy`, `I2.toy-hier`, `I2.components` and `I2.model`. `I2.secp` catches a wrong gate that runs only at 256 bits, on the addends and points it samples.
 - Don't report `I7.charge` as verified. It is pending.
 
 ## Cleanup
@@ -80,4 +86,4 @@ This removes the emitted circuits, the logs of the last run, and the scratch emi
 ## Helpers
 
 - `scripts/doctor.sh` is the read-only health check. Run `.claude/skills/verify-reference-circuit/scripts/doctor.sh`. Set `PY=/path/to/python` to check another interpreter.
-- `scripts/evidence.sh <label> [file ...]` copies the last gate run and any extra files into `verify-out/evidence/<label>-<UTC time>/`. Run `.claude/skills/verify-reference-circuit/scripts/evidence.sh limits verify-out/gate.log`.
+- `scripts/evidence.sh <label> [file ...]` copies the last gate run and any extra files into `verify-out/evidence/<label>-<UTC time>/`. Run `.claude/skills/verify-reference-circuit/scripts/evidence.sh limits` to save the last gate run alone.

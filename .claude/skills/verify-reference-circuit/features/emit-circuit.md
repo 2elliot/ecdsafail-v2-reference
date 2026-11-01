@@ -21,12 +21,12 @@
 Preconditions:
 
 - `doctor.sh` exits 0.
-- `verify-out/emit/` does not exist or holds nothing you need.
+- Run `mkdir -p verify-out/emit`. A fresh clone has no `verify-out/`, and `emit.py` does not create directories. Anything already in `verify-out/emit/` may be overwritten.
 
 - **Toy flat.** Run `python3 -I scripts/emit.py --curve toy:127 --addend-index 5 --out verify-out/emit/toy127_circuit.json`. Exit code 0. The printed line has `"num_wires": 70`, `"ops": 14803`, `"ccx": 5099` and `"json_bytes": 582590`. `verify-out/emit/toy127_circuit.meta.json` holds the same values and a `layout` of control `[0]`, x `1..7`, y `8..14`.
-- **Byte identity.** Run `shasum -a 256 verify-out/emit/toy127_circuit.json artifacts/toy127_circuit.json`. Both digests are equal. A change under `qec/` that is meant to leave the circuit alone must keep them equal.
+- **Byte identity.** Run `cmp verify-out/emit/toy127_circuit.json artifacts/toy127_circuit.json`. It prints nothing and exits 0 when the files are byte-identical. A change under `qec/` that is meant to leave the circuit alone must keep them equal.
 - **Toy hierarchical.** Run `python3 -I scripts/emit.py --curve toy:127 --addend-index 5 --hier --out verify-out/emit/toy127_circuit.hier.json`. The printed line has `"definitions": 11`, `"call_sites": 39`, `"primitive_ops": 1974` and `"json_bytes": 82002`.
-- **256-bit hierarchical.** Run `python3 -I scripts/emit.py --hier --out verify-out/emit/secp256k1_G_circuit.hier.json`. It takes about 2 s. The printed line has `"num_wires": 2311`, `"definitions": 261`, `"call_sites": 1796`, `"primitive_ops": 972903` and `"json_bytes": 43422940`.
+- **256-bit hierarchical.** Run `python3 -I scripts/emit.py --hier --out verify-out/emit/secp256k1_G_circuit.hier.json`. It takes about 1 s. The printed line has `"num_wires": 2311`, `"definitions": 261`, `"call_sites": 1796`, `"primitive_ops": 972903` and `"json_bytes": 43422940`.
 - **256-bit flat.** Run `python3 -I scripts/emit.py --out verify-out/emit/secp256k1_G_circuit.json.gz`. It takes about 40 s. The printed line has `"ops": 18995461`, `"ccx": 7209419` and `"num_wires": 2311`.
 - **Proof.** Run `.claude/skills/verify-reference-circuit/scripts/evidence.sh emit-circuit verify-out/emit/toy127_circuit.meta.json verify-out/emit/secp256k1_G_circuit.hier.meta.json`. The evidence directory holds both meta files and `git.txt`.
 

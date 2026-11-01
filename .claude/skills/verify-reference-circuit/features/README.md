@@ -36,7 +36,7 @@ Each feature file starts with an H1 title and one paragraph on the user-visible 
 ## Features
 
 - [Emit a circuit](./emit-circuit.md) covers flat and hierarchical emission at toy and 256-bit sizes, and the byte-identity check against the committed toy artifact.
-- [Exactness checks](./exactness-checks.md) covers the model, toy, hierarchical toy, component, mutation and 256-bit sampled checks.
-- [Per-addend cost report](./per-addend-cost.md) covers CCX, T, ops and wires at G and over seeded random addends, and the definition digests across addends.
+- [Exactness checks](./exactness-checks.md) covers the model, toy, hierarchical toy, component, mutation, 256-bit hierarchical and 256-bit flat checks.
+- [Per-addend cost report](./per-addend-cost.md) covers CCX, T, ops and wires at G and as sample statistics over [1]G to [8]G and seeded random addends, and the definition digests across addends.
 - [Limits check](./limits.md) covers the interface layout, the wire cap, the upload cap, the gate set, and the pending charge.
 - [Benchmark harness](./benchmark-harness.md) covers replay on the benchmark's own executor. It cannot run until the benchmark is published.

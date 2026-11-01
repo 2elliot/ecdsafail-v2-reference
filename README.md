@@ -5,8 +5,8 @@
 This repository holds the reference circuit for the ecdsafail-v2 controlled point addition, an exact and complete |c>|R>|0> -> |c>|R + c*A>|0> on secp256k1. Fork it to make the circuit cheaper. The benchmark that will judge your change is not published yet, so `scripts/accept.py` checks the invariants a change must keep.
 
 ```sh
-python3 scripts/accept.py --quick   # about 20 s, stdlib Python only
-python3 scripts/accept.py           # about 40 s, run it before you hand a change back
+python3 scripts/accept.py --quick   # about 12 s, stdlib Python only
+python3 scripts/accept.py           # about 95 s, run it before you hand a change back
 ```
 
 - `INVARIANTS.md` says what each check protects, what no script can check, where the CCX are, and how to hand a change back.
@@ -33,7 +33,7 @@ Individual steps:
 
 ```sh
 PY=python3
-$PY -I scripts/model_check.py                                  # classical dialog model, exhaustive at small q
+$PY -I scripts/model_check.py                                  # classical dialog model: Euclid trace exhaustive at small q, multiplier sampled
 $PY -I scripts/check.py --toy-bits 4 6 7 8 9 10 --toy-per-size 6   # gate-level exhaustive check on toy curves
 $PY -I scripts/mutation_control.py                             # negative control for the checker
 $PY -I scripts/component_check.py                              # 256-bit components on boundary inputs

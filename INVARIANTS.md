@@ -7,44 +7,47 @@ The benchmark that will judge your change is not published yet. `accept.py` enco
 ## Run the gate
 
 ```sh
-python3 scripts/accept.py --quick   # 18 s, toy exactness and the cheap 256-bit structure checks
-python3 scripts/accept.py           # 40 s, adds the 256-bit sampled check and 19 addends instead of 7
+python3 scripts/accept.py --quick   # 12 s, 9 addends built, the 256-bit upload simulated at 2 of them
+python3 scripts/accept.py           # 95 s, 24 addends built and simulated, plus the flat 256-bit circuit at G
 ```
 
-Both times are from an Apple M4 laptop with Python 3.14 under light load. The gate runs on one core, and under heavy load the same runs took 27 s and 79 s. Python is stdlib only. The gate prints one row per check and writes the full evidence to `verify-out/accept.json`. It exits 0 only when no check fails. A check marked pending waits on the published benchmark and fails nothing.
+Both times are from an Apple M4 laptop with 10 cores and Python 3.14, at a load average under 10. The checkers run as parallel processes, so quick mode spends about 55 s of CPU time and full mode about 540 s. On fewer cores the wall time grows toward those totals. Full mode peaks near 4.5 GB of memory across its processes. Python is stdlib only. The gate prints one row per check and writes the full evidence to `verify-out/accept.json`. It exits 0 only when no check fails. A check marked pending waits on the published benchmark and fails nothing.
 
-Run `--quick` while you iterate and the full mode before you hand a change back. `--only I5 I6` runs a subset. `--sample N` and `--seed S` change the random addends that I5, I6 and I7 build.
+Run `--quick` while you iterate and the full mode before you hand a change back. `--only I5 I6` runs a subset. `--sample N` and `--seed S` change the random addends that I1, I3, I5, I6 and I7 build and that `I2.secp` simulates. A row's seconds are the time the gate waited for it, so the first row that needs the addends carries their build time.
 
 ## What each check protects
 
 The circuit implements |c>|R>|0> -> |c>|R + c*A>|0> for a fixed public point A on secp256k1, under the frozen profile `secp256k1-controlled-exact-v1`. Every check below guards one part of that contract or one limit of the benchmark.
 
-**I1 interface.** The control is wire 0, x is wires 1..n, and y is wires n+1..2n, at n = 7 and at n = 256. Every other wire is scratch, and the wire count stays at most 4,096. The benchmark reads the declared registers from these positions, so a reordered layout computes the right sum in the wrong place. The reference uses 2,311 wires.
+**I1 interface.** The control is wire 0, x is wires 1..n, and y is wires n+1..2n, at n = 7 and at n = 256, for G and for every built addend. Every other wire is scratch, and the wire count stays at most 4,096. The benchmark reads the declared registers from these positions, so a reordered layout computes the right sum in the wrong place. The reference uses 2,311 wires.
 
 **I2 exactness.** The profile requires an exact unitary, so the circuit must be right on every input, including infinity and R in {A, -A, -2A}. I2 runs the existing checkers and parses what they print. It does not reimplement them.
 
-- `I2.model` runs `scripts/model_check.py`. It checks the classical dialog model exhaustively at 13 small primes and checks the Euclid width schedule against the proven iteration bound.
-- `I2.toy` runs `scripts/check.py` on 36 toy curves of 4 to 10 bits. It simulates every point with c = 0 and c = 1 at gate level and requires all scratch back at zero.
-- `I2.toy-hier` runs the same check on the hierarchical emission after `qec/flatten.py` expands it. The upload is hierarchical, so a broken call map would pass `I2.toy` and still upload a wrong circuit.
+- `I2.model` runs `scripts/model_check.py`. At 13 small primes it traces the Euclid loop for every x, against the proven iteration bound and the width schedule. It checks the classical multiplier model on every (x, y) below q = 300 and on 8 sampled y per x above, so the multiplier part is not exhaustive.
+- `I2.toy` runs `scripts/check.py` on 36 toy instances of 4 to 10 bits, two addends on each of 18 curves. It simulates every point with c = 0 and c = 1 at gate level and requires all scratch back at zero.
+- `I2.toy-hier` runs the same check on the hierarchical emission. `check.py` parses the JSON text with `qec/flatten.py` and expands every call through its wire map and inverse flag, as the benchmark would. On each toy instance it also compares that expansion with the text `flatten.operations_json` writes. The upload is hierarchical, so a broken call map would pass `I2.toy` and still upload a wrong circuit.
 - `I2.components` runs `scripts/component_check.py`. It checks the 256-bit adders, doubler, negation and multiplier on boundary inputs near q and 2^256 that random points almost never reach.
-- `I2.mutation` runs `scripts/mutation_control.py`. It confirms that the checker still rejects mutated circuits. The reference catches 163 of 200 CCX-to-CX demotions. The rest are equivalent circuits.
-- `I2.secp` runs only in full mode. It checks the 256-bit circuit at A = G on 120 random points plus the exceptional ones.
+- `I2.mutation` runs `scripts/mutation_control.py`. It confirms that the checker still rejects mutated circuits. At its fixed seed the reference catches 163 of 200 CCX-to-CX demotions, and the rest are equivalent circuits. The check fails below 163.
+- `I2.secp` simulates the 256-bit hierarchical upload, expanded the same way as `I2.toy-hier`. Each addend runs on infinity, A, -A, -2A, 2A, 3A and random R, with c = 0 and c = 1. Quick mode runs G and one random addend with 8 random R. Full mode runs every built addend with 120 random R. It also requires that the JSON it simulated for G is the bytes `scripts/emit.py` writes.
+- `I2.secp-flat` runs only in full mode. It checks the flat 256-bit circuit at A = G on the same points with 120 random R.
 
-**I3 gate set.** Every emitted primitive is X, CX, CCX or SWAP, with no measurement and no reset. The profile disables measurement cleanup, and a circuit of these four gates is a permutation with no phases. That is why basis-state exactness with clean scratch gives the exact unitary on superpositions. A single Z, CZ or measurement breaks that argument even when every basis check passes. I3 reads the emitted JSON at toy and 256-bit sizes and counts the gate kinds in every toy instance.
+Each checker must reach the coverage pinned in `COVERAGE` at the top of `scripts/accept.py`: 13 model primes, 36 toy instances and 25,800 lanes, 49 components and 8,951 lanes, 200 mutation trials, and 2 x (6 + random R) lanes per simulated addend. A receipt that covers less fails, even with zero failures.
+
+**I3 gate set.** Every emitted primitive is X, CX, CCX or SWAP, with no measurement and no reset. The profile disables measurement cleanup, and a circuit of these four gates is a permutation with no phases. That is why basis-state exactness with clean scratch gives the exact unitary on superpositions. A single Z, CZ or measurement breaks that argument even when every basis check passes. I3 reads the emitted JSON at toy and 256-bit sizes and the JSON of every built addend, and counts the gate kinds in every toy instance and every expanded 256-bit upload.
 
 **I5 addend independence of definitions.** The gate builds the 256-bit kernel hierarchically for [1]G to [8]G and the seeded random addends, 1 of them in quick mode and 16 in full mode. Every definition must be byte-identical across them. Today all 261 definitions are identical, and A enters only through the top level, in the `cmodadd_const` calls in `_kernel` and the four exception compares and loads in `build` (`qec/point_add.py:110-190`). Keep it that way. A whole attack runs this kernel for many addends, and shared definitions let one upload of the expensive parts serve every addend.
 
 **I6 cost at G and sample statistics.** I6 reports CCX, T = 7 x CCX, ops and wires at G. Over the addends the gate built, [1]G to [8]G and a seeded random sample, it reports the sample maximum and the sample minimum. These are statistics of that sample, not bounds. I6 shows the sample maximum T against the reference, 50,465,989, the largest T any sampled addend reached at commit `8ca9b0e`. I6 never fails on cost. It fails only when its counts disagree with the expanded upload that `I2.secp` simulated, at every simulated addend, or with the flat circuit at toy size and, in full mode, at G.
 
-**I7 limits.** Wires stay at most 4,096. The hierarchical JSON for G, which the gate writes to `verify-out/accept/emit/`, stays under 104,857,600 bytes, and so does the JSON for every sampled addend. The reference is 43,422,940 bytes.
+**I7 limits.** Wires stay at most 4,096. The hierarchical JSON for G, which the gate writes to `verify-out/accept/emit/`, stays under 104,857,600 bytes, and so does the JSON for every built addend. Every built addend also stays at most 4,096 wires. The reference is 43,422,940 bytes.
 
 **I7.charge.** The next benchmark release charges a hierarchical upload with a formula that is not public. This check stays pending until it is.
 
-**R1 run hygiene.** The gate compares `git status` before and after it runs. Every checker writes under `verify-out/`, so a run that changes a tracked file is a bug in the gate.
+**R1 run hygiene.** The gate hashes every tracked file and every untracked file git does not ignore, before and after it runs. Every checker writes under `verify-out/`, so a run that changes one of those files is a bug in the gate. It compares contents, so a second edit to a file you already changed still shows.
 
 ## What no script can check
 
-**One generator for every curve.** The exhaustive toy check says something about 256 bits only because the same code emits both sizes. Only the constants and the bound-derived width schedule differ. A code path that runs only at n = 256, or only for secp256k1's q, escapes every exhaustive check. One mutation used to test this gate added 2.8 million identity gates only when n = 256. It passed all of I2 and was caught only by the upload limit. Write size-generic code. If a trick needs a property of secp256k1's q, test that property on toy primes that share it, or prove it.
+**One generator for every curve.** The exhaustive toy check says something about 256 bits only because the same code emits both sizes. Only the constants and the bound-derived width schedule differ. A code path that runs only at n = 256, or only for secp256k1's q, escapes every exhaustive check. One mutation used to test this gate added 2.8 million identity gates only when n = 256. It passed all of I2 and was caught only by the upload limit. A wrong gate that runs only at n = 256 fails `I2.secp`, which simulates the 256-bit upload in both modes, but only on the points and addends it samples. Write size-generic code. If a trick needs a property of secp256k1's q, test that property on toy primes that share it, or prove it.
 
 **The iteration bound is proven, not sampled.** The Euclid loop runs bitlen(q(q-1)) = 512 iterations at secp256k1 because u*v at least halves per step. Random inputs finish far earlier. The paper's approximate circuits use a shorter count and fail on rare inputs. Shrinking the bound needs a proof that covers every input, not a sample that passed.
 
