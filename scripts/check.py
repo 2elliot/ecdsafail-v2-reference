@@ -145,7 +145,7 @@ def main():
     ap.add_argument("--secp-random", type=int, default=64)
     ap.add_argument("--secp-addend", type=lambda s: int(s, 0), nargs="+", default=[1], metavar="K", help="check A = [K]G for each K (default 1)")
     ap.add_argument("--seed", type=int, default=1)
-    ap.add_argument("--hier", action="store_true", help="simulate the flattened hierarchical emission")
+    ap.add_argument("--hier", action="store_true", help="simulate the emitted hierarchical JSON, expanded by qec/flatten.py's rules")
     ap.add_argument("--out", type=Path)
     args = ap.parse_args()
     rng = random.Random(args.seed)

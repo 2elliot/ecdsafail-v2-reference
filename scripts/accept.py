@@ -179,8 +179,8 @@ class Run:
             "secp-hier": [["check.py", "--secp", "--hier", "--secp-addend", *map(hex, c), "--secp-random", self.secp_points,
                            "--seed", seed, "--out", w / f"secp256k1_hier_{i}.json"] for i, c in enumerate(chunks)],
             **{f"emit:{name}": [["emit.py", *args, "--out", w / "emit" / filename]] for name, (filename, args) in EMITS.items()},
+            "addends": [],
         }
-        self.specs["addends"] = []
         if not quick:
             self.specs["secp-flat"] = [["check.py", "--secp", "--secp-random", 120, "--seed", 2026, "--out", w / "secp256k1_sampled.json"]]
         self.jobs = {}
