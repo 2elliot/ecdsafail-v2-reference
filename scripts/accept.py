@@ -38,8 +38,9 @@ MAX_WIRES = 4096
 MAX_UPLOAD_BYTES = 104_857_600
 T_PER_CCX = 7
 ALLOWED_GATES = {"X", "CX", "CCX", "SWAP"}
-REFERENCE = {"commit": "8ca9b0e", "max_t_over_1G_2G_3G": 50_465_989, "wires": 2311, "mutations_caught": 163}
-SECP_SPECIAL_POINTS = 6
+REFERENCE = {"commit": "8ca9b0e", "max_t_over_1G_2G_3G": 50_465_989, "wires": 2311}
+COVERAGE = {"model_primes": 13, "toy_instances": 36, "toy_lanes": 25_800, "components": 49, "component_lanes": 8_951,
+            "mutation_trials": 200, "mutations_caught_at_least": 163, "secp_special_points": 6}
 G_MULTIPLES = (1, 2, 3)
 SECP_RANDOM_POINTS = {True: 8, False: 120}
 SECP_WORKERS = min(6, os.cpu_count() or 1)
@@ -121,6 +122,10 @@ def label(k):
 
 def lean(summary):
     return {k: v for k, v in summary.items() if k not in ("registers", "definition_digests", "layout", "sha256")}
+
+
+def coverage(what, got, key):
+    return [] if got == COVERAGE[key] else [f"{what} {got}, expected {COVERAGE[key]}"]
 
 
 def json_lines(text):
@@ -283,18 +288,22 @@ def i2_model(run):
     rows = json_lines(p.stdout)
     small = [r for r in rows if r["q"] != "secp256k1"]
     bad = [r for r in small if not (r["worst_iterations"] <= r["bound"] and r["width_schedule_ok"] and r["multiplier_ok"])]
-    secp = next(r for r in rows if r["q"] == "secp256k1")
-    ok = p.rc == 0 and small and not bad and secp["multiplier_ok"]
-    note = f"{len(small)} primes exhaustive, worst Euclid run within bound; secp256k1 bound {secp['bound']}, {secp['random_pairs']} random products"
-    return Result(PASS if ok else FAIL, note if ok else f"exit {p.rc}, {len(bad)} failing primes", {"exit": p.rc, "rows": rows, "failing": bad, "log": p.log})
+    secp = next((r for r in rows if r["q"] == "secp256k1"), None)
+    problems = [f"exit {p.rc}, see {p.log}"] * bool(p.rc) + coverage("primes", len(small), "model_primes")
+    if bad:
+        problems.append(f"{len(bad)} failing primes")
+    if not (secp and secp["multiplier_ok"]):
+        problems.append("secp256k1 multiplier fails or is missing")
+    note = "; ".join(problems) or (f"{len(small)} primes: Euclid trace and width schedule exhaustive over x, worst run within bound, "
+                                   f"multiplier model right on every pair tried; secp256k1 bound {secp['bound']}, {secp['random_pairs']} random products")
+    return Result(FAIL if problems else PASS, note, {"exit": p.rc, "rows": rows, "failing": bad, "log": p.log})
 
 
 def _toy_result(proc, rows, what, hier):
     fails = sum(r["failures"] for r in rows)
     lanes = sum(r["lanes"] for r in rows)
-    problems = [f"check.py exited {proc.rc} after {len(rows)} toy instances, see {proc.log}"] * bool(proc.rc and not fails)
-    if not rows:
-        problems.append("no toy instances")
+    problems = [f"check.py exited {proc.rc}, see {proc.log}"] * bool(proc.rc)
+    problems += coverage("instances", len(rows), "toy_instances") + coverage("lanes", lanes, "toy_lanes")
     mismatched = [r for r in rows if hier and not r.get("expansion_matches_flatten")]
     if mismatched:
         problems.append(f"{len(mismatched)} expansions differ from flatten.operations_json")
@@ -314,25 +323,30 @@ def i2_toy_hier(run):
 
 def i2_components(run):
     p, = run.procs("components")
-    out = json.loads(p.stdout)
+    try:
+        out = json.loads(p.stdout)
+    except ValueError:
+        out = {}
     parts = {k: v for k, v in out.items() if isinstance(v, dict)}
     bad = sorted(k for k, v in parts.items() if v["failures"])
-    ok = p.rc == 0 and parts and not bad
-    note = f"{len(parts)} 256-bit components on boundary inputs, {sum(v['lanes'] for v in parts.values())} lanes, failing: {bad or 'none'}"
-    return Result(PASS if ok else FAIL, note, {"exit": p.rc, "components": len(parts), "failing": bad, "log": p.log})
+    lanes = sum(v["lanes"] for v in parts.values())
+    problems = [f"exit {p.rc}, see {p.log}"] * bool(p.rc) + coverage("components", len(parts), "components") + coverage("lanes", lanes, "component_lanes")
+    note = f"{len(parts)} 256-bit components on boundary inputs, {lanes} lanes, failing: {bad or 'none'}" + "".join(f"; {m}" for m in problems)
+    return Result(FAIL if bad or problems else PASS, note, {"exit": p.rc, "components": len(parts), "lanes": lanes, "failing": bad, "log": p.log})
 
 
 def i2_mutation(run):
     p, = run.procs("mutation")
     out = json.loads(p.stdout) if p.rc == 0 else {}
-    caught = out.get("caught", 0)
-    note = f"{caught} of {out.get('trials')} CCX-to-CX demotions caught (reference {REFERENCE['mutations_caught']})"
-    return Result(PASS if p.rc == 0 and caught else FAIL, note if p.rc == 0 else f"exit {p.rc}, see {p.log}", {"exit": p.rc, **out, "log": p.log})
+    caught, trials, need = out.get("caught", 0), out.get("trials"), COVERAGE["mutations_caught_at_least"]
+    problems = [f"exit {p.rc}, see {p.log}"] * bool(p.rc) + coverage("trials", trials, "mutation_trials")
+    note = f"{caught} of {trials} CCX-to-CX demotions caught at the fixed seed, at least {need} required" + "".join(f"; {m}" for m in problems)
+    return Result(FAIL if problems or caught < need else PASS, note, {"exit": p.rc, **out, "required": need, "log": p.log})
 
 
 def i2_secp(run):
     procs, rows = run.secp_hier()
-    lanes = 2 * (SECP_SPECIAL_POINTS + run.secp_points)
+    lanes = 2 * (COVERAGE["secp_special_points"] + run.secp_points)
     failing = {label(k): f"{r['failures']} of {r['lanes']} lanes" for k, r in rows.items() if r["failures"]}
     problems = [f"check.py exited {p.rc}, see {p.log}" for p in procs if p.rc and not any(r["failures"] for r in json_lines(p.stdout))]
     problems += [f"{label(k)} not simulated" for k in run.simulated if k not in rows]
@@ -368,8 +382,7 @@ def i3_gate_set(run):
         if sum(r["counts"].values()) != r["ops"]:
             problems.append(f"toy q={r['q']} A={r['addend']}: {r['ops'] - sum(r['counts'].values())} ops outside X, CX, CCX, SWAP")
     evidence["toy_instances_counted"] = len(rows)
-    if not rows:
-        problems.append(f"no toy rows to count, see {proc.log}")
+    problems += coverage("toy instances counted", len(rows), "toy_instances")
     _, hier = run.secp_hier()
     problems += [f"{label(k)} expanded upload has ops outside X, CX, CCX, SWAP" for k, r in hier.items() if sum(r["counts"].values()) != r["ops"]]
     if not run.quick:
@@ -546,7 +559,7 @@ def main():
               "addends": [label(k) for k in run.addends], "simulated_addends": [label(k) for k in run.simulated],
               "git_head": (_git("rev-parse", "HEAD") or b"").decode().strip() or None, "python": sys.version.split()[0],
               "seconds": round(time.time() - t_start, 1), "counts": dict(tally), "failed": failed, "pending": pending,
-              "not_run_in_quick_mode": skipped, "results": results}
+              "not_run_in_quick_mode": skipped, "coverage": COVERAGE, "results": results}
     (run.out / "accept.json").write_text(json.dumps(report, indent=1))
     print(f"\ngate {report['gate'].upper()}: {tally[PASS]} pass, {tally[FAIL]} fail, {tally[PENDING]} pending{f' {pending}' if pending else ''}"
           f"{f'; not run in --quick: {skipped}' if skipped else ''}; {report['seconds']}s; {rel(run.out / 'accept.json')}")
