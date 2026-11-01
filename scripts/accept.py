@@ -203,6 +203,8 @@ def _toy_result(proc, rows, what):
     ok = proc.rc == 0 and rows and not fails
     lanes = sum(r["lanes"] for r in rows)
     note = f"{len(rows)} toy instances, {lanes} lanes, {fails} failures ({what})"
+    if proc.rc and not fails:
+        note = f"check.py exited {proc.rc} after {len(rows)} toy instances, see {proc.log}"
     evidence = {"exit": proc.rc, "instances": len(rows), "lanes": lanes, "failures": fails, "log": proc.log, "seconds": proc.seconds,
                 "first_failures": [r for r in rows if r["failures"]][:3]}
     return Result(PASS if ok else FAIL, note, evidence)
