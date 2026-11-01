@@ -7,11 +7,11 @@ The benchmark that will judge your change is not published yet. `accept.py` enco
 ## Run the gate
 
 ```sh
-python3 scripts/accept.py --quick   # 27 s, toy exactness and the cheap 256-bit structure checks
-python3 scripts/accept.py           # 79 s, adds the 256-bit sampled check and 19 addends instead of 7
+python3 scripts/accept.py --quick   # 18 s, toy exactness and the cheap 256-bit structure checks
+python3 scripts/accept.py           # 40 s, adds the 256-bit sampled check and 19 addends instead of 7
 ```
 
-Both times are from an Apple M4 laptop with Python 3.14. Python is stdlib only. The gate prints one row per check and writes the full evidence to `verify-out/accept.json`. It exits 0 only when no check fails. A check marked pending waits on the published benchmark and fails nothing.
+Both times are from an Apple M4 laptop with Python 3.14 under light load. The gate runs on one core, and under heavy load the same runs took 27 s and 79 s. Python is stdlib only. The gate prints one row per check and writes the full evidence to `verify-out/accept.json`. It exits 0 only when no check fails. A check marked pending waits on the published benchmark and fails nothing.
 
 Run `--quick` while you iterate and the full mode before you hand a change back. `--only I5 I6` runs a subset. `--sample N` and `--seed S` change the random addends that I5, I6 and I7 build.
 

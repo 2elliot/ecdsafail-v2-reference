@@ -41,8 +41,8 @@ Don't run two gates in one checkout at the same time. Each run deletes and rewri
 The gate is the main driver. Every check has an id, and `--only` runs a subset.
 
 ```sh
-python3 scripts/accept.py --quick                     # about 30 s; every check except I2.secp, 7 addends
-python3 scripts/accept.py                             # about 80 s; adds I2.secp and 19 addends
+python3 scripts/accept.py --quick                     # about 20 s; every check except I2.secp, 7 addends
+python3 scripts/accept.py                             # about 40 s; adds I2.secp and 19 addends
 python3 scripts/accept.py --only I5 I6 --sample 8 --seed 7
 ```
 
