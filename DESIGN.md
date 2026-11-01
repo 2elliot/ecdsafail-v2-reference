@@ -2,7 +2,7 @@
 
 ## What the challenge actually requires
 
-Read from `~/ecdsa_venv/ecdsafail-v2` (read-only).
+Read from a checkout of the ecdsafail-v2 benchmark repository (read-only), which is not public until the benchmark is published.
 
 - Profile `profiles/secp256k1-controlled-exact-v1.json` sets `arithmetic_contract: EXACT_UNITARY`, `approximate_arithmetic: DISABLED`, `measurement_cleanup: DISABLED`, target `CLIFFORD_PLUS_T`.
 - SPEC (`ecdsa specs/synthesized-v2/SPEC.md`) DEF-01 requires complete controlled addition of fixed public points. QNT-03 requires identity on control 0 and exact addition on control 1. QNT-05 requires the default exact profile to handle every reachable case, including infinity and R in {A, -A, -2A}. QNT-04 requires correctness on superpositions and with entangled references. SEM-03 rejects `R` and `Hmr`.

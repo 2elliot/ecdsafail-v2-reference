@@ -1,21 +1,38 @@
 # Exact controlled point addition for ecdsafail-v2
 
+## Start here
+
+This repository holds the reference circuit for the ecdsafail-v2 controlled point addition, an exact and complete |c>|R>|0> -> |c>|R + c*A>|0> on secp256k1. Fork it to make the circuit cheaper. The benchmark that will judge your change is not published yet, so `scripts/accept.py` checks the invariants a change must keep.
+
+```sh
+python3 scripts/accept.py --quick   # about 30 s, stdlib Python only
+python3 scripts/accept.py           # about 80 s, run it before you hand a change back
+```
+
+- `INVARIANTS.md` says what each check protects, what no script can check, where the CCX are, and how to hand a change back.
+- `.claude/skills/verify-reference-circuit/` is a Claude Code skill that drives the generator, the checks, the cost report and the limits, with a feature map under `features/`.
+
+## What this circuit is
+
 This directory holds a generator for the arithmetic kernel that the `secp256k1-controlled-exact-v1` profile asks for: |c>|R>|0> -> |c>|R + c*A>|0> for a fixed public point A. It covers every R on secp256k1, including infinity and R in {A, -A, -2A}. It is built from the exact core of Schrottenloher's dialog Euclid and Bezout multiplier (arXiv 2606.02235). It is emitted in the challenge's own `ArithmeticCircuit` JSON and checked with the challenge's own executor.
 
-**It does not pass the challenge at 256 bits.** It is exact and complete, and it runs correctly on the challenge's executor. The service rejects it on size: it has 1.90x the operation cap and 7.84x the upload cap. No route to qualification exists in the repository today in any case. See "Unresolved gates" below.
+**It does not pass the challenge at 256 bits, as the benchmark is published today.** It is exact and complete, and it runs correctly on the challenge's executor. The published service rejects it on size: it has 1.90x the operation cap and 7.84x the upload cap. No route to qualification exists in the repository today in any case. See "Unresolved gates" below.
 
 `DESIGN.md` records the contract reading, the three designs compared, the data shape, and the completeness argument.
 
 ## Run
 
 ```sh
-scripts/run_all.sh            # about 2 minutes; rewrites everything in receipts/ and artifacts/
+scripts/run_all.sh                                # about 2 minutes; rewrites everything in receipts/ and artifacts/
+ECDSAFAIL_V2=../ecdsafail-v2 scripts/run_all.sh   # also builds and runs the harness against the benchmark checkout
 ```
+
+Without `ECDSAFAIL_V2`, `run_all.sh` skips the harness steps and says so, and the harness receipts keep their committed contents.
 
 Individual steps:
 
 ```sh
-PY=~/ecdsa_venv/bin/python
+PY=python3
 $PY -I scripts/model_check.py                                  # classical dialog model, exhaustive at small q
 $PY -I scripts/check.py --toy-bits 4 6 7 8 9 10 --toy-per-size 6   # gate-level exhaustive check on toy curves
 $PY -I scripts/mutation_control.py                             # negative control for the checker
@@ -25,7 +42,7 @@ $PY -I scripts/emit.py --out artifacts/secp256k1_G_circuit.json.gz
 gzip -dc artifacts/secp256k1_G_circuit.json.gz | harness/target/release/qec-harness --circuit - --cases artifacts/secp256k1_cases.json
 ```
 
-Python is stdlib only. The harness is a Rust crate whose dependencies are path references into `~/ecdsa_venv/ecdsafail-v2`. It builds offline into `harness/target` and writes nothing into the sibling repo. Receipts were produced against sibling `HEAD 9152f4d` with its existing uncommitted diff (sha256 prefix of `git diff HEAD` is `3eaa988f0901d0d1`).
+Python is stdlib only. The harness is a Rust crate whose dependencies are path references into a sibling checkout of the benchmark at `../ecdsafail-v2`, next to this repository. That checkout is not public until the benchmark is published. It builds offline into `harness/target` and writes nothing into the sibling repo. Receipts were produced against sibling `HEAD 9152f4d` with its existing uncommitted diff (sha256 prefix of `git diff HEAD` is `3eaa988f0901d0d1`).
 
 ## Layout
 
@@ -34,6 +51,7 @@ Python is stdlib only. The harness is a Rust crate whose dependencies are path r
 - `qec/arith.py` holds exact CDKM add, subtract and compare, each optionally controlled, plus modular add, double and negate.
 - `qec/point_add.py` holds the dialog multiplier, the gen-controlled kernel, and the four-case completeness wrapper.
 - `qec/sim.py` is an independent bit-sliced simulator. `qec/curve.py` is a reference curve law. `qec/emit.py` streams challenge-format JSON.
+- `scripts/accept.py` is the acceptance gate. `INVARIANTS.md` explains each of its checks.
 - `harness/` runs an emitted circuit through `v2_ir` parsing and validation, `v2_runtime::BitSlicedExecutor`, a `SubmittedMethod` round trip, `QualificationGraph::evaluate`, and `v2_lowering`.
 - `artifacts/` holds the emitted circuits, test lanes, and the toy `SubmittedMethod`. `receipts/` holds every measured result quoted below.
 
@@ -72,7 +90,9 @@ The circuit is pure X, CX, CCX and SWAP, so it is a phase-free permutation. Basi
 
 ## Unresolved gates
 
-These are listed in the order they would block a 256-bit submission.
+This section describes the benchmark as published. Its next release accepts a hierarchical upload of definitions and calls. The hierarchical JSON for G is 43,422,940 bytes, which `scripts/accept.py` checks against the 100 MiB upload cap. How that release charges a hierarchical upload is pending its publication.
+
+These are listed in the order they would block a 256-bit submission on the published benchmark.
 
 1. **Operation cap.** 18,995,461 ops against a cap of 10,000,000 (`MAX_DECLARED_RECORDS`). One multiplier alone is 8,685,300 ops. The paper reports about 2^24 total gates per addition even for its approximate circuits, so no published point addition fits this cap.
 2. **Upload cap.** The service parses plain JSON, at about 43 bytes per op. 100 MiB therefore holds about 2.4M ops, roughly 8x fewer than this circuit needs. This also binds before the operation cap does.
@@ -81,6 +101,8 @@ These are listed in the order they would block a 256-bit submission.
 5. **Formal proof.** Exactness rests on exhaustive toy verification of a size-parametric generator, full-size boundary tests, and the proven iteration bound. That is strong evidence, not a machine-checked proof.
 
 ## Optimization headroom (estimates, not built)
+
+These estimates are against the published benchmark's caps.
 
 - The dialog garbage compression from the paper's Fig. 1 saves qubits, not ops.
 - The exact equivalent of the paper's pseudo-Mersenne reduction still needs a full-width carry, so that saving is smaller here than in the paper.
