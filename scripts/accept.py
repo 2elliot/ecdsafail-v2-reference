@@ -415,7 +415,7 @@ def main():
               "git_head": _git_head(), "python": sys.version.split()[0], "seconds": round(time.time() - t_start, 1),
               "counts": dict(tally), "failed": failed, "pending": pending, "not_run_in_quick_mode": skipped, "results": results}
     (run.out / "accept.json").write_text(json.dumps(report, indent=1))
-    print(f"\ngate {report['gate'].upper()}: {tally[PASS]} pass, {tally[FAIL]} fail, {tally[PENDING]} pending {pending or ''}"
+    print(f"\ngate {report['gate'].upper()}: {tally[PASS]} pass, {tally[FAIL]} fail, {tally[PENDING]} pending{f' {pending}' if pending else ''}"
           f"{f'; not run in --quick: {skipped}' if skipped else ''}; {report['seconds']}s; {rel(run.out / 'accept.json')}")
     sys.exit(1 if failed else 0)
 
