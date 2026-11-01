@@ -163,7 +163,7 @@ class Run:
     def __init__(self, out, quick, seed, sample):
         self.out, self.quick, self.seed, self.sample = out, quick, seed, sample
         self.work = out / "accept"
-        self.git_before = _git_status()
+        self.files_before = _snapshot()
         rng = random.Random(seed)
         self.addends = [*G_MULTIPLES, *(rng.randrange(G_MULTIPLES[-1] + 1, SECP256K1_R) for _ in range(sample))]
         self.simulated = [1, self.addends[-1]] if quick else self.addends
@@ -473,12 +473,12 @@ def i7_charge(run):
 
 def r1_hygiene(run):
     run.wait_all()
-    after = _git_status()
-    if run.git_before is None:
+    after = _snapshot()
+    if run.files_before is None or after is None:
         return Result(PASS, "not a git checkout; nothing to compare", {})
-    changed = sorted(set(after.splitlines()) ^ set(run.git_before.splitlines()))
-    return Result(FAIL if changed else PASS, f"run changed {changed}" if changed else "git status is the same before and after the run",
-                  {"changed": changed})
+    changed = sorted(p for p in run.files_before.keys() | after.keys() if run.files_before.get(p) != after.get(p))
+    note = f"run changed {changed}" if changed else f"same content in all {len(after)} tracked and untracked unignored files before and after"
+    return Result(FAIL if changed else PASS, note, {"files": len(after), "changed": changed})
 
 
 class Check(NamedTuple):
@@ -504,7 +504,7 @@ CHECKS = (
     Check("I6", "cost at G and over sampled addends (report)", i6_cost, ("secp-hier", "secp-flat") + EMIT_JOBS),
     Check("I7", "limits: wires and hierarchical upload", i7_limits, EMIT_JOBS),
     Check("I7.charge", "limits: benchmark charge", i7_charge),
-    Check("R1", "run hygiene: no file git tracks changed", r1_hygiene),
+    Check("R1", "run hygiene: no tracked or unignored file changed", r1_hygiene),
 )
 
 
@@ -513,9 +513,16 @@ def _git(*args):
     return p.stdout if p.returncode == 0 else None
 
 
-def _git_status():
-    p = subprocess.run(["git", "status", "--porcelain", "--untracked-files=all"], cwd=ROOT, capture_output=True, text=True)
-    return p.stdout if p.returncode == 0 else None
+def _snapshot():
+    """sha256 of every tracked file and every untracked file git does not ignore, None for a missing one."""
+    tracked, untracked = _git("ls-files", "-z"), _git("ls-files", "-z", "--others", "--exclude-standard")
+    if tracked is None or untracked is None:
+        return None
+    out = {}
+    for name in {n.decode() for n in (tracked + untracked).split(b"\0") if n}:
+        path = ROOT / name
+        out[name] = hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
+    return out
 
 
 def main():
