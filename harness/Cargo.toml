@@ -5,14 +5,14 @@ edition = "2021"
 description = "Runs an emitted circuit through ecdsafail-v2's own parser, executor, caps, qualification graph and lowering (read-only path deps)"
 
 [dependencies]
-v2-ir = { path = "~/ecdsa_venv/ecdsafail-v2/contracts/ir" }
-v2-runtime = { path = "~/ecdsa_venv/ecdsafail-v2/runtime" }
-v2-contracts = { path = "~/ecdsa_venv/ecdsafail-v2/contracts" }
-v2-composition = { path = "~/ecdsa_venv/ecdsafail-v2/assurance/composition" }
-v2-qualification = { path = "~/ecdsa_venv/ecdsafail-v2/assurance/qualification" }
-v2-capacity = { path = "~/ecdsa_venv/ecdsafail-v2/capacity" }
-v2-lowering = { path = "~/ecdsa_venv/ecdsafail-v2/compiler/lowering" }
-v2-api-contracts = { path = "~/ecdsa_venv/ecdsafail-v2/contracts/api" }
+v2-ir = { path = "../../ecdsafail-v2/contracts/ir" }
+v2-runtime = { path = "../../ecdsafail-v2/runtime" }
+v2-contracts = { path = "../../ecdsafail-v2/contracts" }
+v2-composition = { path = "../../ecdsafail-v2/assurance/composition" }
+v2-qualification = { path = "../../ecdsafail-v2/assurance/qualification" }
+v2-capacity = { path = "../../ecdsafail-v2/capacity" }
+v2-lowering = { path = "../../ecdsafail-v2/compiler/lowering" }
+v2-api-contracts = { path = "../../ecdsafail-v2/contracts/api" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 num-bigint = "0.4"

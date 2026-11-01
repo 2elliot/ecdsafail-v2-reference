@@ -3,7 +3,7 @@
 # benchmark's compute_operations_hash digests.
 set -eu
 cd "$(dirname "$0")/.."
-PY=${PY:-~/ecdsa_venv/bin/python}
+PY=${PY:-python3}
 $PY -I - <<'PYEOF' > receipts/baseline/flat_ops.sha256
 import hashlib, sys
 sys.path.insert(0, ".")
