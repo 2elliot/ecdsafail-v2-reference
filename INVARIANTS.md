@@ -32,9 +32,9 @@ The circuit implements |c>|R>|0> -> |c>|R + c*A>|0> for a fixed public point A o
 
 **I3 gate set.** Every emitted primitive is X, CX, CCX or SWAP, with no measurement and no reset. The profile disables measurement cleanup, and a circuit of these four gates is a permutation with no phases. That is why basis-state exactness with clean scratch gives the exact unitary on superpositions. A single Z, CZ or measurement breaks that argument even when every basis check passes. I3 reads the emitted JSON at toy and 256-bit sizes and counts the gate kinds in every toy instance.
 
-**I5 addend independence of definitions.** The gate builds the 256-bit kernel hierarchically for [1]G, [2]G and [3]G, and in full mode for the random addends too. Every definition must be byte-identical across them. Today all 261 definitions are identical, and A enters only through the top level, in the `cmodadd_const` calls in `_kernel` and the four exception compares and loads in `build` (`qec/point_add.py:110-190`). Keep it that way. A whole attack runs this kernel for many addends, and shared definitions let one upload of the expensive parts serve every addend.
+**I5 addend independence of definitions.** The gate builds the 256-bit kernel hierarchically for [1]G to [8]G and the seeded random addends, 1 of them in quick mode and 16 in full mode. Every definition must be byte-identical across them. Today all 261 definitions are identical, and A enters only through the top level, in the `cmodadd_const` calls in `_kernel` and the four exception compares and loads in `build` (`qec/point_add.py:110-190`). Keep it that way. A whole attack runs this kernel for many addends, and shared definitions let one upload of the expensive parts serve every addend.
 
-**I6 cost.** I6 reports CCX, T = 7 x CCX, ops and wires at G and over the sampled addends, then the maximum and the minimum. It also shows the maximum T against the reference, 50,465,989, which is the largest T over [1]G, [2]G and [3]G at commit `8ca9b0e`. I6 never fails on cost. It fails only when its own counting disagrees with the flat circuit, which it cross-checks at toy size and, in full mode, at 256 bits.
+**I6 cost at G and sample statistics.** I6 reports CCX, T = 7 x CCX, ops and wires at G. Over the addends the gate built, [1]G to [8]G and a seeded random sample, it reports the sample maximum and the sample minimum. These are statistics of that sample, not bounds. I6 shows the sample maximum T against the reference, 50,465,989, the largest T any sampled addend reached at commit `8ca9b0e`. I6 never fails on cost. It fails only when its counts disagree with the expanded upload that `I2.secp` simulated, at every simulated addend, or with the flat circuit at toy size and, in full mode, at G.
 
 **I7 limits.** Wires stay at most 4,096. The hierarchical JSON for G, which the gate writes to `verify-out/accept/emit/`, stays under 104,857,600 bytes, and so does the JSON for every sampled addend. The reference is 43,422,940 bytes.
 
@@ -62,9 +62,11 @@ At A = G the circuit has 7,209,419 CCX.
 
 The multipliers and the lambda-squared subtract hold 99.8% of the CCX, and none of them reads A. Spend your effort there. That work also carries over to a future windowed kernel that takes the addend as a quantum input, because that kernel needs the same multiplier and subtract. Constant-adder tricks do not carry over, since a windowed kernel has no classical constant to exploit. They also act on the 0.2% that depends on A.
 
-## Report cost as the maximum over addends
+## Report cost over a sample of addends
 
-Cost depends on A. [2]G and [3]G each cost 7,209,427 CCX, 8 more than G. Over 1,024 sampled addends, T ranges from 50,465,177 to 50,465,989. The benchmark may test any addend, and a whole attack runs hundreds of them, so the maximum is the number that bounds every case. A change that helps G and hurts another addend is a regression. Quote the maximum that I6 prints, not the cost at G.
+Cost depends on A. [2]G and [3]G each cost 7,209,427 CCX, 8 more than G. Over 1,024 sampled addends at the reference, T ranged from 50,465,177 to 50,465,989. The benchmark may test any addend, and a whole attack runs hundreds of them.
+
+The sample maximum that I6 prints is the largest cost among the addends the gate built. It does not bound the cost at other addends. The true maximum over every A is unproven. A change can raise the cost at an addend outside the sample, and the gate will not see it. So keep the cost of your change independent of A. A change inside the definitions does that, because I5 holds them identical across addends. If your change touches the top level, where A enters, argue its maximum over every A. A change that helps G and hurts another addend is a regression. Quote the I6 sample maximum with the sample it came from, not the cost at G.
 
 ## Don't trade ops for many small calls
 
@@ -81,5 +83,5 @@ Open a pull request against this repository with:
 
 1. The change, with nothing under `receipts/` edited by hand.
 2. The output of `python3 scripts/accept.py` in full mode, pasted into the description, and its `verify-out/accept.json` attached.
-3. The I6 maximum T and its delta against 50,465,989.
+3. The I6 sample maximum T, the sample it came from, and its delta against 50,465,989. For a change to the top level, add the argument for its maximum over every A.
 4. For any change to the iteration bound, the width schedule or a modular reduction, the argument that it stays exact on every input.

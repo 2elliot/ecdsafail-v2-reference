@@ -38,10 +38,10 @@ MAX_WIRES = 4096
 MAX_UPLOAD_BYTES = 104_857_600
 T_PER_CCX = 7
 ALLOWED_GATES = {"X", "CX", "CCX", "SWAP"}
-REFERENCE = {"commit": "8ca9b0e", "max_t_over_1G_2G_3G": 50_465_989, "wires": 2311}
+REFERENCE = {"commit": "8ca9b0e", "sample_max_t": 50_465_989, "wires": 2311}
 COVERAGE = {"model_primes": 13, "toy_instances": 36, "toy_lanes": 25_800, "components": 49, "component_lanes": 8_951,
             "mutation_trials": 200, "mutations_caught_at_least": 163, "secp_special_points": 6}
-G_MULTIPLES = (1, 2, 3)
+G_MULTIPLES = tuple(range(1, 9))
 SECP_RANDOM_POINTS = {True: 8, False: 120}
 SECP_WORKERS = min(6, os.cpu_count() or 1)
 SUMMARY_WORKERS = min(3, os.cpu_count() or 1)
@@ -419,7 +419,7 @@ def i6_cost(run):
     rows = {label(k): lean(run.addend(k)) for k in run.addends}
     ts = {name: r["t"] for name, r in rows.items()}
     worst, best = max(ts, key=ts.get), min(ts, key=ts.get)
-    base = REFERENCE["max_t_over_1G_2G_3G"]
+    base = REFERENCE["sample_max_t"]
     problems = []
     g_file = run.emitted("secp256k1_G.hier").summary
     if g_file["sha256"] != run.addend(1)["sha256"]:
@@ -438,12 +438,12 @@ def i6_cost(run):
         if flat is None or g_file["gates"] != flat["counts"]:
             problems.append("256-bit G expanded hierarchical gate counts differ from the flat build")
     evidence = {"t_per_ccx": T_PER_CCX, "seed": run.seed, "random_addends": run.sample, "per_addend": rows,
-                "max": {"addend": worst, **rows[worst]}, "min": {"addend": best, **rows[best]},
-                "reference_max_t": base, "max_t_delta_vs_reference": ts[worst] - base, "count_cross_checks": cross, "problems": problems}
+                "sample_max": {"addend": worst, **rows[worst]}, "sample_min": {"addend": best, **rows[best]},
+                "reference_sample_max_t": base, "sample_max_t_delta_vs_reference": ts[worst] - base, "count_cross_checks": cross, "problems": problems}
     if problems:
         return Result(FAIL, "; ".join(problems), evidence)
     g = rows["[1]G"]
-    note = (f"G: {g['ccx']:,} CCX, T {g['t']:,}, {g['ops']:,} ops, {g['num_wires']} wires; over {len(rows)} addends "
+    note = (f"G: {g['ccx']:,} CCX, T {g['t']:,}, {g['ops']:,} ops, {g['num_wires']} wires; sample of {len(rows)} addends: "
             f"max T {ts[worst]:,} ({ts[worst] - base:+,} vs reference {base:,}), min T {ts[best]:,}; counts match {len(hier)} expanded uploads")
     return Result(PASS, note, evidence)
 
@@ -501,7 +501,7 @@ CHECKS = (
     Check("I2.secp-flat", "exactness: 256-bit flat circuit at G", i2_secp_flat, ("secp-flat",), full_only=True),
     Check("I3", "gate set: X, CX, CCX, SWAP only", i3_gate_set, ("toy", "secp-hier", "secp-flat") + EMIT_JOBS),
     Check("I5", "addend independence of definitions", i5_addend_independence, EMIT_JOBS),
-    Check("I6", "cost at G and over sampled addends (report)", i6_cost, ("secp-hier", "secp-flat") + EMIT_JOBS),
+    Check("I6", "cost at G and sample statistics over addends (report)", i6_cost, ("secp-hier", "secp-flat") + EMIT_JOBS),
     Check("I7", "limits: wires and hierarchical upload", i7_limits, EMIT_JOBS),
     Check("I7.charge", "limits: benchmark charge", i7_charge),
     Check("R1", "run hygiene: no tracked or unignored file changed", r1_hygiene),
@@ -529,11 +529,11 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--quick", action="store_true", help="simulate the 256-bit upload at two addends only, and skip the flat 256-bit check")
     ap.add_argument("--seed", type=int, default=2026, help="seed for the random addends and the random points")
-    ap.add_argument("--sample", type=int, help=f"random addends besides [1]G..[{G_MULTIPLES[-1]}]G (default 4 quick, 16 full)")
+    ap.add_argument("--sample", type=int, help=f"random addends besides [1]G..[{G_MULTIPLES[-1]}]G (default 1 quick, 16 full)")
     ap.add_argument("--only", nargs="+", metavar="ID", choices=[c.id for c in CHECKS], help="run only these checks")
     ap.add_argument("--out", type=Path, default=ROOT / "verify-out")
     args = ap.parse_args()
-    sample = args.sample if args.sample is not None else (4 if args.quick else 16)
+    sample = args.sample if args.sample is not None else (1 if args.quick else 16)
     run = Run(args.out.resolve(), args.quick, args.seed, sample)
     shutil.rmtree(run.work, ignore_errors=True)
     (run.work / "emit").mkdir(parents=True)
