@@ -175,6 +175,8 @@ def main():
         A = SECP256K1_G if k == 1 else curve.mul(k, SECP256K1_G)
         gen = ControlledPointAdd(curve, A)
         C, ops, emitted = build_ops(gen, args.hier)
+        sha = emitted and emitted[1]
+        del emitted
         counts = structural(ops, C.num_wires)
         t_build = time.time() - t0
         rand = [curve.mul(rng.randrange(1, 2**256), A) for _ in range(args.secp_random)]
@@ -184,11 +186,11 @@ def main():
         r = {"mode": "SAMPLED_256", "q": hex(curve.q), "addend": "secp256k1 G" if k == 1 else f"[{hex(k)}]G", "n": gen.n, "wires": C.num_wires,
              "ops": len(ops) // 4, "counts": counts, "lanes": len(cases), "special_cases": ["inf", "A", "-A", "-2A", "2A", "3A"], "failures": len(fails),
              "first_failures": fails[:3], "build_seconds": round(t_build, 1), "sim_seconds": round(time.time() - t1, 1)}
-        if emitted:
-            r.update(k=hex(k), json_sha256=emitted[1])
+        if sha:
+            r.update(k=hex(k), json_sha256=sha)
         print(json.dumps(r), flush=True)
         receipts.append(r)
-        del C, ops, emitted
+        del C, ops
 
     if args.out:
         args.out.write_text(json.dumps(receipts, indent=1))
