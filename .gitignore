@@ -5,6 +5,7 @@ artifacts/*.hier.meta.json
 __pycache__/
 .DS_Store
 .audit/
+verify-out/
 research/paper.txt
 qarton quantum circuit.pdf
 docs/plans/
