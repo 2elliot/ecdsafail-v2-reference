@@ -402,11 +402,19 @@ def i2_components(run):
 
 def i2_mutation(run):
     p, = run.procs("mutation")
-    out = json.loads(p.stdout) if p.rc == 0 else {}
-    caught, trials, need = out.get("caught", 0), out.get("trials"), COVERAGE["mutations_caught_at_least"]
+    rows = json_lines(p.stdout)
+    out = rows[-1] if rows else {}
+    need = COVERAGE["mutations_caught_at_least"]
+    evidence = {"exit": p.rc, **out, "required": need, "log": p.log}
+    if out.get("base_failures"):
+        return Result(FAIL, f"the unmutated base circuit fails {out['base_failures']} of {out['base_lanes']} lanes, "
+                            f"so no mutation was tried; see {p.log}", evidence)
+    if "trials" not in out:
+        return Result(FAIL, f"mutation_control.py exited {p.rc} with no result, see {p.log}", evidence)
+    caught, trials = out["caught"], out["trials"]
     problems = [f"exit {p.rc}, see {p.log}"] * bool(p.rc) + coverage("trials", trials, "mutation_trials")
     note = f"{caught} of {trials} CCX-to-CX demotions caught at the fixed seed, at least {need} required" + "".join(f"; {m}" for m in problems)
-    return Result(FAIL if problems or caught < need else PASS, note, {"exit": p.rc, **out, "required": need, "log": p.log})
+    return Result(FAIL if problems or caught < need else PASS, note, evidence)
 
 
 def i2_secp(run):

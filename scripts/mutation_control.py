@@ -19,7 +19,11 @@ A = pts[5]
 gen = ControlledPointAdd(curve, A)
 C = gen.build()
 cases = [(c, R) for c in (0, 1) for R in pts]
-assert not check(gen, C.ops, cases), "unmutated circuit must pass"
+head = {"q": curve.q, "addend": list(A)}
+base = check(gen, C.ops, cases)
+if base:
+    print(json.dumps({**head, "base_lanes": len(cases), "base_failures": len(base), "first_base_failures": base[:3]}))
+    sys.exit(1)
 caught = 0
 trials = 200
 ccx_idx = [i for i in range(len(C)) if C.ops[4 * i] == CCX]
@@ -30,4 +34,4 @@ for _ in range(trials):
     ops[4 * i + 2] = ops[4 * i + 3]
     if check(gen, ops, cases):
         caught += 1
-print(json.dumps({"q": curve.q, "addend": list(A), "mutation": "one CCX demoted to CX", "trials": trials, "caught": caught}))
+print(json.dumps({**head, "mutation": "one CCX demoted to CX", "trials": trials, "caught": caught}))
