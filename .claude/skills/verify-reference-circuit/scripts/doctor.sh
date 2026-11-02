@@ -22,8 +22,19 @@ if head=$(git rev-parse --short HEAD 2>/dev/null); then
 else
   say info "not a git checkout; accept.py check R1 will have nothing to compare"
 fi
-running=$(pgrep -f 'scripts/accept.py' | tr '\n' ' ')
-[ -n "$running" ] && say warn "accept.py already running (pids $running); two gates in one checkout share verify-out/accept" || say ok "no other accept.py running"
+here=$(pwd -P)
+running=
+for pid in $(pgrep -f 'scripts/accept\.py'); do
+  cwd=$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p')
+  [ -n "$cwd" ] || cwd=$(readlink "/proc/$pid/cwd" 2>/dev/null)
+  for word in $(ps -o command= -p "$pid"); do
+    case "$word" in *scripts/accept.py) ;; *) continue ;; esac
+    case "$word" in /*) script=$word ;; *) script=$cwd/$word ;; esac
+    [ "$(cd "$(dirname "$script")/.." 2>/dev/null && pwd -P)" = "$here" ] && running="$running$pid "
+    break
+  done
+done
+[ -n "$running" ] && say warn "accept.py already running in this checkout (pids $running); two gates in one checkout share verify-out/accept" || say ok "no other accept.py running in this checkout"
 if [ -n "${ECDSAFAIL_V2:-}" ] && [ -f "$ECDSAFAIL_V2/contracts/ir/Cargo.toml" ] && [ -d ../ecdsafail-v2 ]; then
   say ok "benchmark checkout at ../ecdsafail-v2; the harness feature can run"
 else
