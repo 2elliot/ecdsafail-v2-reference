@@ -22,7 +22,7 @@ Preconditions:
 - `doctor.sh` exits 0.
 - No other `accept.py` runs in this checkout.
 
-- **Run the report.** Run `mkdir -p verify-out; python3 scripts/accept.py --quick --only I5 I6 > verify-out/gate.log 2>&1; echo "exit $?" >> verify-out/gate.log`. It takes about 15 s, because I6 waits for `I2.secp`'s expansion to check its counts. The log shows `I5 PASS` with `all 261 definitions identical over 10 builds` and `I6 PASS` with `G: 7,209,419 CCX, T 50,465,933, 18,995,461 ops, 2311 wires`.
+- **Run the report.** Run `mkdir -p verify-out; python3 scripts/accept.py --quick --only I5 I6 > verify-out/gate.log 2>&1; echo "exit $?" >> verify-out/gate.log`. It spends about 60 s of CPU, which took 15 s on 10 cores at load average 13, because I6 waits for `I2.secp`'s expansion to check its counts. The log shows `I5 PASS` with `all 261 definitions identical over 10 builds` and `I6 PASS` with `G: 7,209,419 CCX, T 50,465,933, 18,995,461 ops, 2311 wires`.
 - **Read the maximum.** Run `python3 -c "import json; e=[r for r in json.load(open('verify-out/accept.json'))['results'] if r['id']=='I6'][0]['evidence']; print(e['sample_max']['addend'], e['sample_max']['t'], e['sample_max_t_delta_vs_reference'])"`. At the reference it prints `[2]G 50465989 0`.
 - **Read the per-addend rows.** In the same evidence, `per_addend` maps each addend label to `ccx`, `t`, `ops`, `num_wires`, `top_ccx` and `bytes`. At the reference, `[2]G` and `[3]G` have `ccx` 7,209,427 and `top_ccx` 18,131, and `[1]G` has 7,209,419 and 18,123.
 - **Read the definition digests.** In the `I5` evidence, `differences` is an empty list and `definitions` is 261. `top_level_ccx` lists the top-level CCX per addend. Only these differ.

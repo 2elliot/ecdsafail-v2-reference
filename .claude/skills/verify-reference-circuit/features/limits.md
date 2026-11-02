@@ -22,7 +22,7 @@ Preconditions:
 - `doctor.sh` exits 0.
 - No other `accept.py` runs in this checkout.
 
-- **Run the checks.** Run `mkdir -p verify-out; python3 scripts/accept.py --quick --only I1 I3 I7 I7.charge > verify-out/gate.log 2>&1; echo "exit $?" >> verify-out/gate.log`. It takes about 15 s. Its summary line starts with `gate PASS: 3 pass, 0 fail, 1 pending` and its last line is `exit 0`.
+- **Run the checks.** Run `mkdir -p verify-out; python3 scripts/accept.py --quick --only I1 I3 I7 I7.charge > verify-out/gate.log 2>&1; echo "exit $?" >> verify-out/gate.log`. It spends about 60 s of CPU, which took 16 s on 10 cores at load average 15. Its summary line starts with `gate PASS: 3 pass, 0 fail, 1 pending` and its last line is `exit 0`.
 - **Read the layout.** `I1`'s note reads `control=[0], x=1..n, y=n+1..2n at n=7, n=256 and all 9 built addends; 2311 wires, at most 2311 over addends (reference 2311, cap 4096)`.
 - **Read the upload size.** `I7`'s evidence has `hier_json_bytes_G` 43,422,940 and `largest_hier_json_over_addends` under the cap. Run `wc -c verify-out/accept/emit/secp256k1_G_circuit.hier.json` and confirm the same byte count on disk.
 - **Read the gate set.** `I3`'s evidence lists `["CCX", "CX", "SWAP", "X"]` for `toy127`, `toy127.hier`, `secp256k1_G.hier` and each built addend from `[1]G` on, and `toy_instances_counted` 36.

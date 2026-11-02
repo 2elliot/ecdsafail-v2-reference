@@ -7,11 +7,11 @@ The benchmark that will judge your change is not published yet. `accept.py` enco
 ## Run the gate
 
 ```sh
-python3 scripts/accept.py --quick   # 12 s, 9 addends built, the 256-bit upload simulated at 2 of them
-python3 scripts/accept.py           # 95 s, 24 addends built and simulated, plus the flat 256-bit circuit at G
+python3 scripts/accept.py --quick   # about 80 s of CPU, 9 addends built, the 256-bit upload simulated at 2 of them
+python3 scripts/accept.py           # about 600 s of CPU, 24 addends built and simulated, plus the flat 256-bit circuit at G
 ```
 
-Both times are from an Apple M4 laptop with 10 cores and Python 3.14, at a load average under 10. The checkers run as parallel processes, so quick mode spends about 55 s of CPU time and full mode about 540 s. On fewer cores the wall time grows toward those totals. Full mode peaks near 4.5 GB of memory across its processes. Python is stdlib only. The gate prints one row per check and writes the full evidence to `verify-out/accept.json`. It exits 0 only when no check fails. A check marked pending waits on the published benchmark and fails nothing.
+The CPU times are user plus system time over the gate and its checker processes, measured with Python 3.14 on an Apple M4. The checkers run as parallel processes, so wall time depends on the cores and on the load from other work. With 10 cores at load average 6 to 15, quick mode took 17 s and full mode 103 s. A reviewer measured full mode at 298 s with load average 93 on the same 10 cores. On fewer free cores the wall time grows toward the CPU totals. Full mode peaks near 4.5 GB of memory across its processes. Python is stdlib only. The gate prints one row per check and writes the full evidence to `verify-out/accept.json`. It exits 0 only when no check fails. A check marked pending waits on the published benchmark and fails nothing.
 
 Run `--quick` while you iterate and the full mode before you hand a change back. `--only I5 I6` runs a subset. `--sample N` and `--seed S` change the random addends that I1, I3, I5, I6 and I7 build and that `I2.secp` simulates. A row's seconds are the time the gate waited for it, so the first row that needs the addends carries their build time.
 

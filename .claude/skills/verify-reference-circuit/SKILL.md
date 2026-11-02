@@ -47,10 +47,12 @@ Don't run two gates in one checkout at the same time. Each run deletes and rewri
 The gate is the main driver. Every check has an id, and `--only` runs a subset.
 
 ```sh
-python3 scripts/accept.py --quick                     # about 12 s; every check except I2.secp-flat, 9 addends, 2 simulated
-python3 scripts/accept.py                             # about 95 s; adds I2.secp-flat, 24 addends, all simulated
+python3 scripts/accept.py --quick                     # about 80 s of CPU; every check except I2.secp-flat, 9 addends, 2 simulated
+python3 scripts/accept.py                             # about 600 s of CPU; adds I2.secp-flat, 24 addends, all simulated
 python3 scripts/accept.py --quick --only I5 I6 --sample 4 --seed 7
 ```
+
+Wall time depends on cores and load, because the checkers run in parallel. On 10 cores at load average 6 to 15, quick mode took 17 s and full mode 103 s.
 
 The ids are `I1`, `I2.model`, `I2.toy`, `I2.toy-hier`, `I2.components`, `I2.mutation`, `I2.secp`, `I2.secp-flat`, `I3`, `I5`, `I6`, `I7`, `I7.charge` and `R1`. Each prints a row with `PASS`, `FAIL` or `PENDING` and a one-line note. The last line starts with `gate PASS` or `gate FAIL`. The exit code is 0 only when no check fails. `I7.charge` stays `PENDING` until the benchmark is published, and that is expected.
 
