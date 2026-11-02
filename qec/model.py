@@ -38,12 +38,9 @@ def bezout(q, y, dialog):
 
 def inplace_mul(q, x, y, iters=None):
     iters = iters or iteration_bound(q)
-    u, v, dialog = euclid(q, x, iters)
-    assert v == 0, "euclid did not terminate within the bound"
+    u, v, dialog = euclid(q, x or 1, iters)
+    assert u == 1 and v == 0, "euclid did not reach (1, 0) within the bound"
     r, s = bezout(q, y, dialog)
-    if u != 1:
-        assert x == 0 and u == q
-        r, s = s, r
     assert r == 0
     return s
 
