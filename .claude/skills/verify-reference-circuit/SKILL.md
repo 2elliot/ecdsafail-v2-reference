@@ -80,10 +80,10 @@ Proof standards:
 ## Cleanup
 
 ```sh
-rm -rf verify-out/accept verify-out/emit verify-out/gate.log
+rm -rf verify-out/accept verify-out/emit verify-out/gate.log verify-out/accept.json
 ```
 
-This removes the emitted circuits, the logs of the last run, and the scratch emit directory. The 256-bit hierarchical circuit alone is 43 MB. It keeps `verify-out/evidence/`, which holds the proof. Kill only processes you started, by the pid your shell reported, never by name.
+This removes the emitted circuits, the logs and summary of the last run, and the scratch emit directory. The 256-bit hierarchical circuit alone is 43 MB. It keeps `verify-out/evidence/`, which holds the proof. Kill only processes you started, by the pid your shell reported, never by name.
 
 ## Helpers
 

@@ -364,7 +364,7 @@ def _toy_result(run, hier, what, upload):
     mismatched = [r for r in rows if hier and not r.get("expansion_matches_flatten")]
     if mismatched:
         problems.append(f"{len(mismatched)} expansions differ from flatten.operations_json")
-    file = rel(run.emitted(upload).path)
+    file = rel(run.work / "emit" / EMITS[upload][0])
     try:
         upload_lanes, upload_fails = run.toy_upload(upload)
     except (ValueError, AssertionError) as e:
@@ -602,7 +602,10 @@ def _fingerprint(path):
     if stat.S_ISLNK(st.st_mode):
         data = os.readlink(path).encode()
     elif stat.S_ISREG(st.st_mode):
-        data = path.read_bytes()
+        try:
+            data = path.read_bytes()
+        except PermissionError:
+            data = b"unreadable"
     else:
         data = b""
     return stat.S_IFMT(st.st_mode), stat.S_IMODE(st.st_mode), hashlib.sha256(data).hexdigest()
