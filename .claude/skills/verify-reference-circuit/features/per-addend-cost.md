@@ -1,6 +1,6 @@
 # Per-addend cost report
 
-The cost report gives CCX, T = 7 x CCX, ops and wires for the 256-bit circuit at G, at [2]G to [8]G and at a seeded sample of random addends, then the sample maximum and the sample minimum. Those two are statistics of the sample, not bounds over every addend. It also checks that every definition in the hierarchical circuit is byte-identical across those addends, so the addend reaches only the top level. `scripts/accept.py` runs these as `I6` and `I5`.
+The cost report gives CCX, T = 7 x CCX, ops and wires for the 256-bit circuit at G, at [2]G to [8]G and at a seeded sample of random addends, then the sample maximum and the sample minimum. Those two are statistics of the sample, not bounds over every addend. It also checks that every definition in the hierarchical circuit is identical across those addends, comparing the sha256 of each definition after parsing and compact re-serialization, so the addend reaches only the top level. `scripts/accept.py` runs these as `I6` and `I5`.
 
 ## Sub-features
 

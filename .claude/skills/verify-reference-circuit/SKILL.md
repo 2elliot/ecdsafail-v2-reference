@@ -71,7 +71,7 @@ Proof standards:
 
 - Drive the real path a user runs, `scripts/emit.py` and `scripts/accept.py`. Don't call `qec` functions in a one-off script and report that as the proof.
 - Capture the action and the resulting state. For emission, that is the meta line it printed and the file it wrote. For a check, that is the row and the evidence in `accept.json`.
-- Check the side effects. `R1` in `accept.json` confirms the run changed no file git tracks. An emitted file has the byte count and sha256 that `evidence.sh` recorded.
+- Check the side effects. `R1` in `accept.json` confirms the run changed no file git tracks, in content, type or mode. An emitted file has the byte count and sha256 that `evidence.sh` recorded.
 - A pass of `I2.secp` alone proves little. Random 256-bit points cannot tell an exact circuit from an approximate one. Exactness rests on `I2.toy`, `I2.toy-hier`, `I2.components` and `I2.model`. `I2.secp` catches a wrong gate that runs only at 256 bits, on the addends and points it samples.
 - Don't report `I7.charge` as verified. It is pending.
 
