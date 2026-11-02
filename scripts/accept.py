@@ -17,6 +17,7 @@ import json
 import os
 import random
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -548,7 +549,7 @@ def r1_hygiene(run):
     if run.files_before is None or after is None:
         return Result(PASS, "not a git checkout; nothing to compare", {})
     changed = sorted(p for p in run.files_before.keys() | after.keys() if run.files_before.get(p) != after.get(p))
-    note = f"run changed {changed}" if changed else f"same content in all {len(after)} tracked and untracked unignored files before and after"
+    note = f"run changed {changed}" if changed else f"same type, mode and content in all {len(after)} tracked and untracked unignored files before and after"
     return Result(FAIL if changed else PASS, note, {"files": len(after), "changed": changed})
 
 
@@ -584,16 +585,27 @@ def _git(*args):
     return p.stdout if p.returncode == 0 else None
 
 
+def _fingerprint(path):
+    """(type, permission bits, sha256 of the content or of a symlink's target) without following links, None if missing."""
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        return None
+    if stat.S_ISLNK(st.st_mode):
+        data = os.readlink(path).encode()
+    elif stat.S_ISREG(st.st_mode):
+        data = path.read_bytes()
+    else:
+        data = b""
+    return stat.S_IFMT(st.st_mode), stat.S_IMODE(st.st_mode), hashlib.sha256(data).hexdigest()
+
+
 def _snapshot():
-    """sha256 of every tracked file and every untracked file git does not ignore, None for a missing one."""
+    """The fingerprint of every tracked file and every untracked file git does not ignore."""
     tracked, untracked = _git("ls-files", "-z"), _git("ls-files", "-z", "--others", "--exclude-standard")
     if tracked is None or untracked is None:
         return None
-    out = {}
-    for name in {n.decode() for n in (tracked + untracked).split(b"\0") if n}:
-        path = ROOT / name
-        out[name] = hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
-    return out
+    return {name: _fingerprint(ROOT / name) for name in {n.decode() for n in (tracked + untracked).split(b"\0") if n}}
 
 
 def main():
