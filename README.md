@@ -18,7 +18,7 @@ The checkers run in parallel, so wall time depends on your cores and load. On an
 
 This directory holds a generator for the arithmetic kernel that the `secp256k1-controlled-exact-v1` profile asks for: |c>|R>|0> -> |c>|R + c*A>|0> for a fixed public point A. It covers every R on secp256k1, including infinity and R in {A, -A, -2A}. It is built from the exact core of Schrottenloher's dialog Euclid and Bezout multiplier (arXiv 2606.02235). It is emitted in the challenge's own `ArithmeticCircuit` JSON and checked with the challenge's own executor.
 
-**It does not pass the challenge at 256 bits, as the benchmark is published today.** The regenerated circuit is 1.58x the published operation cap. The retained reference SubmittedMethod was 7.84x the upload cap; its executor and service receipts were not rerun for this change. No route to qualification exists in the repository today in any case. See "Unresolved gates" below.
+**It does not pass the challenge at 256 bits, as the benchmark is published today.** The regenerated circuit is 1.53x the published operation cap. The retained reference SubmittedMethod was 7.84x the upload cap; its executor and service receipts were not rerun for this change. No route to qualification exists in the repository today in any case. See "Unresolved gates" below.
 
 `DESIGN.md` records the contract reading, the three designs compared, the data shape, and the completeness argument.
 
@@ -63,10 +63,10 @@ All numbers are measured unless marked as estimates.
 
 | | toy q=127 | secp256k1, A = G | cap |
 |---|---|---|---|
-| wires | 70 | 2,311 | 4,096 |
-| ops | 12,227 | 15,841,541 | 10,000,000 |
-| CCX | 4,483 | 6,421,963 | |
-| T + T-dagger (7 x regenerated CCX) | 31,381 | 44,953,741 | |
+| wires | 60 | 1,803 | 4,096 |
+| ops | 13,203 | 15,334,657 | 10,000,000 |
+| CCX | 4,709 | 5,692,351 | |
+| T + T-dagger (7 x regenerated CCX) | 32,963 | 39,846,457 | |
 | measurements, R or Hmr | 0 | 0 | 0 |
 | SubmittedMethod JSON bytes | 583,085 | 822,274,918 | 104,857,600 |
 | `v2_ir` validator, service caps | PASS | REJECT, ops | |
@@ -74,11 +74,13 @@ All numbers are measured unless marked as estimates.
 | dirty scratch or phase lanes | 0 | 0 | |
 | `is_qualified` | false | false | |
 
-The SubmittedMethod byte counts, validator, executor lanes, dirty/phase lanes and qualification rows above retain the harness receipts measured on the reference at `e3bf0c0`; the optional harness steps were skipped. Ratios derived from those harness values, including the 7.84x reference upload ratio, are reference-only. The regenerated flat circuit JSON is 488,520 bytes for toy q=127 and 698,302,393 bytes for G; these are circuit files, not new SubmittedMethod measurements.
+The SubmittedMethod byte counts, validator, executor lanes, dirty/phase lanes and qualification rows above retain the harness receipts measured on the reference at `e3bf0c0`; the optional harness steps were skipped. Ratios derived from those harness values, including the 7.84x reference upload ratio, are reference-only. The regenerated flat circuit JSON is 522,419 bytes for toy q=127 and 658,042,801 bytes for G; these are circuit files, not new SubmittedMethod measurements.
 
-The comparison change uses one controlled comparison per Euclid step instead of computing a temporary comparison twice. It removes 787,456 CCX and 5,512,192 T at G, with 2,311 wires unchanged. Full `scripts/accept.py` on the source commit reports 13 pass, 0 fail and 1 pending (`I7.charge`), including R1. With seed 2026, [1]G through [8]G plus 16 random addends, the sample maximum is 44,953,797 T (5,512,192 below the reference sample maximum 50,465,989); the sample minimum is 44,953,433 T. This sample maximum is not a bound over every addend. All 261 definitions remain identical across addends; the change affects no iteration bound, width schedule or modular reduction.
+The stack combines three changes. One controlled comparison per Euclid step removes 787,456 CCX and 5,512,192 T at G. The exact merged Bézout reduction removes another 731,136 CCX and 5,117,952 T, with peak wires rising from 2,311 to 2,313. Reusing zero Euclid words and reversibly remapping x = 0 adds 1,524 CCX and 10,668 T while reducing the combined peak to 1,803 wires. These CCX and T deltas are additive; wire counts are peaks. The bound and width schedule are unchanged, and `DESIGN.md` gives the merged reduction and zero-remap arguments.
 
-Where the 256-bit CCX go (`receipts/secp256k1_breakdown.json`). One dialog multiplier is 2,747,136 CCX: two Euclid passes of 591,104 each, one Bezout pass of 1,564,672, and 256 for the n-bit controlled swap between them. The kernel uses it twice. The lambda-squared subtraction is 910,080 CCX. Flags and constant adds make up the remaining 17,611.
+Full `scripts/accept.py` on the merged source reports 13 pass, 0 fail and 1 pending (`I7.charge`), including R1. With seed 2026, [1]G through [8]G plus 16 random addends, the sample maximum is 39,846,513 T (10,619,476 below the reference sample maximum 50,465,989); the sample minimum is 39,846,149 T. This sample maximum is not a bound over every addend. All 261 definitions remain identical across addends. EuclidStep and BezoutStep retain their semantic contracts; DialogMul composition support and proof obligations must change, and the checker currently refuses it. Passing this repository's gate does not establish checker acceptance or qualification.
+
+Where the 256-bit CCX go (`receipts/secp256k1_breakdown.json`). One dialog multiplier is 2,382,330 CCX: two Euclid passes of 591,104 each, one Bézout pass of 1,199,104, and 1,018 for the remaining zero-remap and cleanup operations. The old controlled word swap is removed; the word swap is now unconditional. The kernel uses the multiplier twice. The lambda-squared subtraction is 910,080 CCX. Flags and constant adds make up the remaining 17,611.
 
 The controlled subtract and the controlled modular add run a controlled CDKM ripple instead of copying `ctrl*a` into an AND register. A controlled subtract costs 3w CCX instead of 4w, and a controlled modular add went from 10n + 2 to 9n + 4. That took the 256-bit point addition from 8,686,084 to 7,967,236 CCX, 8.3% fewer.
 
@@ -90,19 +92,19 @@ Exactness evidence, strongest first:
 2. **Challenge executor (retained reference evidence).** `receipts/harness_toy127.json` and `receipts/harness_secp256k1.json` replay the emitted JSON on `v2_runtime::BitSlicedExecutor`. Expected values come from `qec/curve.py`, which shares no code with the generator.
 3. **256-bit boundary components.** `receipts/secp256k1_components.json` covers modadd with and without ctrl on edge-by-edge pairs around q and 2^255 and at q - f and 2^256 - 1 mod q, where f = 2^256 - q, plus moddbl on the same values and cneg. It runs cmodadd_const and gt_const_into with ctrl 0 and 1, gt_const_into without ctrl, and add_const under ctrl with a carry out, each on the kernel's constants for G (q - a, q - b, 3a and a) and on sparse and dense edge constants (1, f, 2^255, q - 1, q - 2, 2^255 - 1 and 2^256 - 1 mod q), with inputs on both sides of each constant. It also runs the multiplier on x = 0 and on x values whose Euclid run takes 511 of the proven 512 iterations. All pass.
 4. **Proven iteration bound.** u*v at least halves per active Euclid step, so bitlen(q(q-1)) iterations always suffice. That is 512 at secp256k1. `receipts/model_check.jsonl` shows the observed worst case never exceeds the bound at any of the 13 tested q. It equals the bound at q = 3, 5, 11 and 43 and is one below it elsewhere.
-5. **Checker sensitivity.** A must-fail control (an extra X on the output) fails every lane. Exhaustively, 173 of 200 random CCX-to-CX demotions are caught, and the survivors are correct on the whole promise domain, so they are equivalent circuits. Most CCX in constant adders and idle Euclid tails fire only on rare carries, so random 256-bit sampling cannot separate an exact circuit from an approximate one, which is why items 1, 3 and 4 carry the exactness claim.
+5. **Checker sensitivity.** A must-fail control (an extra X on the output) fails every lane. Exhaustively, 170 of 200 random CCX-to-CX demotions are caught, and the survivors are correct on the whole promise domain, so they are equivalent circuits. Most CCX in constant adders and idle Euclid tails fire only on rare carries, so random 256-bit sampling cannot separate an exact circuit from an approximate one, which is why items 1, 3 and 4 carry the exactness claim.
 
 The circuit is pure X, CX, CCX and SWAP, so it is a phase-free permutation. Basis exactness with clean scratch on the promise domain therefore gives the exact unitary on superpositions and entangled references (QNT-04). Outside the promise it is still a permutation, which satisfies QNT-06.
 
 ## Unresolved gates
 
-This section describes the benchmark as published. Its next release accepts a hierarchical upload of definitions and calls. The hierarchical JSON for G is 33,252,091 bytes, which `scripts/accept.py` checks against the 100 MiB upload cap. How that release charges a hierarchical upload is pending its publication.
+This section describes the benchmark as published. Its next release accepts a hierarchical upload of definitions and calls. The hierarchical JSON for G is 32,949,586 bytes, which `scripts/accept.py` checks against the 100 MiB upload cap. How that release charges a hierarchical upload is pending its publication.
 
 These are listed in the order they would block a 256-bit submission on the published benchmark.
 
-1. **Operation cap.** 15,841,541 ops against a cap of 10,000,000 (`MAX_DECLARED_RECORDS`). One multiplier alone is 7,108,340 ops. The paper reports about 2^24 total gates per addition even for its approximate circuits, so no published point addition fits this cap.
-2. **Upload cap.** The service parses plain JSON, at about 43 bytes per op. 100 MiB therefore holds about 2.4M ops, roughly 6.6x fewer than this circuit needs. This also binds before the operation cap does.
-3. **Whole-attack T budget (estimate).** DEF-02's binary wrapper makes 512 controlled additions, which comes to about 2.3e10 T against the 3.25e9 cap. A w = 16 windowed interface (QNT-02) would need about 32 additions plus exact lookups, roughly 1.8e9 T. That would fit, but it means a coherent-addend kernel, which is not built here.
+1. **Operation cap.** 15,334,657 ops against a cap of 10,000,000 (`MAX_DECLARED_RECORDS`). One multiplier alone is 6,854,898 ops. The paper reports about 2^24 total gates per addition even for its approximate circuits, so no published point addition fits this cap.
+2. **Upload cap.** The service parses plain JSON, at about 43 bytes per op. 100 MiB therefore holds about 2.4M ops, roughly 6.3x fewer than this circuit needs. This also binds before the operation cap does.
+3. **Whole-attack T budget (estimate).** DEF-02's binary wrapper makes 512 controlled additions, which comes to about 2.04e10 T against the 3.25e9 cap. A w = 16 windowed interface (QNT-02) would need about 32 additions plus exact lookups, roughly 1.67e9 T (32 × 39,846,457 plus about 0.39e9 for lookups). That would fit, but it means a coherent-addend kernel, which is not built here.
 4. **Qualification route.** `QualificationGraph` requires a universal secp256k1 certificate checked by a `SoundTheoremChecker`, a Shor wrapper certificate, a schedule, observations, and a retry model. The production registry holds no sound checker, so every artifact ends `is_qualified: false` with `No sound theorem checker exists`. This candidate supplies none of those artifacts.
 5. **Formal proof.** Exactness rests on exhaustive toy verification of a size-parametric generator, full-size boundary tests, and the proven iteration bound. That is strong evidence, not a machine-checked proof.
 
@@ -112,4 +114,4 @@ These estimates are against the published benchmark's caps.
 
 - The dialog garbage compression from the paper's Fig. 1 saves qubits, not ops.
 - The exact equivalent of the paper's pseudo-Mersenne reduction still needs a full-width carry, so that saving is smaller here than in the paper.
-- A further 2x reduction would bring the ops under the operation cap, but the flat file would stay about 3.3x over the upload cap.
+- A further 2x reduction would bring the ops under the operation cap, but the flat file would stay about 3.1x over the upload cap.
