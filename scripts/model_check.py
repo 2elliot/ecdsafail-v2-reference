@@ -20,7 +20,13 @@ from qec.point_add import DialogMultiplier
 
 
 def gate_mul(q: int, ys, inverse: bool = False, iters: int | None = None) -> int:
+    """Check every x against the supplied y values."""
+    return gate_pairs(q, [(x, y) for x in range(q) for y in ys], inverse, iters)
+
+
+def gate_pairs(q: int, pairs, inverse: bool = False, iters: int | None = None) -> int:
     """Count bad output or dirty-scratch lanes; malformed builds raise."""
+    pairs = list(pairs)
     C = Circuit(hierarchical=True)
     mod = Mod(q)
     X, Y = C.alloc(mod.n), C.alloc(mod.n)
@@ -34,7 +40,6 @@ def gate_mul(q: int, ys, inverse: bool = False, iters: int | None = None) -> int
     write_circuit(buf, C, {"control": [], "x": X, "y": Y})
     ops = expand(flatten.load(io.StringIO(buf.getvalue())))
     structural(ops, C.num_wires)
-    pairs = [(x, y) for x in range(q) for y in ys]
     xs, values = zip(*pairs)
     init = sim.pack(xs, inputs[0]) | sim.pack(values, inputs[1])
     state = sim.run(ops, C.num_wires, init, len(pairs))
@@ -47,8 +52,7 @@ def gate_mul(q: int, ys, inverse: bool = False, iters: int | None = None) -> int
     return bad.bit_count()
 
 
-def gate_pass(q: int, iters: int | None = None) -> int:
-    """Count remapped input lanes whose gate pass does not end at (1, 0)."""
+def _pass_bad(q, xs, iters):
     C = Circuit()
     mod = Mod(q)
     m = DialogMultiplier(C, mod)
@@ -59,12 +63,37 @@ def gate_pass(q: int, iters: int | None = None) -> int:
     G = C.alloc(2 * m.iters)
     load_const(C, U, q)
     m._euclid_pass(U, V, G)
+    assert len(set(U + V + G)) == len(U + V + G), "aliased pass register"
     structural(C.prims, C.num_wires)
-    state = sim.run(C.prims, C.num_wires, sim.pack([x or 1 for x in range(q)], inputs), q)
-    bad = state[U[0]] ^ ((1 << q) - 1)
-    for w in U[1:] + V:
-        bad |= state[w]
+    state = sim.run(C.prims, C.num_wires, sim.pack(xs, inputs), len(xs))
+    # Keep the reference model independent of offset_pass and sweep_tape.
+    tapes = [sum((odd + 2 * swap) << (2 * i)
+                 for i, (odd, swap) in enumerate(euclid(q, x, m.iters)[2])) for x in xs]
+    want = sim.pack([q if x == 0 else 1 for x in xs], U) | sim.pack(tapes, G)
+    bad = 0
+    for w, actual in enumerate(state):
+        bad |= actual ^ want.get(w, 0)
     return bad.bit_count()
+
+
+def gate_pass(q: int, iters: int | None = None) -> int:
+    """Check terminal words, exact tape and all scratch on remapped inputs."""
+    return _pass_bad(q, [x or 1 for x in range(q)], iters)
+
+
+def gate_pass_zero(q: int) -> int:
+    """A generic zero caller keeps q and writes zero tape and scratch."""
+    return _pass_bad(q, [0], None)
+
+
+def width_edge_inputs(q: int) -> list[tuple[int, int]]:
+    """Schedule-edge powers and neighbours, boundaries, and seed-2026 samples."""
+    rng = random.Random(2026)
+    xs = {x for k in range(q.bit_length())
+          for x in (2**k, 2**k - 1, 2**k + 1) if 0 <= x < q}
+    xs |= {0, 1, 3, q - 1, q - 2, (q - 1) // 2, (q + 1) // 2}
+    xs |= {rng.randrange(q) for _ in range(64)}
+    return [(x, rng.choice([0, 1, q - 1, rng.randrange(q)])) for x in sorted(xs)]
 
 
 def offset_checks(q, xs):
@@ -117,6 +146,7 @@ for q in [3, 5, 7, 11, 13, 31, 43, 61, 127, 251, 509, 1021, 4093]:
     short_rejected = any(euclid(q, x or 1, worst - 1)[1] != 0 for x in range(q))
     short_rejected &= gate_mul(q, ys, iters=worst - 1) > 0
     pass_gates = gate_pass(q) == 0
+    pass_zero = gate_pass_zero(q) == 0
     forward_bad = gate_mul(q, ys)
     inverse_bad = gate_mul(q, ys, inverse=True)
     pass_offset, pass_tape = offset_checks(q, range(1, q))
@@ -126,7 +156,7 @@ for q in [3, 5, 7, 11, 13, 31, 43, 61, 127, 251, 509, 1021, 4093]:
                  "pass_short_rejected": short_rejected, "pass_gates_ok": pass_gates,
                  "multiplier_gates_ok": forward_bad == inverse_bad == 0,
                  "forward_bad": forward_bad, "inverse_bad": inverse_bad,
-                 "pass_offset_ok": pass_offset, "pass_tape_ok": pass_tape})
+                 "pass_offset_ok": pass_offset, "pass_tape_ok": pass_tape, "pass_zero_ok": pass_zero})
     print(json.dumps(rows[-1]))
 q = 2**256 - 2**32 - 977
 rng = random.Random(1)
@@ -135,10 +165,13 @@ ok = all(inplace_mul(q, x, y) == (x * y % q if x else y) for x, y in pairs)
 pass_end = all(euclid(q, x or 1, iteration_bound(q))[:2] == (1, 0)
                for x in [0, 1, q - 1] + [x for x, _ in pairs])
 offset_ok = all(offset_checks(q, [1, q - 1] + [x for x, _ in pairs]))
+edge_pairs = width_edge_inputs(q)
+width_edge_ok = gate_pairs(q, edge_pairs) == 0 and gate_pairs(q, edge_pairs, inverse=True) == 0
 print(json.dumps({"q": "secp256k1", "bound": iteration_bound(q), "random_pairs": 2000,
-                  "multiplier_ok": ok, "pass_end_ok": pass_end, "offset_ok": offset_ok}))
+                  "multiplier_ok": ok, "pass_end_ok": pass_end, "offset_ok": offset_ok,
+                  "width_edge_ok": width_edge_ok, "width_edge_lanes": len(edge_pairs)}))
 keys = ("width_schedule_ok", "multiplier_ok", "pass_end_ok", "remap_control_ok",
         "pass_short_rejected", "pass_gates_ok", "multiplier_gates_ok",
-        "pass_offset_ok", "pass_tape_ok")
-sys.exit(0 if ok and pass_end and offset_ok and all(r["worst_iterations"] <= r["bound"]
+        "pass_offset_ok", "pass_tape_ok", "pass_zero_ok")
+sys.exit(0 if ok and pass_end and offset_ok and width_edge_ok and all(r["worst_iterations"] <= r["bound"]
          and all(r[k] for k in keys) for r in rows) else 1)
