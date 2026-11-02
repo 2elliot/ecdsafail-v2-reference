@@ -254,6 +254,105 @@ def _bz_order_control(q):
     return {'lanes': len(inputs), 'failures': int(any(v == 0 for v in result.values())), 'dirty': result}
 
 
+def _bz_target_lanes(q, targets):
+    """Realize requested s=2S+gR, accounting explicitly for impossible pairs."""
+    rng = random.Random(41)
+    rows, dropped = set(), 0
+    for total in targets:
+        if not 0 <= total <= 3*q-3:
+            dropped += 2
+            continue
+        if total & 1 or total >= 2*q:
+            dropped += 1
+        else:
+            for r in (0, 1, q-1, rng.randrange(q)):
+                rows.add((0, r, total//2))
+        lo, hi = max(0, total-2*(q-1)), min(q-1, total)
+        lo += (lo ^ total) & 1
+        hi -= (hi ^ total) & 1
+        if lo > hi:
+            dropped += 1
+        else:
+            for r in (lo, hi, lo+2*((hi-lo)//4), lo+2*rng.randrange((hi-lo)//2+1)):
+                rows.add((1, r, (total-r)//2))
+    return sorted(rows), dropped
+
+
+def _bz_boundary_groups(q):
+    n=q.bit_length();f=(1<<n)-q;m=(2*f).bit_length();h=n-m
+    rng=random.Random(43)
+    threshold=[0,3*q-3]+[base+d for base in (q,2*q,1<<n,1<<(n+1)) for d in (-2,-1,0,1,2)]
+    band=[];band_outside_low=0
+    for t in (0,1):
+        for low in [(1<<m)-j*f+d for j in (1,2,3) for d in (-1,0,1)]+[0,1,f,2*f,(1<<m)-1]:
+            if 0<=low<(1<<m):band.append((t<<n)+(((1<<h)-1)<<m)+low)
+            else:band_outside_low+=1
+    chain=[];chain_impossible=0
+    for i in range(h):
+        high=(rng.getrandbits(h-i-1)<<(i+1))+(1<<i)-1
+        for t in (0,1):
+            for low in ((1<<m)-f,(1<<m)-1):
+                total=(t<<n)+(high<<m)+low
+                k=total//q
+                if k<=2 and (low+k*f)>>m==1:chain.append(total)
+                else:chain_impossible+=1
+    lowcases=[]
+    for i in range(m):
+        low=(rng.getrandbits(m-i-1)<<(i+1))+(1<<i)-1
+        for t in (0,1):
+            for high in (0,(1<<h)-1):lowcases.append((t<<n)+(high<<m)+low)
+    groups={}
+    for name,targets in [('threshold',threshold),('band',band),('chain',chain),('low',lowcases)]:
+        rows,dropped=_bz_target_lanes(q,targets)
+        groups[name]=(rows,{'requested_targets':len(targets)+(band_outside_low if name=='band' else 0),
+                           'dropped_low_range_targets':band_outside_low if name=='band' else 0,
+                           'dropped_target_controls':dropped,
+                           'impossible_carry_targets':chain_impossible if name=='chain' else 0})
+    return groups
+
+
+def _bz_boundary_census(q, inputs):
+    from array import array
+    from qec.builder import CCX,CX
+    C,ins,outs=_bz_build(q)
+    expected=[(g,r,(2*s+g*r)%q) for g,r,s in inputs]
+    wrong,_,init,want=_bz_state(C,ins,outs,inputs,expected)
+    assert wrong==0
+    rng=random.Random(47)
+    random_rows=[(rng.randrange(2),rng.randrange(q),rng.randrange(q)) for _ in range(1000)]
+    random_expected=[(g,r,(2*s+g*r)%q) for g,r,s in random_rows]
+    wrong,_,rinit,rwant=_bz_state(C,ins,outs,random_rows,random_expected)
+    assert wrong==0
+    records=[]
+    for pos in range(0,len(C.ops),4):
+        if C.ops[pos]!=CCX:continue
+        ops=array('i',C.ops);_,a,_,c=ops[pos:pos+4]
+        ops[pos:pos+4]=array('i',(CX,a,c,c))
+        state=sim.run(ops,C.num_wires,init,len(inputs))
+        rstate=sim.run(ops,C.num_wires,rinit,1000)
+        bad=any(v!=want.get(w,0) for w,v in enumerate(state))
+        rbad=any(v!=rwant.get(w,0) for w,v in enumerate(rstate))
+        records.append({'gate_index':pos//4,'caught_boundary':bad,'caught_random':rbad})
+    survivors=[r['gate_index'] for r in records if not r['caught_boundary']]
+    return {'lanes':len(inputs),'failures':len(survivors),'mutants':len(records),
+            'survivors':survivors,'random_lanes':1000,
+            'boundary_caught_random_missed':sum(r['caught_boundary'] and not r['caught_random'] for r in records),
+            'records':records}
+
+
+def bezout_boundary_checks():
+    out={};secp=2**256-2**32-977
+    for q in (secp,2**127-1,2**255-19,2**224-2**96+1,2**255+95):
+        C,ins,outs=_bz_build(q);allrows=set()
+        for name,(rows,meta) in _bz_boundary_groups(q).items():
+            allrows.update(rows)
+            wrong,dirty,_,_=_bz_state(C,ins,outs,rows,[(g,r,(2*s+g*r)%q) for g,r,s in rows])
+            out[f'boundary_{name}[{q}]']={'lanes':len(rows),'failures':wrong.bit_count(),'dirty':dirty.bit_count(),**meta}
+        if q==secp:
+            out['boundary_census']=_bz_boundary_census(q,sorted(allrows))
+    return out
+
+
 def bezout_step_checks():
     return {f'bezout_step_exhaustive[{q}]': _bz_exhaust(q, step=True)
             for q in (13, 127, 251, 509, 547)}
@@ -278,11 +377,16 @@ def bezout_checks():
         out[f'cell_census[{q}]'] = _bz_census(q)
         out[f'chain_order_control[{q}]'] = _bz_order_control(q)
     out.update(bezout_step_checks())
+    out.update(bezout_boundary_checks())
     print(json.dumps(out, indent=1))
     return int(any(row['failures'] for row in out.values()))
 
 
 if __name__ == "__main__":
+    if "--bezout-boundary" in sys.argv:
+        out = bezout_boundary_checks()
+        print(json.dumps(out, indent=1))
+        sys.exit(int(any(row["failures"] for row in out.values())))
     if "--bezout" in sys.argv:
         sys.exit(bezout_checks())
     main()
