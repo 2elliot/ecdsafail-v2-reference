@@ -9,11 +9,11 @@
   ],
   "n": 4,
   "wires": 43,
-  "ops": 5481,
+  "ops": 4585,
   "counts": {
-   "X": 920,
-   "CX": 2648,
-   "CCX": 1909,
+   "X": 712,
+   "CX": 2168,
+   "CCX": 1701,
    "SWAP": 4
   },
   "lanes": 14,
@@ -31,11 +31,11 @@
   ],
   "n": 4,
   "wires": 43,
-  "ops": 5537,
+  "ops": 4641,
   "counts": {
-   "X": 920,
-   "CX": 2680,
-   "CCX": 1933,
+   "X": 712,
+   "CX": 2200,
+   "CCX": 1725,
    "SWAP": 4
   },
   "lanes": 14,
@@ -53,11 +53,11 @@
   ],
   "n": 6,
   "wires": 59,
-  "ops": 11078,
+  "ops": 9358,
   "counts": {
-   "X": 1772,
-   "CX": 5477,
-   "CCX": 3823,
+   "X": 1364,
+   "CX": 4573,
+   "CCX": 3415,
    "SWAP": 6
   },
   "lanes": 62,
@@ -75,11 +75,11 @@
   ],
   "n": 6,
   "wires": 59,
-  "ops": 10980,
+  "ops": 9260,
   "counts": {
-   "X": 1772,
-   "CX": 5395,
-   "CCX": 3807,
+   "X": 1364,
+   "CX": 4491,
+   "CCX": 3399,
    "SWAP": 6
   },
   "lanes": 62,
@@ -97,11 +97,11 @@
   ],
   "n": 6,
   "wires": 61,
-  "ops": 11742,
+  "ops": 9822,
   "counts": {
-   "X": 1950,
-   "CX": 5549,
-   "CCX": 4237,
+   "X": 1494,
+   "CX": 4541,
+   "CCX": 3781,
    "SWAP": 6
   },
   "lanes": 122,
@@ -119,11 +119,11 @@
   ],
   "n": 6,
   "wires": 61,
-  "ops": 11800,
+  "ops": 9880,
   "counts": {
-   "X": 1950,
-   "CX": 5591,
-   "CCX": 4253,
+   "X": 1494,
+   "CX": 4583,
+   "CCX": 3797,
    "SWAP": 6
   },
   "lanes": 122,
@@ -141,17 +141,17 @@
   ],
   "n": 7,
   "wires": 68,
-  "ops": 15669,
+  "ops": 13325,
   "counts": {
-   "X": 2388,
-   "CX": 8039,
-   "CCX": 5235,
+   "X": 1828,
+   "CX": 6815,
+   "CCX": 4675,
    "SWAP": 7
   },
   "lanes": 158,
   "failures": 0,
   "first_failures": [],
-  "seconds": 0.01
+  "seconds": 0.0
  },
  {
   "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
@@ -163,17 +163,17 @@
   ],
   "n": 7,
   "wires": 68,
-  "ops": 15633,
+  "ops": 13289,
   "counts": {
-   "X": 2388,
-   "CX": 8011,
-   "CCX": 5227,
+   "X": 1828,
+   "CX": 6787,
+   "CCX": 4667,
    "SWAP": 7
   },
   "lanes": 158,
   "failures": 0,
   "first_failures": [],
-  "seconds": 0.01
+  "seconds": 0.0
  },
  {
   "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
@@ -185,17 +185,17 @@
   ],
   "n": 7,
   "wires": 68,
-  "ops": 14698,
+  "ops": 12354,
   "counts": {
-   "X": 2396,
-   "CX": 7300,
-   "CCX": 4995,
+   "X": 1836,
+   "CX": 6076,
+   "CCX": 4435,
    "SWAP": 7
   },
   "lanes": 134,
   "failures": 0,
   "first_failures": [],
-  "seconds": 0.01
+  "seconds": 0.0
  },
  {
   "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
@@ -207,17 +207,17 @@
   ],
   "n": 7,
   "wires": 68,
-  "ops": 14610,
+  "ops": 12266,
   "counts": {
-   "X": 2396,
-   "CX": 7220,
-   "CCX": 4987,
+   "X": 1836,
+   "CX": 5996,
+   "CCX": 4427,
    "SWAP": 7
   },
   "lanes": 134,
   "failures": 0,
   "first_failures": [],
-  "seconds": 0.01
+  "seconds": 0.0
  },
  {
   "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
@@ -229,17 +229,17 @@
   ],
   "n": 7,
   "wires": 70,
-  "ops": 16954,
+  "ops": 14378,
   "counts": {
-   "X": 2598,
-   "CX": 8622,
-   "CCX": 5727,
+   "X": 1982,
+   "CX": 7278,
+   "CCX": 5111,
    "SWAP": 7
   },
   "lanes": 158,
   "failures": 0,
   "first_failures": [],
-  "seconds": 0.01
+  "seconds": 0.0
  },
  {
   "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
@@ -251,17 +251,17 @@
   ],
   "n": 7,
   "wires": 70,
-  "ops": 16946,
+  "ops": 14370,
   "counts": {
-   "X": 2598,
-   "CX": 8630,
-   "CCX": 5711,
+   "X": 1982,
+   "CX": 7286,
+   "CCX": 5095,
    "SWAP": 7
   },
   "lanes": 158,
   "failures": 0,
   "first_failures": [],
-  "seconds": 0.01
+  "seconds": 0.0
  },
  {
   "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
@@ -273,17 +273,17 @@
   ],
   "n": 7,
   "wires": 70,
-  "ops": 14928,
+  "ops": 12352,
   "counts": {
-   "X": 2604,
-   "CX": 7214,
-   "CCX": 5103,
+   "X": 1988,
+   "CX": 5870,
+   "CCX": 4487,
    "SWAP": 7
   },
   "lanes": 254,
   "failures": 0,
   "first_failures": [],
-  "seconds": 0.01
+  "seconds": 0.0
  },
  {
   "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
@@ -295,17 +295,17 @@
   ],
   "n": 7,
   "wires": 70,
-  "ops": 14760,
+  "ops": 12184,
   "counts": {
-   "X": 2604,
-   "CX": 7086,
-   "CCX": 5063,
+   "X": 1988,
+   "CX": 5742,
+   "CCX": 4447,
    "SWAP": 7
   },
   "lanes": 254,
   "failures": 0,
   "first_failures": [],
-  "seconds": 0.01
+  "seconds": 0.0
  },
  {
   "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
@@ -317,11 +317,11 @@
   ],
   "n": 8,
   "wires": 77,
-  "ops": 20156,
+  "ops": 17092,
   "counts": {
-   "X": 3112,
-   "CX": 10169,
-   "CCX": 6867,
+   "X": 2376,
+   "CX": 8577,
+   "CCX": 6131,
    "SWAP": 8
   },
   "lanes": 278,
@@ -339,11 +339,11 @@
   ],
   "n": 8,
   "wires": 77,
-  "ops": 20158,
+  "ops": 17094,
   "counts": {
-   "X": 3112,
-   "CX": 10179,
-   "CCX": 6859,
+   "X": 2376,
+   "CX": 8587,
+   "CCX": 6123,
    "SWAP": 8
   },
   "lanes": 278,
@@ -361,11 +361,11 @@
   ],
   "n": 8,
   "wires": 79,
-  "ops": 21077,
+  "ops": 17749,
   "counts": {
-   "X": 3324,
-   "CX": 10462,
-   "CCX": 7283,
+   "X": 2524,
+   "CX": 8734,
+   "CCX": 6483,
    "SWAP": 8
   },
   "lanes": 398,
@@ -383,11 +383,11 @@
   ],
   "n": 8,
   "wires": 79,
-  "ops": 21047,
+  "ops": 17719,
   "counts": {
-   "X": 3324,
-   "CX": 10424,
-   "CCX": 7291,
+   "X": 2524,
+   "CX": 8696,
+   "CCX": 6491,
    "SWAP": 8
   },
   "lanes": 398,
@@ -405,11 +405,11 @@
   ],
   "n": 9,
   "wires": 86,
-  "ops": 24976,
+  "ops": 21096,
   "counts": {
-   "X": 3914,
-   "CX": 12208,
-   "CCX": 8845,
+   "X": 2978,
+   "CX": 10200,
+   "CCX": 7909,
    "SWAP": 9
   },
   "lanes": 626,
@@ -427,11 +427,11 @@
   ],
   "n": 9,
   "wires": 86,
-  "ops": 25042,
+  "ops": 21162,
   "counts": {
-   "X": 3914,
-   "CX": 12242,
-   "CCX": 8877,
+   "X": 2978,
+   "CX": 10234,
+   "CCX": 7941,
    "SWAP": 9
   },
   "lanes": 626,
@@ -449,11 +449,11 @@
   ],
   "n": 9,
   "wires": 88,
-  "ops": 27037,
+  "ops": 22861,
   "counts": {
-   "X": 4162,
-   "CX": 13499,
-   "CCX": 9367,
+   "X": 3154,
+   "CX": 11339,
+   "CCX": 8359,
    "SWAP": 9
   },
   "lanes": 794,
@@ -471,11 +471,11 @@
   ],
   "n": 9,
   "wires": 88,
-  "ops": 27007,
+  "ops": 22831,
   "counts": {
-   "X": 4162,
-   "CX": 13461,
-   "CCX": 9375,
+   "X": 3154,
+   "CX": 11301,
+   "CCX": 8367,
    "SWAP": 9
   },
   "lanes": 794,
@@ -493,11 +493,11 @@
   ],
   "n": 9,
   "wires": 88,
-  "ops": 26992,
+  "ops": 22816,
   "counts": {
-   "X": 4156,
-   "CX": 13480,
-   "CCX": 9347,
+   "X": 3148,
+   "CX": 11320,
+   "CCX": 8339,
    "SWAP": 9
   },
   "lanes": 794,
@@ -515,11 +515,11 @@
   ],
   "n": 9,
   "wires": 88,
-  "ops": 26972,
+  "ops": 22796,
   "counts": {
-   "X": 4156,
-   "CX": 13444,
-   "CCX": 9363,
+   "X": 3148,
+   "CX": 11284,
+   "CCX": 8355,
    "SWAP": 9
   },
   "lanes": 794,
@@ -537,17 +537,17 @@
   ],
   "n": 10,
   "wires": 95,
-  "ops": 32163,
+  "ops": 27371,
   "counts": {
-   "X": 4786,
-   "CX": 16576,
-   "CCX": 10791,
+   "X": 3626,
+   "CX": 14104,
+   "CCX": 9631,
    "SWAP": 10
   },
   "lanes": 1094,
   "failures": 0,
   "first_failures": [],
-  "seconds": 0.02
+  "seconds": 0.01
  },
  {
   "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
@@ -559,17 +559,17 @@
   ],
   "n": 10,
   "wires": 95,
-  "ops": 32127,
+  "ops": 27335,
   "counts": {
-   "X": 4786,
-   "CX": 16548,
-   "CCX": 10783,
+   "X": 3626,
+   "CX": 14076,
+   "CCX": 9623,
    "SWAP": 10
   },
   "lanes": 1094,
   "failures": 0,
   "first_failures": [],
-  "seconds": 0.02
+  "seconds": 0.01
  },
  {
   "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
@@ -581,17 +581,17 @@
   ],
   "n": 10,
   "wires": 95,
-  "ops": 32926,
+  "ops": 28134,
   "counts": {
-   "X": 4792,
-   "CX": 17173,
-   "CCX": 10951,
+   "X": 3632,
+   "CX": 14701,
+   "CCX": 9791,
    "SWAP": 10
   },
   "lanes": 1226,
   "failures": 0,
   "first_failures": [],
-  "seconds": 0.02
+  "seconds": 0.01
  },
  {
   "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
@@ -603,17 +603,17 @@
   ],
   "n": 10,
   "wires": 95,
-  "ops": 32750,
+  "ops": 27958,
   "counts": {
-   "X": 4792,
-   "CX": 17013,
-   "CCX": 10935,
+   "X": 3632,
+   "CX": 14541,
+   "CCX": 9775,
    "SWAP": 10
   },
   "lanes": 1226,
   "failures": 0,
   "first_failures": [],
-  "seconds": 0.02
+  "seconds": 0.01
  },
  {
   "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
@@ -625,17 +625,17 @@
   ],
   "n": 10,
   "wires": 97,
-  "ops": 32381,
+  "ops": 27261,
   "counts": {
-   "X": 5078,
-   "CX": 15776,
-   "CCX": 11517,
+   "X": 3838,
+   "CX": 13136,
+   "CCX": 10277,
    "SWAP": 10
   },
   "lanes": 1382,
   "failures": 0,
   "first_failures": [],
-  "seconds": 0.02
+  "seconds": 0.01
  },
  {
   "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
@@ -647,17 +647,17 @@
   ],
   "n": 10,
   "wires": 97,
-  "ops": 32357,
+  "ops": 27237,
   "counts": {
-   "X": 5078,
-   "CX": 15760,
-   "CCX": 11509,
+   "X": 3838,
+   "CX": 13120,
+   "CCX": 10269,
    "SWAP": 10
   },
   "lanes": 1382,
   "failures": 0,
   "first_failures": [],
-  "seconds": 0.02
+  "seconds": 0.01
  },
  {
   "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
@@ -669,17 +669,17 @@
   ],
   "n": 10,
   "wires": 97,
-  "ops": 31915,
+  "ops": 26795,
   "counts": {
-   "X": 5088,
-   "CX": 15684,
-   "CCX": 11133,
+   "X": 3848,
+   "CX": 13044,
+   "CCX": 9893,
    "SWAP": 10
   },
   "lanes": 1658,
   "failures": 0,
   "first_failures": [],
-  "seconds": 0.02
+  "seconds": 0.01
  },
  {
   "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
@@ -691,17 +691,17 @@
   ],
   "n": 10,
   "wires": 97,
-  "ops": 32061,
+  "ops": 26941,
   "counts": {
-   "X": 5088,
-   "CX": 15806,
-   "CCX": 11157,
+   "X": 3848,
+   "CX": 13166,
+   "CCX": 9917,
    "SWAP": 10
   },
   "lanes": 1658,
   "failures": 0,
   "first_failures": [],
-  "seconds": 0.02
+  "seconds": 0.01
  },
  {
   "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
@@ -713,17 +713,17 @@
   ],
   "n": 10,
   "wires": 97,
-  "ops": 32725,
+  "ops": 27605,
   "counts": {
-   "X": 5074,
-   "CX": 16314,
-   "CCX": 11327,
+   "X": 3834,
+   "CX": 13674,
+   "CCX": 10087,
    "SWAP": 10
   },
   "lanes": 1934,
   "failures": 0,
   "first_failures": [],
-  "seconds": 0.02
+  "seconds": 0.01
  },
  {
   "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
@@ -735,17 +735,17 @@
   ],
   "n": 10,
   "wires": 97,
-  "ops": 32695,
+  "ops": 27575,
   "counts": {
-   "X": 5074,
-   "CX": 16276,
-   "CCX": 11335,
+   "X": 3834,
+   "CX": 13636,
+   "CCX": 10095,
    "SWAP": 10
   },
   "lanes": 1934,
   "failures": 0,
   "first_failures": [],
-  "seconds": 0.02
+  "seconds": 0.01
  },
  {
   "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
@@ -757,17 +757,17 @@
   ],
   "n": 10,
   "wires": 97,
-  "ops": 32052,
+  "ops": 26932,
   "counts": {
-   "X": 5094,
-   "CX": 15791,
-   "CCX": 11157,
+   "X": 3854,
+   "CX": 13151,
+   "CCX": 9917,
    "SWAP": 10
   },
   "lanes": 1814,
   "failures": 0,
   "first_failures": [],
-  "seconds": 0.02
+  "seconds": 0.01
  },
  {
   "mode": "EXHAUSTIVE_PROMISE_DOMAIN",
@@ -779,16 +779,16 @@
   ],
   "n": 10,
   "wires": 97,
-  "ops": 31904,
+  "ops": 26784,
   "counts": {
-   "X": 5094,
-   "CX": 15667,
-   "CCX": 11133,
+   "X": 3854,
+   "CX": 13027,
+   "CCX": 9893,
    "SWAP": 10
   },
   "lanes": 1814,
   "failures": 0,
   "first_failures": [],
-  "seconds": 0.02
+  "seconds": 0.01
  }
 ]
