@@ -1,8 +1,9 @@
 """Classical integer model of the exact dialog in-place multiplier.
 
-M(x, y) = (x, x*y mod q) for x != 0 and M(0, y) = (0, y). The reference Euclid dialog is the oracle for the iteration bound and Bezout
-identity. The held-offset recurrence and sweep describe the alternative
-physical representation used by the shared-chain circuit.
+M(x, y) = (x, x*y mod q) for x != 0 and M(0, y) = (0, y). The reference Euclid
+dialog is the oracle for the iteration bound and Bezout identity. The
+held-offset recurrence and sweep describe the alternative physical
+representation used by the shared-chain circuit.
 """
 
 

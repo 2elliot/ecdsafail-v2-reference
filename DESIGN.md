@@ -125,11 +125,11 @@ When v_i=0, nonnegative V and e force V=e=0.
 Then g0=g1=0 and the upward/downward chain restores U and V for every window, including one narrower than U.
 F1 gives u_T=1 and v_T=0 for nonzero canonical x over prime q, hence U=1,V=e=0 at the end.
 Primality is used here through F1's gcd argument.
-The last odd step has u=v=1, since reaching zero requires equal operands and their gcd is1, so that step leaves no offset.
+The last odd step has u=v=1, since reaching zero requires equal operands and their gcd is 1, so that step leaves no offset.
 
 **E4: descending tape sweep.**
 Write z_i for the unswept second bit: z_i=s_i on odd cells, z_i=z_(i-1) on later even cells, and z_0=s_0.
-For i=T-1 down to1, XOR (NOT(b_i))*z_(i-1) into z_i.
+For i=T-1 down to 1, XOR (NOT(b_i))*z_(i-1) into z_i.
 Descending order reads the predecessor before it is changed, so even cells become zero and odd cells keep s_i.
 The swept tape is exactly the reference dialog, allowing the unchanged Bezout cell, reduction proof and F1-F5 cleanup to apply.
 The sweep costs T-1 CCX and is one recorded definition, called once per pass body.
@@ -144,8 +144,8 @@ Reversing the pass reverses its sweep and then its step calls, including their l
 F5 restores precisely the terminal words and swept tape needed by that inverse, so no additional garbage or cleanup assumption is introduced.
 The external pass relation, iteration bound, width schedule and modular reduction are unchanged; EuclidStep's physical relation and internal second-bit meaning change as E1 states.
 
-At G, sum(W)=98432 and T=512, so each pass costs 4*98432+2*512-1+511=395262 CCX instead of591104.
-Four passes save783368 CCX, or5483576 T; these are formulas to check against emitted counts.
+At G, sum(W)=98432 and T=512, so each pass costs 4*98432+2*512-1+511=395262 CCX instead of 591104.
+Four passes save 783368 CCX, or 5483576 T; these are formulas to check against emitted counts.
 This change leaves _bezout and qec/arith.py unchanged.
 Finite gate checks and the separate leaf lift probe do not establish acceptance by the benchmark checker or compose this proof automatically.
 
