@@ -138,5 +138,145 @@ def main():
     sys.exit(1 if any(isinstance(v, dict) and v["failures"] for v in out.values()) else 0)
 
 
+def _bz_pack(values, wires):
+    """Byte-backed transpose avoids quadratic big-int growth at exhaustive sizes."""
+    masks = [bytearray((len(values) + 7) // 8) for _ in wires]
+    for lane, value in enumerate(values):
+        byte, bit = lane >> 3, 1 << (lane & 7)
+        for i, mask in enumerate(masks):
+            if value >> i & 1:
+                mask[byte] |= bit
+    return {w: int.from_bytes(mask, 'little') for w, mask in zip(wires, masks)}
+
+
+def _bz_state(C, ins, outs, inputs, expected, ops=None):
+    init, want = {}, {}
+    for i, reg in enumerate(ins):
+        init.update(_bz_pack([v[i] for v in inputs], reg))
+    for i, reg in enumerate(outs):
+        want.update(_bz_pack([v[i] for v in expected], reg))
+    state = sim.run(C.ops if ops is None else ops, C.num_wires, init, len(inputs))
+    wrong = dirty = 0
+    for wire, value in enumerate(state):
+        wrong |= value ^ want.get(wire, 0)
+        if wire not in want:
+            dirty |= value
+    return wrong, dirty, init, want
+
+
+def _bz_build(q, m=None, inverse=False, step=False):
+    C = Circuit()
+    n = q.bit_length()
+    regs = [C.alloc(2 if step else 1), C.alloc(n), C.alloc(n)]
+    ins = [r[:] for r in regs]
+    mod = Mod(q)
+    if step:
+        block = DialogMultiplier(C, mod)._bezout()
+    else:
+        block = C.record(lambda g, a, s: mod.dbl_add(C, g[0], a, s, m), regs)
+    C.apply(block, regs, inverse=inverse)
+    return C, ins, regs
+
+
+def _bz_exhaust(q, m=None, inverse=False, step=False):
+    C, ins, outs = _bz_build(q, m, inverse, step)
+    batch, wants = [], []
+    failures = lanes = 0
+    for g in range(4 if step else 2):
+        for r in range(q):
+            for s in range(q):
+                batch.append((g, r, s))
+                v = ((s - g * r) * pow(2, -1, q) if inverse else 2 * s + (g & 1) * r) % q
+                wants.append((g, v, r) if step and g & 2 else (g, r, v))
+                if len(batch) == 8192:
+                    wrong, _, _, _ = _bz_state(C, ins, outs, batch, wants)
+                    failures += wrong.bit_count(); lanes += len(batch)
+                    batch, wants = [], []
+    if batch:
+        wrong, _, _, _ = _bz_state(C, ins, outs, batch, wants)
+        failures += wrong.bit_count(); lanes += len(batch)
+    return {'lanes': lanes, 'failures': failures, 'ops': len(C), 'wires': C.num_wires}
+
+
+def _bz_census(q):
+    from array import array
+    from qec.builder import CCX, CX
+    C, ins, outs = _bz_build(q)
+    inputs = [(g, r, s) for g in (0, 1) for r in range(q) for s in range(q)]
+    expected = [(g, r, (2 * s + g * r) % q) for g, r, s in inputs]
+    wrong, _, init, want = _bz_state(C, ins, outs, inputs, expected)
+    assert wrong == 0
+    caught, survivors = [], []
+    for pos in range(0, len(C.ops), 4):
+        if C.ops[pos] != CCX:
+            continue
+        ops = array('i', C.ops)
+        _, a, _, c = ops[pos:pos+4]
+        ops[pos:pos+4] = array('i', (CX, a, c, c))
+        state = sim.run(ops, C.num_wires, init, len(inputs))
+        bad = any(value != want.get(w, 0) for w, value in enumerate(state))
+        (caught if bad else survivors).append(pos // 4)
+    return {'lanes': len(inputs), 'failures': int(not caught), 'caught': len(caught),
+            'survivors': survivors, 'survivor_reason': 'equivalent on every canonical input, exhaustively checked including scratch'}
+
+
+def _bz_order_control(q):
+    from array import array
+    from qec.builder import CCX
+    C, ins, outs = _bz_build(q)
+    inputs = [(g, r, s) for g in (0, 1) for r in range(q) for s in range(q)]
+    expected = [(g, r, (2 * s + g * r) % q) for g, r, s in inputs]
+    wrong, _, init, want = _bz_state(C, ins, outs, inputs, expected)
+    assert wrong == 0
+    # The terminal prefix gate is the last compute CCX targeting a scratch
+    # prefix and controlled by the top high bit. Identify its inverse by wires.
+    high_top = ins[2][-2]
+    candidates = []
+    live = {w for reg in ins for w in reg}
+    ops = [tuple(C.ops[p:p+4]) for p in range(0, len(C.ops), 4)]
+    for i, op in enumerate(ops):
+        if op[0] == CCX and high_top in op[1:3] and op[3] not in live:
+            later = [j for j in range(i+1, len(ops)) if ops[j] == op]
+            if later:
+                j = later[0]
+                if j+1 < len(ops) and ops[j+1][0] == CCX and ops[j+1][3] == high_top:
+                    candidates.append(j)
+    assert len(candidates) == 1, candidates
+    j = candidates[0]
+    result = {}
+    for name, edited in [('deleted', ops[:j]+ops[j+1:]),
+                         ('late', ops[:j]+[ops[j+1],ops[j]]+ops[j+2:])]:
+        state = sim.run(array('i', (x for op in edited for x in op)), C.num_wires, init, len(inputs))
+        dirty = 0
+        for w, v in enumerate(state):
+            if w not in want: dirty |= v
+        result[name] = dirty.bit_count()
+    return {'lanes': len(inputs), 'failures': int(any(v == 0 for v in result.values())), 'dirty': result}
+
+
+def bezout_checks():
+    # Missing arithmetic, a wrong reduction band, a dirty carry or wrong
+    # output rotation must fail these independent integer-map checks.
+    assert hasattr(Mod, 'dbl_add'), 'missing exact Mod.dbl_add'
+    out = {}
+    primes = (3, 5, 7, 13, 61, 127, 251, 509, 1021, 163, 349, 547, 733)
+    for q in primes:
+        out[f'cell_exhaustive[{q}]'] = _bz_exhaust(q)
+        out[f'cell_inverse_exhaustive[{q}]'] = _bz_exhaust(q, inverse=True)
+    for q in (31, 61, 127, 251, 509):
+        parts = [_bz_exhaust(q, m) for m in range(Mod(q).low_bits, q.bit_length()+1)]
+        out[f'cell_every_m[{q}]'] = {'lanes': sum(x['lanes'] for x in parts), 'failures': sum(x['failures'] for x in parts), 'parts': parts}
+    C, _, _ = _bz_build(2**256-2**32-977)
+    ccx = sum(op == 2 for op in C.ops[::4])
+    out['cell_count'] = {'lanes': 1, 'failures': int(ccx != 2086), 'CCX': ccx}
+    for q in (127, 509):
+        out[f'cell_census[{q}]'] = _bz_census(q)
+        out[f'chain_order_control[{q}]'] = _bz_order_control(q)
+    print(json.dumps(out, indent=1))
+    return int(any(row['failures'] for row in out.values()))
+
+
 if __name__ == "__main__":
+    if "--bezout" in sys.argv:
+        sys.exit(bezout_checks())
     main()

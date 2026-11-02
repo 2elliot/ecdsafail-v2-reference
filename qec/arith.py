@@ -196,12 +196,50 @@ def cswap(C, ctrl, a, b):
         C.cx(bi, ai)
 
 
+def _selected_carry(C, bit, selectors, masks, i, incoming, target):
+    """XOR a majority carry into target, restoring bit and the selectors.
+
+    The selected addend bit is an XOR of constant masks. Callers use exclusive
+    selectors, so that XOR is also the intended selected integer's bit.
+    """
+    active = [s for s, mask in zip(selectors, masks) if mask >> i & 1]
+    if not active:
+        if incoming is not None:
+            C.ccx(bit, incoming, target)
+        return
+    b = active[0]
+    for other in active[1:]:
+        C.cx(other, b)
+    if incoming is None:
+        C.ccx(bit, b, target)
+    else:
+        # MAJ(x,b,c) = c XOR ((x XOR c) AND (b XOR c)).
+        C.cx(incoming, bit)
+        C.cx(incoming, b)
+        C.ccx(bit, b, target)
+        C.cx(incoming, target)
+        C.cx(incoming, b)
+        C.cx(incoming, bit)
+    for other in reversed(active[1:]):
+        C.cx(other, b)
+
+
+def _selected_chain(C, low, selectors, masks):
+    carries = [None]
+    for i, bit in enumerate(low):
+        (carry,) = C.alloc(1)
+        _selected_carry(C, bit, selectors, masks, i, carries[-1], carry)
+        carries.append(carry)
+    return carries
+
+
 class Mod:
     """Arithmetic modulo an odd q < 2^n on canonical values in [0, q)."""
 
     def __init__(self, q):
         self.q = q
         self.n = q.bit_length()
+        self.low_bits = (2 * ((1 << self.n) - q)).bit_length()
 
     def _wrap(self):
         """2^(n+1) - q, so s + _wrap() carries out of n + 1 bits exactly when s >= q."""
@@ -221,6 +259,81 @@ class Mod:
         """s = 2s mod q. 2s is a relabel with a zero low bit, so the reduction
         runs on s against _wrap() >> 1, and the low bit of the result is the flag."""
         _reduce(C, s, self._wrap() >> 1)
+        s[:] = s[-1:] + s[:-1]
+
+    def dbl_add(self, C, ctrl, a, s, m=None):
+        """s = (2s + ctrl*a) mod q, canonical inputs, with clean scratch.
+
+        Like moddbl, rotate the output wire list right by one. The two quotient
+        bits are cleared by parity and a controlled comparison, respectively.
+        See DESIGN.md for the all-input reduction and cleanup argument.
+        """
+        n, q = self.n, self.q
+        m = self.low_bits if m is None else m
+        assert q >= 3 and q & 1 and self.low_bits <= m <= n
+        assert len(a) == len(s) == n and len(set([ctrl] + a + s)) == 2*n+1
+        f = (1 << n) - q
+        l0, top = C.alloc(2)
+        add(C, a[1:] + [l0], s, top, ctrl=ctrl)
+        C.ccx(ctrl, a[0], l0)
+        low = [l0] + s[:-1]
+        L, H = low[:m], low[m:]
+        # A[1] aliases H[0]; only A[2:] are owned scratch.
+        prefix = [None] + (H[:1] if H else [])
+        for bit in H[1:]:
+            (p,) = C.alloc(1)
+            C.ccx(prefix[-1], bit, p)
+            prefix.append(p)
+        k0, k1 = s[-1], top
+        C.x(k1)
+        C.cx(k0, k1)
+        selectors, masks = [k1, k0], [f, 2*f]
+        chain = _selected_chain(C, L, selectors, masks)
+        (e,) = C.alloc(1)
+        if H:
+            C.ccx(prefix[-1], chain[-1], e)
+        else:
+            C.cx(chain[-1], e)
+        for i in reversed(range(m)):
+            _selected_carry(C, L[i], selectors, masks, i, chain[i], chain[i+1])
+            C.free([chain[i+1]])
+        C.cx(k0, k1)
+        C.x(k1)
+        C.ccx(k0, e, k1)
+        C.cx(e, k0)
+        selectors = [k0, k1]
+        chain = _selected_chain(C, L, selectors, masks)
+        if H:
+            C.ccx(prefix[-1], chain[-1], e)
+        else:
+            C.cx(chain[-1], e)
+        C.free([e])
+        for i in reversed(range(1, len(H))):
+            # Clear the prefix before overwriting the bit that computed it.
+            C.ccx(prefix[i], H[i], prefix[i+1])
+            C.ccx(chain[-1], prefix[i], H[i])
+            C.free([prefix[i+1]])
+        if H:
+            C.cx(chain[-1], H[0])
+        for i in reversed(range(m)):
+            _selected_carry(C, L[i], selectors, masks, i, chain[i], chain[i+1])
+            C.free([chain[i+1]])
+            if i:
+                for selector, mask in zip(selectors, masks):
+                    if mask >> i & 1:
+                        C.cx(selector, L[i])
+                C.cx(chain[i], L[i])
+        (z,) = C.alloc(1)
+        C.x(k0)
+        C.ccx(ctrl, k0, z)
+        C.x(k0)
+        gt_into(C, a[1:], low[1:], k1, ctrl=z)
+        C.x(k0)
+        C.ccx(ctrl, k0, z)
+        C.x(k0)
+        C.cx(l0, k0)
+        C.ccx(ctrl, a[0], l0)
+        C.free([l0, top, z])
         s[:] = s[-1:] + s[:-1]
 
     def cmodadd_const(self, C, ctrl, value, b):
