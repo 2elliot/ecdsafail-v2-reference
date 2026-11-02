@@ -339,11 +339,11 @@
   "first": []
  },
  "dialog_mul": {
-  "ops": 6854898,
+  "ops": 5876708,
   "wires": 1796,
   "lanes": 57,
   "failures": 0,
   "first": [],
-  "seconds": 2.8
+  "seconds": 2.2
  }
 }
