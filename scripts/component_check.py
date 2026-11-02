@@ -179,6 +179,8 @@ def _bz_build(q, m=None, inverse=False, step=False):
 
 
 def _bz_exhaust(q, m=None, inverse=False, step=False):
+    if inverse and step:
+        raise ValueError("inverse and step cannot be combined")
     C, ins, outs = _bz_build(q, m, inverse, step)
     batch, wants = [], []
     failures = lanes = 0

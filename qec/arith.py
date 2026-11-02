@@ -271,7 +271,7 @@ class Mod:
         n, q = self.n, self.q
         m = self.low_bits if m is None else m
         assert q >= 3 and q & 1 and self.low_bits <= m <= n
-        assert len(a) == len(s) == n and len(set([ctrl] + a + s)) == 2*n+1
+        assert len(a) == len(s) == n and len(set([ctrl] + a + s)) == 2 * n + 1
         f = (1 << n) - q
         l0, top = C.alloc(2)
         add(C, a[1:] + [l0], s, top, ctrl=ctrl)
@@ -287,7 +287,7 @@ class Mod:
         k0, k1 = s[-1], top
         C.x(k1)
         C.cx(k0, k1)
-        selectors, masks = [k1, k0], [f, 2*f]
+        selectors, masks = [k1, k0], [f, 2 * f]
         chain = _selected_chain(C, L, selectors, masks)
         (e,) = C.alloc(1)
         if H:
@@ -295,8 +295,8 @@ class Mod:
         else:
             C.cx(chain[-1], e)
         for i in reversed(range(m)):
-            _selected_carry(C, L[i], selectors, masks, i, chain[i], chain[i+1])
-            C.free([chain[i+1]])
+            _selected_carry(C, L[i], selectors, masks, i, chain[i], chain[i + 1])
+            C.free([chain[i + 1]])
         C.cx(k0, k1)
         C.x(k1)
         C.ccx(k0, e, k1)
@@ -310,14 +310,14 @@ class Mod:
         C.free([e])
         for i in reversed(range(1, len(H))):
             # Clear the prefix before overwriting the bit that computed it.
-            C.ccx(prefix[i], H[i], prefix[i+1])
+            C.ccx(prefix[i], H[i], prefix[i + 1])
             C.ccx(chain[-1], prefix[i], H[i])
-            C.free([prefix[i+1]])
+            C.free([prefix[i + 1]])
         if H:
             C.cx(chain[-1], H[0])
         for i in reversed(range(m)):
-            _selected_carry(C, L[i], selectors, masks, i, chain[i], chain[i+1])
-            C.free([chain[i+1]])
+            _selected_carry(C, L[i], selectors, masks, i, chain[i], chain[i + 1])
+            C.free([chain[i + 1]])
             if i:
                 for selector, mask in zip(selectors, masks):
                     if mask >> i & 1:

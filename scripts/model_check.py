@@ -59,7 +59,7 @@ def gate_pass(q: int, iters: int | None = None) -> int:
     G = C.alloc(2 * m.iters)
     load_const(C, U, q)
     for i in range(m.iters):
-        C.apply(m._euclid_step(m.widths[i]), [U, V, G[2*i:2*i+2]])
+        C.apply(m._euclid_step(m.widths[i]), [U, V, G[2 * i:2 * i + 2]])
     structural(C.prims, C.num_wires)
     state = sim.run(C.prims, C.num_wires, sim.pack([x or 1 for x in range(q)], inputs), q)
     bad = state[U[0]] ^ ((1 << q) - 1)
