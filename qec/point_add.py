@@ -1,7 +1,7 @@
 """Exact, complete, controlled fixed-addend point addition:
 |c>|R>|0> -> |c>|R + c*A>|0> for every R in E(F_q) encoded as little-endian
 affine (x, y) with infinity = (0, 0)."""
-from .arith import Mod, cswap, gt_into, load_const, sub
+from .arith import Mod, _maj, cswap, load_const
 from .builder import Circuit
 from .curve import Curve
 from .model import iteration_bound, width_schedule
@@ -16,24 +16,78 @@ class DialogMultiplier:
         self.iters = iteration_bound(q)
         self.widths = width_schedule(q, self.iters)
         self._euclid_steps = {}
+        self._sweep_block = None
         self._bezout_step = None
         self.block = None
 
-    def _euclid_step(self, w):
-        if w not in self._euclid_steps:
+    def _shared_difference(self, U, V, g0, g1):
+        """Compare and form the even difference using one majority chain."""
+        C = self.C
+        (cin,) = C.alloc(1)
+        carries = [cin] + U[:-1]
+        for wire in V:
+            C.x(wire)
+        for i in range(len(U)):
+            _maj(C, carries[i], V[i], U[i])
+        C.ccx(g0, U[-1], g1)
+        for i in reversed(range(len(U))):
+            # Restore a_i and select S_i while unwinding the carry chain.
+            C.ccx(carries[i], V[i], U[i])
+            C.ccx(g0, carries[i], V[i])
+            C.cx(U[i], carries[i])
+            C.cx(U[i], V[i])
+            # S_i XOR c_i XOR 1 is a_i XOR v_i on the swap branch.
+            C.cx(carries[i], V[i])
+            C.x(V[i])
+            C.ccx(g1, V[i], U[i])
+            C.x(V[i])
+            C.cx(carries[i], V[i])
+        C.free([cin])
+        for wire in V:
+            C.x(wire)
+        for wire in V[1:]:
+            C.cx(g1, wire)
+
+    def _euclid_step(self, w: int, first: bool = False):
+        key = (w, first)
+        if key not in self._euclid_steps:
             C = self.C
 
-            def step(U, V, g):
-                g0, g1 = g
+            def step(U, V, cell):
+                g0, g1 = cell[-2:]
+                if not first:
+                    C.cx(cell[0], V[0])
                 C.cx(V[0], g0)
-                gt_into(C, U[:w], V[:w], g1, ctrl=g0)
-                cswap(C, g1, U[:w], V[:w])
-                sub(C, U[:w], V[:w], ctrl=g0)
+                self._shared_difference(U[:w], V[:w], g0, g1)
                 V[:] = V[1:] + V[:1]
+                if not first:
+                    C.x(g0)
+                    C.ccx(g0, cell[0], g1)
+                    C.x(g0)
 
             n = self.mod.n
-            self._euclid_steps[w] = C.record_shape(step, [n, n, 2])
-        return self._euclid_steps[w]
+            self._euclid_steps[key] = C.record_shape(step, [n, n, 2 if first else 3])
+        return self._euclid_steps[key]
+
+    def _tape_sweep(self):
+        if self._sweep_block is None:
+            C, T = self.C, self.iters
+
+            def sweep(G):
+                for i in range(T - 1, 0, -1):
+                    odd, previous, held = G[2 * i], G[2 * i - 1], G[2 * i + 1]
+                    C.x(odd)
+                    C.ccx(odd, previous, held)
+                    C.x(odd)
+
+            self._sweep_block = C.record_shape(sweep, [2 * T])
+        return self._sweep_block
+
+    def _euclid_pass(self, U: list[int], V: list[int], G: list[int]) -> None:
+        for i in range(self.iters):
+            cell = G[:2] if i == 0 else G[2 * i - 1:2 * i + 2]
+            self.C.apply(self._euclid_step(self.widths[i], first=i == 0), [U, V, cell])
+        self.C.apply(self._tape_sweep(), [G])
 
     def _bezout(self):
         if self._bezout_step is None:
@@ -56,11 +110,7 @@ class DialogMultiplier:
         load_const(C, U, q)
         G = C.alloc(2 * T)
 
-        def euclid(U, V, G):
-            for i in range(T):
-                C.apply(self._euclid_step(self.widths[i]), [U, V, G[2 * i:2 * i + 2]])
-
-        E = C.run(euclid, [U, Xr, G])
+        E = C.run(self._euclid_pass, [U, Xr, G])
         # The completed pass leaves V zero, including when x is zero.
         S = list(Xr)
         # Remapping zero to one makes U = 1; its low wire remains live.

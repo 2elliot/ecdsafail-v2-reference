@@ -29,8 +29,7 @@ def euclid_only(C, X, Y):
     U = C.alloc(n)
     load_const(C, U, mod.q)
     G = C.alloc(2 * M.iters)
-    for i in range(M.iters):
-        C.apply(M._euclid_step(M.widths[i]), [U, X, G[2 * i:2 * i + 2]])
+    M._euclid_pass(U, X, G)
 
 
 def bezout_only(C, Y, S, G):
