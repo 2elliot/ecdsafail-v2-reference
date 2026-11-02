@@ -30,7 +30,7 @@ from typing import Callable, NamedTuple
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from qec.curve import SECP256K1, SECP256K1_G, SECP256K1_R
+from qec.curve import SECP256K1, SECP256K1_G, SECP256K1_R, toy_secp_curves
 from qec.emit import write_circuit
 from qec.point_add import ControlledPointAdd
 
@@ -45,7 +45,8 @@ G_MULTIPLES = tuple(range(1, 9))
 SECP_RANDOM_POINTS = {True: 8, False: 120}
 SECP_WORKERS = min(6, os.cpu_count() or 1)
 SUMMARY_WORKERS = min(3, os.cpu_count() or 1)
-TOY_ARGS = ["--toy-bits", "4", "6", "7", "8", "9", "10", "--toy-per-size", "6"]
+TOY_BITS, TOY_PER_SIZE, TOY_ADDENDS_PER_CURVE = (4, 6, 7, 8, 9, 10), 6, 2
+TOY_ARGS = ["--toy-bits", *map(str, TOY_BITS), "--toy-per-size", str(TOY_PER_SIZE)]
 EMITS = {
     "toy127": ("toy127_circuit.json", ["--curve", "toy:127", "--addend-index", "5"]),
     "toy127.hier": ("toy127_circuit.hier.json", ["--curve", "toy:127", "--addend-index", "5", "--hier"]),
@@ -182,7 +183,7 @@ class Run:
             "addends": [],
         }
         if not quick:
-            self.specs["secp-flat"] = [["check.py", "--secp", "--secp-random", 120, "--seed", 2026, "--out", w / "secp256k1_sampled.json"]]
+            self.specs["secp-flat"] = [["check.py", "--secp", "--secp-random", SECP_RANDOM_POINTS[False], "--seed", 2026, "--out", w / "secp256k1_sampled.json"]]
         self.jobs = {}
         self.pool = None
         self.summaries = {}
@@ -299,11 +300,44 @@ def i2_model(run):
     return Result(FAIL if problems else PASS, note, {"exit": p.rc, "rows": rows, "failing": bad, "log": p.log})
 
 
+@functools.cache
+def toy_instances():
+    """{(q, addend): lanes} that TOY_ARGS asks of check.py: the first TOY_ADDENDS_PER_CURVE points with y != 0
+    on each curve, every point with c in {0,1}."""
+    want = {}
+    for bits in TOY_BITS:
+        for curve in toy_secp_curves(bits)[:TOY_PER_SIZE]:
+            pts = curve.points()
+            want.update(((curve.q, A), 2 * len(pts)) for A in [P for P in pts[1:] if P[1] != 0][:TOY_ADDENDS_PER_CURVE])
+    return want
+
+
+def _instance_problems(rows):
+    want = toy_instances()
+    got = Counter((r["q"], tuple(r["addend"])) for r in rows)
+    name = lambda key: f"q={key[0]} A={list(key[1])}"
+    missing = [k for k in want if k not in got]
+    repeated = [k for k, n in got.items() if n > 1]
+    unexpected = [k for k in got if k not in want]
+    problems = []
+    if missing:
+        problems.append(f"{len(missing)} expected instances not simulated, first {name(missing[0])}")
+    if repeated:
+        problems.append(f"{len(repeated)} instances repeated, first {name(repeated[0])} x{got[repeated[0]]}")
+    if unexpected:
+        problems.append(f"{len(unexpected)} unexpected instances, first {name(unexpected[0])}")
+    for r in rows:
+        key = (r["q"], tuple(r["addend"]))
+        if key in want and r["lanes"] != want[key]:
+            problems.append(f"{name(key)}: {r['lanes']} lanes, expected {want[key]}")
+    return problems
+
+
 def _toy_result(proc, rows, what, hier):
     fails = sum(r["failures"] for r in rows)
     lanes = sum(r["lanes"] for r in rows)
     problems = [f"check.py exited {proc.rc}, see {proc.log}"] * bool(proc.rc)
-    problems += coverage("instances", len(rows), "toy_instances") + coverage("lanes", lanes, "toy_lanes")
+    problems += coverage("instances", len(rows), "toy_instances") + coverage("lanes", lanes, "toy_lanes") + _instance_problems(rows)
     mismatched = [r for r in rows if hier and not r.get("expansion_matches_flatten")]
     if mismatched:
         problems.append(f"{len(mismatched)} expansions differ from flatten.operations_json")
@@ -364,9 +398,16 @@ def i2_secp(run):
 
 def i2_secp_flat(run):
     proc, row = run.secp_flat()
-    ok = proc.rc == 0 and row is not None and not row["failures"]
-    note = f"{row['lanes']} lanes at A = G incl. inf, A, -A, -2A, 2A, 3A; {row['failures']} failures" if row else f"exit {proc.rc}, see {proc.log}"
-    return Result(PASS if ok else FAIL, note, {"exit": proc.rc, "receipt": row, "log": proc.log})
+    lanes = 2 * (COVERAGE["secp_special_points"] + SECP_RANDOM_POINTS[False])
+    problems = [f"check.py exited {proc.rc}, see {proc.log}"] * bool(proc.rc)
+    if row is None:
+        problems.append(f"no receipt, see {proc.log}")
+    else:
+        problems += [f"addend {row['addend']}, expected secp256k1 G"] * (row["addend"] != "secp256k1 G")
+        problems += [f"{row['lanes']} lanes, expected {lanes}"] * (row["lanes"] != lanes)
+    note = (f"{row['lanes']} lanes at A = G incl. inf, A, -A, -2A, 2A, 3A; {row['failures']} failures" if row else "no lanes") + "".join(f"; {m}" for m in problems)
+    ok = not problems and not row["failures"]
+    return Result(PASS if ok else FAIL, note, {"exit": proc.rc, "receipt": row, "lanes_expected": lanes, "problems": problems, "log": proc.log})
 
 
 def i3_gate_set(run):
