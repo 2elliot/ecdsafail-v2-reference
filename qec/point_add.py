@@ -60,15 +60,19 @@ class DialogMultiplier:
                 C.apply(self._euclid_step(self.widths[i]), [U, V, G[2 * i:2 * i + 2]])
 
         E = C.run(euclid, [U, Xr, G])
-        S = C.alloc(n)
+        # The completed pass leaves V zero, including when x is zero.
+        S = list(Xr)
         bz = self._bezout()
         for i in reversed(range(T)):
             C.apply(bz, [G[2 * i:2 * i + 2], Yr, S])
         cswap(C, U[self.zbit], Yr, S)
+        out = C.alloc(n)
+        for source, target in zip(S, out):
+            C.swap(source, target)
         C.apply(E, [U, Xr, G], inverse=True)
         load_const(C, U, q)
         C.free(U + G + Yr)
-        Yr[:] = S
+        Yr[:] = out
 
     def apply(self, Xr, Yr, inverse=False):
         if self.block is None:
