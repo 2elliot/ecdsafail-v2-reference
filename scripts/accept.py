@@ -29,7 +29,10 @@ from typing import Callable, NamedTuple
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "scripts"))
 
+import check as checker
+from qec import flatten
 from qec.curve import SECP256K1, SECP256K1_G, SECP256K1_R, toy_secp_curves
 from qec.emit import write_circuit
 from qec.point_add import ControlledPointAdd
@@ -47,9 +50,11 @@ SECP_WORKERS = min(6, os.cpu_count() or 1)
 SUMMARY_WORKERS = min(3, os.cpu_count() or 1)
 TOY_BITS, TOY_PER_SIZE, TOY_ADDENDS_PER_CURVE = (4, 6, 7, 8, 9, 10), 6, 2
 TOY_ARGS = ["--toy-bits", *map(str, TOY_BITS), "--toy-per-size", str(TOY_PER_SIZE)]
+TOY_EMIT_Q, TOY_EMIT_INDEX = 127, 5
+TOY_EMIT_ARGS = ["--curve", f"toy:{TOY_EMIT_Q}", "--addend-index", str(TOY_EMIT_INDEX)]
 EMITS = {
-    "toy127": ("toy127_circuit.json", ["--curve", "toy:127", "--addend-index", "5"]),
-    "toy127.hier": ("toy127_circuit.hier.json", ["--curve", "toy:127", "--addend-index", "5", "--hier"]),
+    "toy127": ("toy127_circuit.json", TOY_EMIT_ARGS),
+    "toy127.hier": ("toy127_circuit.hier.json", [*TOY_EMIT_ARGS, "--hier"]),
     "secp256k1_G.hier": ("secp256k1_G_circuit.hier.json", ["--hier"]),
 }
 
@@ -222,6 +227,22 @@ class Run:
         return Emitted(path, meta, summarize(path.read_text()))
 
     @functools.cache
+    def toy_upload(self, name):
+        """(lanes, failures) of the toy file scripts/emit.py wrote, parsed by qec/flatten.py, expanded, and
+        simulated on every point with c in {0,1} at the addend EMITS names, not the one its meta claims."""
+        path = self.emitted(name).path
+        with path.open() as fh:
+            doc = flatten.load(fh)
+        ops = checker.expand(doc)
+        checker.structural(ops, doc["num_wires"])
+        curve = next(c for c in toy_secp_curves(TOY_EMIT_Q.bit_length()) if c.q == TOY_EMIT_Q)
+        pts = curve.points()
+        gen = ControlledPointAdd(curve, pts[TOY_EMIT_INDEX])
+        gen.build()
+        cases = [(c, R) for c in (0, 1) for R in pts]
+        return len(cases), checker.check(gen, ops, cases, doc["num_wires"])
+
+    @functools.cache
     def toy(self, hier):
         proc, = self.procs("toy-hier" if hier else "toy")
         out = self.work / ("toy_exhaustive_hier.json" if hier else "toy_exhaustive.json")
@@ -333,7 +354,8 @@ def _instance_problems(rows):
     return problems
 
 
-def _toy_result(proc, rows, what, hier):
+def _toy_result(run, hier, what, upload):
+    proc, rows = run.toy(hier)
     fails = sum(r["failures"] for r in rows)
     lanes = sum(r["lanes"] for r in rows)
     problems = [f"check.py exited {proc.rc}, see {proc.log}"] * bool(proc.rc)
@@ -341,18 +363,26 @@ def _toy_result(proc, rows, what, hier):
     mismatched = [r for r in rows if hier and not r.get("expansion_matches_flatten")]
     if mismatched:
         problems.append(f"{len(mismatched)} expansions differ from flatten.operations_json")
-    note = f"{len(rows)} toy instances, {lanes} lanes, {fails} failures ({what})" + "".join(f"; {m}" for m in problems)
+    file = rel(run.emitted(upload).path)
+    try:
+        upload_lanes, upload_fails = run.toy_upload(upload)
+    except (ValueError, AssertionError) as e:
+        upload_lanes, upload_fails = 0, []
+        problems.append(f"{file} does not load as a valid circuit: {e!r}"[:300])
+    note = (f"{len(rows)} toy instances, {lanes} lanes, {fails} failures ({what}); "
+            f"emitted {file}: {upload_lanes} lanes, {len(upload_fails)} failures") + "".join(f"; {m}" for m in problems)
     evidence = {"exit": proc.rc, "instances": len(rows), "lanes": lanes, "failures": fails, "log": proc.log, "problems": problems,
-                "first_failures": [r for r in rows if r["failures"]][:3]}
-    return Result(FAIL if fails or problems else PASS, note, evidence)
+                "first_failures": [r for r in rows if r["failures"]][:3],
+                "emitted_file": {"file": file, "lanes": upload_lanes, "failures": len(upload_fails), "first_failures": upload_fails[:3]}}
+    return Result(FAIL if fails or upload_fails or problems else PASS, note, evidence)
 
 
 def i2_toy(run):
-    return _toy_result(*run.toy(False), "flat circuit, every point, c in {0,1}", False)
+    return _toy_result(run, False, "flat circuit, every point, c in {0,1}", "toy127")
 
 
 def i2_toy_hier(run):
-    return _toy_result(*run.toy(True), "hierarchical emission expanded by qec/flatten.py's rules", True)
+    return _toy_result(run, True, "hierarchical emission expanded by qec/flatten.py's rules", "toy127.hier")
 
 
 def i2_components(run):
@@ -534,8 +564,8 @@ EMIT_JOBS = tuple(f"emit:{name}" for name in EMITS) + ("addends",)
 CHECKS = (
     Check("I1", "interface: layout and wire count", i1_interface, EMIT_JOBS),
     Check("I2.model", "exactness: classical dialog model and iteration bound", i2_model, ("model",)),
-    Check("I2.toy", "exactness: exhaustive gate-level check on toy curves", i2_toy, ("toy",)),
-    Check("I2.toy-hier", "exactness: same check on the hierarchical upload", i2_toy_hier, ("toy-hier",)),
+    Check("I2.toy", "exactness: exhaustive gate-level check on toy curves and the emitted toy file", i2_toy, ("toy", "emit:toy127")),
+    Check("I2.toy-hier", "exactness: same check on the hierarchical upload", i2_toy_hier, ("toy-hier", "emit:toy127.hier")),
     Check("I2.components", "exactness: 256-bit components on boundary inputs", i2_components, ("components",)),
     Check("I2.mutation", "exactness: the checker rejects mutated circuits", i2_mutation, ("mutation",)),
     Check("I2.secp", "exactness: 256-bit hierarchical upload on exceptional and random points", i2_secp, ("secp-hier", "emit:secp256k1_G.hier")),

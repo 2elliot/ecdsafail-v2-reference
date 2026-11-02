@@ -34,19 +34,21 @@ def structural(ops, num_wires):
     return {name: kinds.count(k) for k, name in ((X, "X"), (CX, "CX"), (CCX, "CCX"), (SWAP, "SWAP"))}
 
 
-def check(gen, ops, cases):
-    """cases: list of (c, R). Returns list of failure descriptions."""
-    C, lay, n, curve, A = gen.C, gen.layout, gen.n, gen.curve, gen.A
+def check(gen, ops, cases, num_wires=None):
+    """cases: list of (c, R). Returns list of failure descriptions. num_wires
+    defaults to the built circuit's; pass a file's when ops came from it."""
+    lay, n, curve, A = gen.layout, gen.n, gen.curve, gen.A
+    num_wires = num_wires or gen.C.num_wires
     acc = lay["x"] + lay["y"]
     lanes = len(cases)
     init = sim.pack([cr[0] for cr in cases], lay["control"])
     init.update(sim.pack([encode(R, n) for _, R in cases], acc))
-    state = sim.run(ops, C.num_wires, init, lanes)
+    state = sim.run(ops, num_wires, init, lanes)
     out = sim.unpack(state, acc, lanes)
     ctl = sim.unpack(state, lay["control"], lanes)
     live = set(acc) | set(lay["control"])
     dirty = 0
-    for w in range(C.num_wires):
+    for w in range(num_wires):
         if w not in live:
             dirty |= state[w]
     fails = []
