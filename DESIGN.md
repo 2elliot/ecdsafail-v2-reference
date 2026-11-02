@@ -33,7 +33,53 @@ For a fixed public A = (a, b), the generic kernel fails only on R in {inf, A, -A
 3. runs the generic kernel controlled only through gen, using M^-1 ... M. With gen = 0, every gen-controlled step is the identity, and M^-1 followed by M cancels exactly at the circuit level;
 4. uncomputes gen, then uncomputes each f_k from the output as c AND [R' == O_k]. This works because R -> R + A is a bijection.
 
-M itself is total. For x = 0, Euclid emits an all-zero dialog and leaves u = q instead of 1. Bit 1 of u then distinguishes the two cases for free, and a controlled swap puts y back in place.
+M itself is total: it records z = [x = 0] and XORs z into x's low bit, so zero runs through the multiplier as one.
+Multiplication by one leaves y unchanged, as required by M(0, y) = (0, y).
+After the pass is reversed, the XOR is undone and the equality test clears z from the restored x.
+
+## Reusing the Euclid pass's zero words
+
+These arguments apply to every odd prime q of n >= 2 bits and every canonical x and y in [0, q).
+Let P = q(q - 1), T = bitlen(P), and x' = x XOR [x = 0].
+Then 1 <= x' < q, including x = 0 and x = 1, whose distinct original values are retained by z.
+
+**F1: the terminal state is (1, 0).**
+Initially u = q is positive and odd, v = x' is nonnegative, and gcd(u, v) = 1 by primality.
+If v is even, halving v halves the product and preserves the gcd because u is odd.
+If v is odd, the conditional swap makes the subtracted operand no larger than v, and (v - u)/2 is nonnegative.
+That step preserves the gcd and makes the product at most half its preceding value, with u still positive and odd.
+Thus u_i * v_i <= floor(P / 2^i), and at i = T the product is zero.
+Since u_T is positive, v_T = 0; the preserved gcd then forces u_T = 1.
+This is an argument using the existing iteration bound, not a sampled reduction of that bound.
+
+**F2: the zero remap is reversible.**
+The flag z stays allocated while x' is used, and the inverse pass restores x' before the remap is undone.
+The resulting x is the original input, so the repeated zero test clears z exactly.
+The x' = 1 path multiplies by one and therefore implements the specified identity on y for original x = 0.
+
+**F3: V supplies S.**
+V is zero after the pass, even without remapping zero, so its wires can hold the initially zero Bezout word S.
+The existing exact Bezout recurrence on canonical R = y and S = 0 ends at R = 0 and S = x' * y mod q.
+No arithmetic cell, modular reduction or transcript alphabet changes.
+
+**F4: only U's upper wires are lent.**
+With the remap, U = 1, so U[1:] are zero and U[0] must remain allocated.
+The allocator can lend those n - 1 zero wires to Bezout scratch; the unchanged exact cells restore that scratch to zero.
+Reclaiming n - 1 zero wires afterwards need not return the original wires or their order.
+The reclaimed word consists of the still-live U[0] followed by these zero wires, disjoint from the live x and y words.
+
+**F5: restore the terminal state on a new layout.**
+X on U[0] zeros the reclaimed word, and swapping it with S moves the product onto the word that becomes out while zeroing V again.
+R on y's wires is zero, so X on its low wire recreates one there.
+The triple (y wires, V wires, tape) now contains (1, 0, tape), the terminal state required by the inverse Euclid block.
+Block replay on that matching layout restores (q, x', zero tape), and loading q again clears y's wires.
+The cleared y word and tape are freed before the final equality test, allowing its AND chain to reuse their wires without increasing the peak.
+The remap is then undone, z is cleared and freed, and the product word becomes the logical y output.
+Every other wire is returned clean; reversing this same block gives M inverse, including its identity at x = 0.
+
+This change relies on the existing proven bound and width schedule and changes neither, nor any modular reduction.
+For nonzero remapped inputs, active operands fit the existing schedule, and the idle state (1, 0) also fits every emitted step.
+The gate-level small-prime checks and 256-bit boundary components exercise the implementation; they do not replace the all-input argument or constitute acceptance by the separate benchmark proof checker.
 
 ## Data shape
 

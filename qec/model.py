@@ -46,6 +46,10 @@ def inplace_mul(q, x, y, iters=None):
 
 
 def width_schedule(q, iters):
-    """Bits needed for u and v before iteration i while v != 0."""
+    """Bits needed before iteration i while v != 0.
+
+    For nonzero canonical x the terminal state (1, 0) also fits every
+    emitted step. The multiplier remaps x = 0 to this nonzero domain.
+    """
     n = q.bit_length()
     return [min(n, (q * (q - 1) >> i).bit_length()) for i in range(iters)]
