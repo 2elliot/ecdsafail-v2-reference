@@ -15,7 +15,6 @@ class DialogMultiplier:
         q, n = mod.q, mod.n
         self.iters = iteration_bound(q)
         self.widths = width_schedule(q, self.iters)
-        self.zbit = next(j for j in range(1, n) if q >> j & 1)
         self._euclid_steps = {}
         self._bezout_step = None
         self.block = None
@@ -50,6 +49,9 @@ class DialogMultiplier:
 
     def _body(self, Xr, Yr):
         C, q, n, T = self.C, self.mod.q, self.mod.n, self.iters
+        (zero,) = C.alloc(1)
+        eq_const_into(C, None, Xr, 0, zero)
+        C.cx(zero, Xr[0])
         U = C.alloc(n)
         load_const(C, U, q)
         G = C.alloc(2 * T)
@@ -59,15 +61,28 @@ class DialogMultiplier:
                 C.apply(self._euclid_step(self.widths[i]), [U, V, G[2 * i:2 * i + 2]])
 
         E = C.run(euclid, [U, Xr, G])
-        S = C.alloc(n)
+        # The completed pass leaves V zero, including when x is zero.
+        S = list(Xr)
+        # Remapping zero to one makes U = 1; its low wire remains live.
+        C.free(U[1:])
         bz = self._bezout()
         for i in reversed(range(T)):
             C.apply(bz, [G[2 * i:2 * i + 2], Yr, S])
-        cswap(C, U[self.zbit], Yr, S)
-        C.apply(E, [U, Xr, G], inverse=True)
-        load_const(C, U, q)
-        C.free(U + G + Yr)
-        Yr[:] = S
+        # Reclaim zero wires, without assuming the allocator's original order.
+        U[1:] = C.alloc(n - 1)
+        C.x(U[0])
+        for source, target in zip(S, U):
+            C.swap(source, target)
+        # R is zero now. Rebuild Euclid on that word, keeping the product on U.
+        C.x(Yr[0])
+        C.apply(E, [Yr, Xr, G], inverse=True)
+        load_const(C, Yr, q)
+        # Release clean words before the zero test borrows its AND chain.
+        C.free(Yr + G)
+        Yr[:] = U
+        C.cx(zero, Xr[0])
+        eq_const_into(C, None, Xr, 0, zero)
+        C.free([zero])
 
     def apply(self, Xr, Yr, inverse=False):
         if self.block is None:
@@ -76,13 +91,14 @@ class DialogMultiplier:
 
 
 def eq_const_into(C, ctrl, bits, value, target):
-    """target ^= ctrl AND [bits == value]."""
+    """XOR equality into target, optionally controlled by ctrl."""
     flips = [w for i, w in enumerate(bits) if not value >> i & 1]
     for w in flips:
         C.x(w)
     chain = []
-    acc = ctrl
-    for w in bits[:-1]:
+    acc = ctrl if ctrl is not None else bits[0]
+    factors = bits[:-1] if ctrl is not None else bits[1:-1]
+    for w in factors:
         (a,) = C.alloc(1)
         C.ccx(acc, w, a)
         chain.append((acc, w, a))

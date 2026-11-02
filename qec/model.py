@@ -38,17 +38,18 @@ def bezout(q, y, dialog):
 
 def inplace_mul(q, x, y, iters=None):
     iters = iters or iteration_bound(q)
-    u, v, dialog = euclid(q, x, iters)
-    assert v == 0, "euclid did not terminate within the bound"
+    u, v, dialog = euclid(q, x or 1, iters)
+    assert u == 1 and v == 0, "euclid did not reach (1, 0) within the bound"
     r, s = bezout(q, y, dialog)
-    if u != 1:
-        assert x == 0 and u == q
-        r, s = s, r
     assert r == 0
     return s
 
 
 def width_schedule(q, iters):
-    """Bits needed for u and v before iteration i while v != 0."""
+    """Bits needed before iteration i while v != 0.
+
+    For nonzero canonical x the terminal state (1, 0) also fits every
+    emitted step. The multiplier remaps x = 0 to this nonzero domain.
+    """
     n = q.bit_length()
     return [min(n, (q * (q - 1) >> i).bit_length()) for i in range(iters)]
