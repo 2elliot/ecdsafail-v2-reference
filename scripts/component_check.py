@@ -254,6 +254,11 @@ def _bz_order_control(q):
     return {'lanes': len(inputs), 'failures': int(any(v == 0 for v in result.values())), 'dirty': result}
 
 
+def bezout_step_checks():
+    return {f'bezout_step_exhaustive[{q}]': _bz_exhaust(q, step=True)
+            for q in (13, 127, 251, 509, 547)}
+
+
 def bezout_checks():
     # Missing arithmetic, a wrong reduction band, a dirty carry or wrong
     # output rotation must fail these independent integer-map checks.
@@ -272,6 +277,7 @@ def bezout_checks():
     for q in (127, 509):
         out[f'cell_census[{q}]'] = _bz_census(q)
         out[f'chain_order_control[{q}]'] = _bz_order_control(q)
+    out.update(bezout_step_checks())
     print(json.dumps(out, indent=1))
     return int(any(row['failures'] for row in out.values()))
 
