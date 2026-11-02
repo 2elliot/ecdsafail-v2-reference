@@ -81,6 +81,74 @@ This change relies on the existing proven bound and width schedule and changes n
 For nonzero remapped inputs, active operands fit the existing schedule, and the idle state (1, 0) also fits every emitted step.
 The gate-level small-prime checks and 256-bit boundary components exercise the implementation; they do not replace the all-input argument or constitute acceptance by the separate benchmark proof checker.
 
+## Shared-chain Euclid pass with a held offset
+
+For every odd prime q, put n = bitlen(q), P = q(q - 1), T = bitlen(P), and use the unchanged width_schedule.
+Let (u_i, v_i) be the reference Euclid state and (b_i, s_i) its parity and conditional-swap bits.
+The following describes the step and sweep introduced with this proof; the existing F1-F5 and C1-C10 arguments remain its external boundaries.
+
+**E1: the physical step, before wire rotation.**
+For w >= 1, take a w-bit odd word a, a w-bit word B, prior offset bit e (zero for the first step), two zero tape bits and a zero carry-in.
+Let vhat = B XOR e on the low bit, S = a + NOT(vhat) modulo 2^w, and c = [a > vhat], its carry out.
+The physical output before interpreting the rotation as halving is:
+
+| Condition | a output | B output | g0 | g1 |
+|---|---|---|---|---|
+| vhat even | a | vhat | 0 | e |
+| vhat odd, c = 0 | a | vhat - a | 1 | 0 |
+| vhat odd, c = 1 | vhat | a - vhat - 2 | 1 | 1 |
+
+The upward majority chain stores c_(i+1) on a[i], NOT(vhat_i) XOR a_i on B[i], and c_i XOR a_i on the preceding carry wire.
+On descent, one CCX restores a_i and a second adds g0*(c_i XOR a_i) to B[i].
+Two CX gates restore the preceding carry and remove a_i from B[i], leaving S_i when g0=1 and NOT(vhat_i) otherwise.
+The identity S_i XOR c_i XOR 1 = a_i XOR vhat_i lets an X-conjugated CCX controlled by g1 exchange the selected a bit without a second ripple.
+Complementing B gives NOT(S) when g0=1 and vhat otherwise.
+A CX from g1 to each upper B bit selects S on those bits in the swap case, while retaining NOT(S_0) on the low bit.
+Odd a and odd vhat imply S_0=1, so B's low bit is zero in both odd branches; it is also zero in the even branch.
+The final controlled copy adds (NOT(g0))*e to g1; it preserves e, and the carry-in returns to zero.
+Thus the low-bit rotation of the full V word is exact halving, and E1's table must not be confused with the logical post-rotation word.
+The first variant costs 4w+1 CCX and later variants cost 4w+2, including the offset copy.
+
+**E2: held-state induction.**
+For 1 <= x < q, before each step U=u_i and V+e_i=v_i with V>=0, e_0=0, and e_i the preceding cell's second bit for i>=1.
+If e=0 the absorb leaves V=v; if e=1 and v is odd it changes the even V=v-1 to v; if e=1 and v is even it changes the odd V=v-1 to v-2.
+Therefore vhat has v's parity and is at most v.
+For odd v with u>v, the gate outputs after rotation are (U,V,e')=(v,(u-v)/2-1,1); u-v>=2 makes V nonnegative.
+For odd v with u<=v they are (u,(v-u)/2,0).
+For even v they are (u,v/2,0) if e=0, and (u,v/2-1,1) if e=1.
+Each case preserves V+e'=v_(i+1) and U=u_(i+1), with e' the current second tape bit.
+During active steps u and v fit the existing window, so vhat<=v and V<=v make this chain exact in that window.
+This uses the existing product-halving bound proved in F1; it is not Bernstein-Yang's different divsteps bound.
+
+**E3: zero tail and terminal offset.**
+When v_i=0, nonnegative V and e force V=e=0.
+Then g0=g1=0 and the upward/downward chain restores U and V for every window, including one narrower than U.
+F1 gives u_T=1 and v_T=0 for nonzero canonical x over prime q, hence U=1,V=e=0 at the end.
+Primality is used here through F1's gcd argument.
+The last odd step has u=v=1, since reaching zero requires equal operands and their gcd is1, so that step leaves no offset.
+
+**E4: descending tape sweep.**
+Write z_i for the unswept second bit: z_i=s_i on odd cells, z_i=z_(i-1) on later even cells, and z_0=s_0.
+For i=T-1 down to1, XOR (NOT(b_i))*z_(i-1) into z_i.
+Descending order reads the predecessor before it is changed, so even cells become zero and odd cells keep s_i.
+The swept tape is exactly the reference dialog, allowing the unchanged Bezout cell, reduction proof and F1-F5 cleanup to apply.
+The sweep costs T-1 CCX and is one recorded definition, called once per pass body.
+
+**E5: zero inputs and generic callers.**
+The multiplier remaps original x=0 to x'=1, covered by E2; the retained flag distinguishes it from original x=1.
+A generic pass caller with V=0 instead starts in E3's tail, keeps U=q and V=0, writes zero tape, and leaves the sweep inert.
+Although q can exceed a later window, g0=0 restores the entire arithmetic chain and no higher bit changes.
+
+**E6: reversal and unchanged surfaces.**
+Reversing the pass reverses its sweep and then its step calls, including their layout permutations.
+F5 restores precisely the terminal words and swept tape needed by that inverse, so no additional garbage or cleanup assumption is introduced.
+The external pass relation, iteration bound, width schedule and modular reduction are unchanged; EuclidStep's physical relation and internal second-bit meaning change as E1 states.
+
+At G, sum(W)=98432 and T=512, so each pass costs 4*98432+2*512-1+511=395262 CCX instead of591104.
+Four passes save783368 CCX, or5483576 T; these are formulas to check against emitted counts.
+This change leaves _bezout and qec/arith.py unchanged.
+Finite gate checks and the separate leaf lift probe do not establish acceptance by the benchmark checker or compose this proof automatically.
+
 ## Exact merged Bézout reduction
 
 For every odd q >= 3 and canonical R, S, `Mod.dbl_add` computes (2S + g0 R) mod q with clean scratch. The Bézout step then applies the existing g1-controlled swap; its contract and [2, n, n] layout are unchanged.

@@ -15,7 +15,7 @@ from qec import flatten, sim
 from qec.arith import Mod, load_const
 from qec.builder import Circuit
 from qec.emit import write_circuit
-from qec.model import euclid, inplace_mul, iteration_bound, width_schedule
+from qec.model import euclid, inplace_mul, iteration_bound, offset_pass, sweep_tape, width_schedule
 from qec.point_add import DialogMultiplier
 
 
@@ -68,6 +68,28 @@ def gate_pass(q: int, iters: int | None = None) -> int:
     return bad.bit_count()
 
 
+def offset_checks(q, xs):
+    """Compare held states and swept cells with the independent reference dialog."""
+    T = iteration_bound(q)
+    offset_ok = tape_ok = True
+    for x in xs:
+        states, cells = offset_pass(q, x, T)
+        if len(states) != T + 1 or len(cells) != T:
+            return False, False
+        u, v = q, x
+        reference = euclid(q, x, T)[2]
+        for i, (U, V, e) in enumerate(states):
+            offset_ok &= U == u and V + e == v and V >= 0
+            offset_ok &= e == (cells[i - 1][1] if i else 0)
+            if i < T:
+                odd, swap = reference[i]
+                if swap:
+                    u, v = v, u
+                v = (v - odd * u) // 2
+        tape_ok &= sweep_tape(cells) == reference and states[-1][1:] == (0, 0)
+    return offset_ok, tape_ok
+
+
 def trace(q, x):
     u, v, sizes = q, x, []
     while v:
@@ -98,12 +120,14 @@ for q in [3, 5, 7, 11, 13, 31, 43, 61, 127, 251, 509, 1021, 4093]:
     pass_gates = gate_pass(q) == 0
     forward_bad = gate_mul(q, ys)
     inverse_bad = gate_mul(q, ys, inverse=True)
+    pass_offset, pass_tape = offset_checks(q, range(1, q))
     rows.append({"q": q, "worst_iterations": worst, "bound": B,
                  "width_schedule_ok": width_ok, "multiplier_ok": mul_ok,
                  "pass_end_ok": pass_end, "remap_control_ok": remap_control,
                  "pass_short_rejected": short_rejected, "pass_gates_ok": pass_gates,
                  "multiplier_gates_ok": forward_bad == inverse_bad == 0,
-                 "forward_bad": forward_bad, "inverse_bad": inverse_bad})
+                 "forward_bad": forward_bad, "inverse_bad": inverse_bad,
+                 "pass_offset_ok": pass_offset, "pass_tape_ok": pass_tape})
     print(json.dumps(rows[-1]))
 q = 2**256 - 2**32 - 977
 rng = random.Random(1)
@@ -111,9 +135,11 @@ pairs = [(rng.randrange(q), rng.randrange(q)) for _ in range(2000)]
 ok = all(inplace_mul(q, x, y) == (x * y % q if x else y) for x, y in pairs)
 pass_end = all(euclid(q, x or 1, iteration_bound(q))[:2] == (1, 0)
                for x in [0, 1, q - 1] + [x for x, _ in pairs])
+offset_ok = all(offset_checks(q, [1, q - 1] + [x for x, _ in pairs]))
 print(json.dumps({"q": "secp256k1", "bound": iteration_bound(q), "random_pairs": 2000,
-                  "multiplier_ok": ok, "pass_end_ok": pass_end}))
+                  "multiplier_ok": ok, "pass_end_ok": pass_end, "offset_ok": offset_ok}))
 keys = ("width_schedule_ok", "multiplier_ok", "pass_end_ok", "remap_control_ok",
-        "pass_short_rejected", "pass_gates_ok", "multiplier_gates_ok")
-sys.exit(0 if ok and pass_end and all(r["worst_iterations"] <= r["bound"]
+        "pass_short_rejected", "pass_gates_ok", "multiplier_gates_ok",
+        "pass_offset_ok", "pass_tape_ok")
+sys.exit(0 if ok and pass_end and offset_ok and all(r["worst_iterations"] <= r["bound"]
          and all(r[k] for k in keys) for r in rows) else 1)
