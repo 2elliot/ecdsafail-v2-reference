@@ -61,6 +61,16 @@ Python is stdlib only. The harness is a Rust crate whose dependencies are path r
 
 All numbers are measured unless marked as estimates.
 
+**This branch.**
+At G the circuit is 1,246 wires, 3,301,711 CCX, 23,111,977 T and 12,144,387 ops, as `scripts/accept.py` reports it, with 13 pass, 0 fail and 1 pending (`I7.charge`).
+Wires × T is 28,797,523,342, which is 75.31% below the reference's 2,311 × 50,465,933.
+The hierarchical JSON for G is 39,211,035 bytes, under the 100 MiB upload cap; the flat circuit is still over the 10,000,000 operation cap.
+Two named limits apply.
+`I2.model`'s zero-caller row is narrowed from the reference's gate.
+The standalone multiplier is restricted to x in [1, q), and nonzero x at its entries rests on the kernel's flag code and the non-full build refusal.
+`DESIGN.md` and `INVARIANTS.md` give the constructions and their arguments.
+The table and paragraphs below still give the earlier shared-chain build's figures, and so do the files in `receipts/` and `artifacts/` other than `receipts/baseline/`; they were not regenerated for this branch.
+
 | | toy q=127 | secp256k1, A = G | cap |
 |---|---|---|---|
 | wires | 60 | 1,803 | 4,096 |

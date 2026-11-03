@@ -1,5 +1,47 @@
 # Exact controlled point addition for `secp256k1-controlled-exact-v1`
 
+## Current mux contract
+
+The merged path now uses the paired-tick contract D1-D4 in [the mux proof](docs/mux-proof.md), superseding the older unrestricted canonical per-symbol Bézout-cell claims below. Logical T and R are canonical and scratch starts clean, but after a non-final B1 the physical word stores H = 2T + R in S4's encoded form, borrowing the next cell's g0 for its high bit. A semantic subtract follows B1; next.g0 must be 1 before holding; a final B1 requires R = 0. The held tick restores the borrowed symbol. Fallback primes retain the old step.
+
+The additional sweep rotates each no-subtract run so B1 is last in Bézout order.
+It runs in Euclid's tail, one cell behind the offset sweep, with which it commutes: the offset sweep's swap acts only on b of g0 = 1 cells, and each B1 step only on b of two g0 = 0 cells.
+So Euclid hands Bézout the B1-swept tape, and inverse Euclid unsweeps it before undoing its steps; this supersedes the placement in S2's last sentence and S17's last sentence of the mux proof, not the maps they state.
+The tape at rest is block-coded, two wires freed per 15 ticks by `qec/tape_block.py`; on the swept tape every B1 follows a subtract cell in tape order, so the code reads each block's cells last first and relies on the same clause.
+Cells read previous-symbol wires and can write the next g0 across a block edge, so Bézout decodes a block one tick before its first tick and codes it again one tick after its last, and two blocks are decoded across each edge for two ticks.
+The gate's toy primes have at most one block, so the edge path is covered by `scripts/block_check.py` at 20 bits and above and by the secp256k1 rows, not by a toy instance.
+The four-symbol alphabet, 384-tick bound and width schedule are unchanged. M and its inverse use clean states in their respective input/output layouts; top-level R remains on-curve or infinity with canonical encoding and zero scratch.
+
+The corrected S13 distinguishes logical carries from physical borrowed first-probe wires: only on P = 1 do those wires equal the carries; on P = 0 their junk is unobserved except through P and reversed. Exported e and the second chain remain zero on the inert lane. Credit arXiv:2609.05625 section VI for the offset representation.
+
+The exact-source independent review covers this pair contract; it does not grant upstream checker acceptance. The local held secp BDD probe stopped at the production 4,194,304-node budget. The earlier cell's cap-transfer proof does not automatically transfer. I7.charge, qualification, and the flat-upload operation cap remain open limits.
+
+## Clean wires in the mux tick
+
+Before these changes the mux tick held the circuit's peak at 1,275 wires, with 26 clean, while Euclid, the code calls and the B1 step peaked at 1,249.
+So each clean wire the tick gives up lowers Q by one, until another stage binds.
+A wire is worth T / (768 × 7 × Q) CCX per tick, counting 768 tick uses and 7 T per CCX, which is 3.40 on this tree.
+
+Two changes lower the tick to 19 clean wires at secp256k1, for 1,268 wires × 23,151,240 T on this tree, against 1,275 × 23,075,976 before them.
+Their statements are C1–C4 and R1–R4 in `INVARIANTS.md`.
+
+- **Kept low carries.** The second chain no longer keeps every low carry through its top.
+  It keeps c2, c6, c9 and c11 on wires and c12 on bit 11's selector, clears each other one once the next kept carry is built, and rebuilds them on the way down, at 2 CCX per dropped carry.
+  The mux cell already drops c1 to pay for k2, so this saves 6 more wires, at +12 CCX per tick.
+  At secp256k1 a pebble search over these carries, whose up pass may clear and rebuild any carry many times, finds this peak at the same cost, one wire lower at +6 CCX more, which is above a wire's worth, and nothing two wires lower.
+- **The quiet run's prefix top.** M's top below its last is read only by `M.write`, so it is cleared right after M is built and recomputed on a new wire just before the write.
+  That is 1 wire at +2 CCX per tick.
+
+Three other wire trades were priced and set aside:
+
+- `l0` cannot be recomputed across the second chain from g0 and R₀.
+  On a non-last B1 it holds H's bit n, parked there by the hide, and that bit is on no other wire.
+- Moving `Prefix` tops onto lower wires costs about +6 CCX per wire.
+  Each intermediate top is also the next block's `a`, read once when the prefix is built and twice in `write`.
+  A conditionally clean copy needs a true control beside it at every read, as in arXiv:2407.17966, so every read pays a gate.
+- Releasing P's top below its last saves nothing, because `P.write` runs at the second chain's top, which is the tick's peak.
+
+
 ## What the challenge actually requires
 
 Read from a checkout of the ecdsafail-v2 benchmark repository (read-only), which is not public until the benchmark is published.
@@ -30,12 +72,17 @@ For a fixed public A = (a, b), the generic kernel fails only on R in {inf, A, -A
 
 1. computes flags f_k = c AND [R == E_k] for the four exceptional inputs, and gen = c AND NOT(f1 xor f2 xor f3 xor f4);
 2. XORs E_k xor O_k into the accumulator under f_k;
-3. runs the generic kernel controlled only through gen, using M^-1 ... M. With gen = 0, every gen-controlled step is the identity, and M^-1 followed by M cancels exactly at the circuit level;
+3. runs the generic kernel controlled only through gen, using M^-1 ... M. With gen = 0, every gen-controlled step is the identity, and M^-1 followed by M cancels exactly at the circuit level when M's entries are in [1, q), which the kernel's flag code ensures;
 4. uncomputes gen, then uncomputes each f_k from the output as c AND [R' == O_k]. This works because R -> R + A is a bijection.
 
-M itself is total: it records z = [x = 0] and XORs z into x's low bit, so zero runs through the multiplier as one.
-Multiplication by one leaves y unchanged, as required by M(0, y) = (0, y).
-After the pass is reversed, the XOR is undone and the equality test clears z from the restored x.
+M's standalone contract is narrowed to canonical x in [1, q); x != 0 at M's entries rests on the kernel's flag code.
+The build refuses curves with a finite point at x = 0 and addends with x(A) = 0 or x(2A) = 0.
+The kernel codes both the -A exception and the c = 0, R = inf marker as f0 = f1 = 1, while keeping gen zero.
+It flips X's low bit under f0 AND f1 before M inverse and restores it after M, holding no extra wire during M.
+The direct evidence is the instrumented observation that the indicator equals [X = 0] before the remap and X != 0 at both M entries, on all 25,800 toy lanes and the secp256k1 special points.
+The guarantee's control of record removes both remaps with every flag intact; the existing point gates then fail on 72 lanes, c = 0 with R = inf and c = 1 with R = -A, across all 36 toy instances.
+The marker-removal, one-remap and old-gen-fold mutants are sensitivity controls; they do not test the nonzero-X guarantee.
+This named limit accompanies I2.model's narrowed zero-caller row.
 
 ## Reusing the Euclid pass's zero words
 
@@ -132,12 +179,21 @@ Write z_i for the unswept second bit: z_i=s_i on odd cells, z_i=z_(i-1) on later
 For i=T-1 down to 1, XOR (NOT(b_i))*z_(i-1) into z_i.
 Descending order reads the predecessor before it is changed, so even cells become zero and odd cells keep s_i.
 The swept tape is exactly the reference dialog, allowing the unchanged Bezout cell, reduction proof and F1-F5 cleanup to apply.
-The sweep costs T-1 CCX and is one recorded definition, called once per pass body.
+The sweep costs T-1 CCX and runs inline in the pass body, so that blocks of the tape code can be decoded and coded between its steps.
 
 **E5: zero inputs and generic callers.**
 The multiplier remaps original x=0 to x'=1, covered by E2; the retained flag distinguishes it from original x=1.
-A generic pass caller with V=0 instead starts in E3's tail, keeps U=q and V=0, writes zero tape, and leaves the sweep inert.
-Although q can exceed a later window, g0=0 restores the entire arithmetic chain and no higher bit changes.
+The pass's domain is therefore V != 0, which E7 needs.
+A generic caller with V=0 would keep U=q, whose high wires are not zero, so E7's lent wires would not start clean; the pass no longer supports that caller.
+
+**E7: late tape on U's vacated wires.**
+For V != 0, the proven bound gives max(u_t, v_t) < 2^(w_t) at every boundary t, or (u_t, v_t) = (1, 0), so U < 2^(w_t).
+A step at width w touches only U[:w], and widths never grow, so U's wires from w_t up are zero from boundary t to the end of the pass.
+When the width drops, the pass adds those wires to the tape's supply, the highest first, as it already does with V's.
+It lends as many as it ends with zero wires: V's tail and two free wires per coded block, 52 at secp256k1.
+At the end U takes those zero wires back as its upper wires, so U is again (1, 0, ..., 0) and S reuses the whole word.
+The boundary is a permutation of U and the pool together, so replaying the pass block in reverse gives inverse Euclid the mirror layout with no extra gate.
+Euclid's pool is smaller by the lent wires, which puts Euclid's peak below Bezout's, so no block is coded during the pass any more.
 
 **E6: reversal and unchanged surfaces.**
 Reversing the pass reverses its sweep and then its step calls, including their layout permutations.
@@ -259,4 +315,113 @@ The run of ones only makes m small.
 
 ## Why the permutation is enough for QNT-04
 
-The circuit contains only X, CX, CCX and SWAP. It is therefore a permutation matrix with no phases. If every promise basis state |c, R, 0> maps to |c, R + cA, 0>, the same matrix acts exactly on any superposition of promise states and on any extension with a reference system. Basis exactness plus clean scratch is the whole unitary contract. Outside the promise, the circuit is still a permutation, so QNT-06's valid-channel requirement holds by construction.
+The circuit contains only X, CX, CCX and SWAP. It is therefore a permutation matrix with no phases. The point-addition promise is R on the curve or infinity, with canonical encoding and zero scratch. On this domain, x and y parity identify each finite point; the x=0 guard retains a full y comparison when required to distinguish infinity. Both flag computations use this same domain before and after the controlled translation. If every promise basis state |c, R, 0> maps to |c, R + cA, 0>, the same matrix acts exactly on any superposition of promise states and on any extension with a reference system. Basis exactness plus clean scratch is the whole unitary contract. Outside the promise, the circuit is still a permutation, so QNT-06's valid-channel requirement holds by construction.
+
+## Last-cell lend
+
+The merged pass lends the uncoded final tape cell's b after its last read, using its proved complement relation with g0.
+Restoration allocates fresh zero storage and updates the tape boundary before inverse Euclid.
+The codec and tick schedule do not change.
+See `docs/tail-lend-proof.md`.
+
+## Seven-tick whole-block capacity codec
+
+The seven-cell block codes W[0..12], whose six inner windows (g_i, b_i, g_(i+1)) exclude 000, while W[13] remains raw.
+The existing block reading order reads cells last first on the B1-swept tape.
+There are 4,021 coded words and 8,042 inputs including both raw-b values.
+The primitive list is pinned by canonical-JSON SHA256 8a43178163d443fa37f9f9e8da3431e876f476d8f1d4c87b0710760106813ed2.
+Its 326 primitives include 36 CCX: the five-cell part costs 15, the re-tag costs 11, and the U1 hand pack costs 10.
+Two clean ancillas at indices 14 and 15 return zero, and FREE = (10,) names the block wire returned zero.
+W[13] is absent from every primitive operand.
+
+The generic encode/decode plumbing and sweep order are unchanged.
+Each decode supplies one fresh zero wire and each encode returns one wire to the allocator.
+At secp256k1, 54 blocks code 378 cells and leave six uncoded, preserving the last-cell lend.
+Euclid lends 56 wires: its two tail zeros plus one zero per coded block.
+Two decoded blocks still overlap across each edge.
+Item 4's borrowed tape storage must be checked on this layout at its four borrow boundaries; later physical reuse is distinct from a live FREE or codec-ancilla role.
+
+This section supersedes the earlier fifteen-tick codec summaries and their 25-block, two-free-wire and 52-wire lending figures.
+The whole-block domain requires all six inner windows, including the boundaries the previous three-part codec did not code.
+Checks cover the emitted list exhaustively, both sweep states at every gate prime with coded blocks, M and its inverse with every wire compared, the merged block edges, and directed secp256k1 lanes.
+The ordinary toy mutation row is finite-domain evidence; separate codec deletion controls test codec sensitivity.
+Every figure retains the limit: **`I2.model`'s zero-caller row narrowed from the reference's gate**.
+No checker admission or qualification is implied.
+
+### Euclid tick 0 on its initial boundary
+
+The initial U is q, V is the nonzero-remapped x, E is zero, and the cell and remaining tape are clean.
+The first step alone uses `_euclid_tick0` when the width is n and k = n - 1 - lsb(2^n - q + 1) unwritten tape wires are available.
+For odd v its output is U=v, V=(q-v)/2-1, E=1, cell=(1,0).
+For v=2 mod4 it leaves U=q, E=0 and cell=(0,0), with V=v/2; for v=0 mod4, V=v/4 and cell=(0,1).
+The V list rotates exactly as in the general step.
+Controlled addition of 2^n-q+1 uses the borrowed wires as carries; it uncomputes them before returning.
+The recorded block's input/output wire sets agree and contain every used wire.
+If width, supply or that shape contract fails, the first step falls back to `_euclid_step`; later steps always use the general block.
+The borrowed wires are zero at tick 0's entry/exit and the mirror points in the inverse pass.
+They may hold nonzero tape at E's exit, so they are not generally clean scratch there.
+
+### Inline kernel constants and reflection
+
+For cmodadd_const, k=c*[b>=q-v].
+The control temporarily holds c XOR k, so selectors (c XOR k,k) exclusively select v or v+2^n-q.
+The selected carry chain starts at the lowest set bit of either mask and uncomputes each carry before overwriting its old input bit.
+After restoring c, [b'<v] clears k.
+For creflect, k=c*[b>a].
+Complement b under c and add a+1 or (a+1+q) mod2^n under the same exclusive selectors.
+The output remains canonical and lies above a exactly when k, so CX(c,k) followed by comparison a+1>b' clears the flag.
+This reflection is valid at b=0 as well.
+It replaces kernel cneg and the final constant addition; the intervening subtraction acts on Yr and commutes.
+All gates are inline: addend-dependent constants introduce no new recorded definitions.
+Existing standalone cneg behavior and its tests remain.
+
+### Kernel flag recode across M
+
+At either M boundary, (c, f0, f1, gen) is one of 0000, 0110, 1000, 1100, 1010, 1110 and 1001.
+With c = 0 the word is 0000, or 0110 with the zero marker; with c = 1 it is 1001 on the generic path and 1000, 1100, 1010 or 1110 on an exception.
+CX(gen, c) and CX(gen, f0) move 1001 to 0101, then gen XOR= NOT c AND f0 AND NOT f1 clears gen using three CCX and one temporary wire.
+The other six words are unchanged, and the seven remaining (c, f0, f1) words are distinct.
+The kernel releases zero gen before each M apply and allocates a zero wire before reversing the recode, restoring c, f0, f1 and gen before any subsequent reader.
+The released physical wire may become M scratch or an output register; the reallocated wire carries the restored logical gen and is returned to build.
+Four recodes cost twelve CCX in total and free one live wire throughout both M applies.
+Direct observation checks both boundaries on all 25,800 toy lanes and twelve secp256k1 special-point lanes, including zero at release and reallocation, word restoration and final data/control/scratch.
+Removing gen's clearing CCX is the freed-wire control of record; removing CX(gen, f0) is a sensitivity control, each checked over the full toy population.
+The inherited narrowed zero-caller row and standalone M domain x in [1, q) remain unchanged.
+
+## Five-cell tail code
+
+The merged Bezout pass codes five raw tail cells when the tail lend applies, at least five cells are uncoded, and the width at tick T - 5 is at most six.
+The code applies after tick T - 6 and its block encode check, and reverses after block zero is encoded but before the lend restore.
+Its 168 primitives cost 21 CCX per apply, return FREE = (2,) zero, and restore three clean ancillas.
+The domain is all 230 L6 words on nine live wires; the exhaustive tail_code component row checks distinct images, zero FREE and ancillas, and exact reverse restoration.
+A real-tape corpus reaches 84 of those words; the remaining words are covered by the exhaustive component row, not claimed as reached tape states.
+The new row adds one component and 230 lanes, changing the census from 50 / 9,615 to 51 / 9,845 without changing any other row.
+Both existing named limits remain: I2.model's narrowed zero-caller row, and standalone M restricted to x in [1, q) with nonzero entries resting on kernel flags and the non-full build refusal.
+The tail code additionally requires T >= CELLS + 1 so its forward tick exists; the inverse asserts that the forward apply ran.
+
+## Block-zero code
+
+For canonical x < q, strips before the first subtract leave U = q > V, so that subtract swaps and the swept block-zero word lies in the 4,022-word D1 subset of the L6 domain.
+On the merged path with a block, a 21-CCX pre-map followed by the existing codec frees W10 and W13, with seven pre-map ancillas returned before the codec allocates its two.
+The extra free wire joins the clean pool that U borrows at the pass boundary, reducing external tape by one; with_free_slots restores both positions for later passes.
+A one-CCX HOLD frees b0 while ticks 7 through 2 run and restores it before tick 1, without touching the g1 next-cell lend.
+Nonmerged paths keep the original codec, and no new per-prime domain refusal is needed.
+The exhaustive D1 component row checks encode and HOLD both ways, clean FREE and ancillas, and distinct images, increasing the census only to 52 rows and 13,867 lanes.
+
+## Pooled tick schedule
+
+Selected merged ticks use a cap-four reversible pebble search on the second chain's unperched prefix, derived from that shape's length and quiet-run top wire.
+The construction applies when the sole low perch is at a-1 and a cap-four schedule exists; otherwise that shape keeps the original kept-carry schedule.
+At secp256k1 the 106 block-edge ticks, tail-code edge 378, and ticks 1 and 0 use the schedule, adding six CCX each.
+At the other measured merged primes below 20,000 where this schedule runs, CCX changes by zero to minus two per use, with no wire change or scratch increase.
+The uncoded terminal cell is never B1, so when the existing tail lend applies, tick T - 2 uses the no-prev shape and the terminal b release moves before that tick.
+That released b is unread until the existing end-of-pass X and CX restore it.
+These changes leave the nonmerged path and no-tail-lend instances unchanged.
+
+The codec's primitives 4, 128, 145, 162, 188 and 197 use the six checked CX substitutions, giving a 30-CCX reversible code.
+Its contract holds on all 8,042 window words and all 4,022 pre-map images; 6,254 window words have changed codewords, and each block uses the same shape for encoding and decoding.
+Each of the six wrong-control substitutions fails the domain contract.
+
+The merged Euclid sweep carries one mark equal to NOT g_k AND NOT g_(k-1) across the pass, updating it before the next block encode and clearing it before block zero is encoded.
+Each update toggles the mark by NOT g_(k-1) AND (g_k XOR g_(k-2)), so every g read is still raw.
+At 384 ticks this saves 382 CCX per Euclid pass, 1,528 per point addition, while the nonmerged sweep is unchanged.

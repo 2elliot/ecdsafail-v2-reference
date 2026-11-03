@@ -30,14 +30,16 @@ def _cx(C, ctrl, src, dst):
         C.ccx(ctrl, src, dst)
 
 
-def add(C, a, b, cout=None, ctrl=None):
-    """b += ctrl*a mod 2^w (CDKM). cout ^= ctrl*carry out."""
+def add(C, a, b, cout=None, ctrl=None, cin=None):
+    """b += ctrl*a mod 2^w (CDKM). cout ^= ctrl*carry out. A wire holding 1 as cin adds 1."""
     w = len(a)
     assert len(b) == w
     assert ctrl is None or ctrl not in (*a, *b, cout)
     if w == 0:
         return
-    (cin,) = C.alloc(1)
+    own = cin is None
+    if own:
+        (cin,) = C.alloc(1)
     carries = [cin] + a[:-1]
     for i in range(w):
         _maj(C, carries[i], b[i], a[i])
@@ -48,7 +50,8 @@ def add(C, a, b, cout=None, ctrl=None):
             _uma(C, carries[i], b[i], a[i])
         else:
             _cuma(C, ctrl, carries[i], b[i], a[i])
-    C.free([cin])
+    if own:
+        C.free([cin])
 
 
 def sub(C, a, b, borrow=None, ctrl=None):
@@ -233,6 +236,26 @@ def _selected_chain(C, low, selectors, masks):
     return carries
 
 
+def _add_selected_const(C, b, selectors, masks):
+    """Add one of the constant masks under exclusive selectors, inline."""
+    n = len(b)
+    masks = [mask % (1 << n) for mask in masks]
+    start = min(((mask & -mask).bit_length() - 1 for mask in masks if mask), default=n)
+    low = b[start:]
+    shifted = [mask >> start for mask in masks]
+    chain = _selected_chain(C, low[:-1], selectors, shifted)
+    for i in reversed(range(len(low))):
+        if i + 1 < len(low):
+            # Clear the carry against the old bit, before writing the sum.
+            _selected_carry(C, low[i], selectors, shifted, i, chain[i], chain[i + 1])
+            C.free([chain[i + 1]])
+        for selector, mask in zip(selectors, shifted):
+            if mask >> i & 1:
+                C.cx(selector, low[i])
+        if chain[i] is not None:
+            C.cx(chain[i], low[i])
+
+
 class Mod:
     """Arithmetic modulo an odd q < 2^n on canonical values in [0, q)."""
 
@@ -337,15 +360,33 @@ class Mod:
         s[:] = s[-1:] + s[:-1]
 
     def cmodadd_const(self, C, ctrl, value, b):
-        """b = (b + ctrl*value) mod q."""
+        """b = (b + ctrl*value) mod q on canonical b, with ctrl restored."""
         value %= self.q
         if value == 0:
             return
-        (top,) = C.alloc(1)
-        add_const(C, b, value, ctrl, top)
-        _reduce(C, b + [top], self._wrap())
-        gt_const_into(C, value, b, top, ctrl)
-        C.free([top])
+        (k,) = C.alloc(1)
+        gt_const_into(C, self.q - value, b, k, ctrl)
+        C.cx(ctrl, k)
+        C.cx(k, ctrl)
+        _add_selected_const(C, b, [ctrl, k], [value, value + (1 << self.n) - self.q])
+        C.cx(k, ctrl)
+        gt_const_into(C, value, b, k, ctrl)
+        C.free([k])
+
+    def creflect(self, C, ctrl, a, b):
+        """b = (a - b) mod q when ctrl, valid on all canonical b."""
+        a %= self.q
+        (k,) = C.alloc(1)
+        gt_const_into(C, a + 1, b, k, ctrl)
+        C.cx(ctrl, k)
+        for wire in b:
+            C.cx(ctrl, wire)
+        C.cx(k, ctrl)
+        _add_selected_const(C, b, [ctrl, k], [a + 1, (a + 1 + self.q) % (1 << self.n)])
+        C.cx(k, ctrl)
+        C.cx(ctrl, k)
+        gt_const_into(C, a + 1, b, k, ctrl)
+        C.free([k])
 
     def cneg(self, C, ctrl, b):
         """b = q - b when ctrl, valid for b in [1, q). A bijection on all of

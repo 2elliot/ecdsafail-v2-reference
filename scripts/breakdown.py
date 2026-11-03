@@ -7,6 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from qec.builder import Circuit
 from qec.curve import SECP256K1, SECP256K1_G
+from qec.model import tick_bound
 from qec.point_add import ControlledPointAdd, DialogMultiplier
 
 
@@ -28,14 +29,14 @@ def euclid_only(C, X, Y):
     from qec.arith import load_const
     U = C.alloc(n)
     load_const(C, U, mod.q)
-    G = C.alloc(2 * M.iters)
-    M._euclid_pass(U, X, G)
+    pool = list(X) + C.alloc(M.tape_external)
+    M._euclid_pass(U, pool)
 
 
 def bezout_only(C, Y, S, G):
+    # The pass reads the coded tape; the B1 sweep now runs in Euclid's tail.
     M = DialogMultiplier(C, mod)
-    for i in reversed(range(M.iters)):
-        C.apply(M._bezout(), [G[2 * i:2 * i + 2], Y, S])
+    M._bezout_pass(M.with_free_slots(G), Y, S)
 
 
 def mulsub(C, g, X, Y):
@@ -44,7 +45,9 @@ def mulsub(C, g, X, Y):
 
 
 out["euclid_pass"] = count(euclid_only, [n, n])
-out["bezout_pass"] = count(bezout_only, [n, n, 2 * 512])
+tape = DialogMultiplier(Circuit(), mod)
+freed = sum(len(tape._block_free(j, tape.swept)) for j in range(tape.blocks))
+out["bezout_pass"] = count(bezout_only, [n, n, 2 * tick_bound(mod.q) - freed])
 out["dialog_multiplier_M"] = count(lambda C, X, Y: DialogMultiplier(C, mod).apply(X, Y), [n, n])
 out["lambda_square_subtract"] = count(mulsub, [1, n, n])
 full = gen.build()

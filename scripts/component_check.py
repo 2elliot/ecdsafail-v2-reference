@@ -49,6 +49,88 @@ def run_case(build, inputs, expect):
     return {"ops": len(C), "wires": C.num_wires, "lanes": lanes, "failures": len(fails), "first": [[hex(x) for x in inputs[i]] for i in fails[:2]]}
 
 
+def tail_code_check():
+    """Exhaust all 230 L6 words from the tail-code handover."""
+    from array import array
+    from qec import tail_code
+
+    words = (
+        68, 69, 70, 71, 76, 77, 78, 79, 81, 83, 84, 85, 86, 87, 88,
+        89, 90, 91, 92, 93, 94, 95, 97, 99, 100, 101, 102, 103, 104, 105,
+        106, 107, 108, 109, 110, 111, 113, 115, 116, 117, 118, 119, 120, 121, 122,
+        123, 124, 125, 126, 127, 145, 147, 148, 149, 150, 151, 152, 153, 154, 155,
+        156, 157, 158, 159, 164, 165, 166, 167, 169, 170, 273, 275, 276, 277, 278,
+        279, 280, 281, 282, 283, 284, 285, 286, 287, 305, 307, 308, 309, 310, 311,
+        312, 313, 314, 315, 316, 317, 318, 319, 324, 325, 326, 327, 332, 333, 334,
+        335, 337, 339, 340, 341, 342, 343, 344, 345, 346, 347, 348, 349, 350, 351,
+        353, 355, 356, 357, 358, 359, 364, 365, 366, 367, 369, 371, 372, 373, 374,
+        375, 376, 377, 378, 379, 380, 381, 382, 383, 388, 389, 390, 391, 396, 397,
+        398, 399, 401, 403, 404, 405, 406, 407, 412, 413, 414, 415, 428, 429, 430,
+        431, 433, 435, 436, 437, 438, 439, 440, 441, 442, 443, 444, 445, 446, 447,
+        452, 453, 454, 455, 460, 461, 462, 463, 465, 467, 468, 469, 470, 471, 472,
+        473, 474, 475, 476, 477, 478, 479, 481, 483, 484, 485, 486, 487, 488, 489,
+        490, 491, 492, 493, 494, 495, 497, 499, 500, 501, 502, 503, 504, 505, 506,
+        507, 508, 509, 510, 511,
+    )
+    C = Circuit()
+    W = C.alloc(tail_code.LIVE)
+    tail_code.apply(C, W)
+    lanes = len(words)
+    init = sim.pack(words, W)
+    state = sim.run(C.ops, C.num_wires, init, lanes)
+    images = sim.unpack(state, W, lanes)
+    zero = [W[i] for i in tail_code.FREE] + list(range(tail_code.LIVE, C.num_wires))
+    dirty = 0
+    for wire in zero:
+        dirty |= state[wire]
+    reverse = array('i', (v for k in range(len(C.ops) - 4, -1, -4)
+                          for v in C.ops[k:k + 4]))
+    restored = sim.run(reverse, C.num_wires, dict(enumerate(state)), lanes)
+    wrong = 0
+    for wire, value in enumerate(restored):
+        wrong |= value ^ init.get(wire, 0)
+    duplicates = lanes - len(set(images))
+    return {"lanes": lanes, "failures": (dirty | wrong).bit_count() + duplicates,
+            "distinct_images": len(set(images)), "dirty": dirty.bit_count(),
+            "reverse_failures": wrong.bit_count(), "ops": len(C), "wires": C.num_wires}
+
+
+def block0_code_check():
+    """Exhaust D1, checking the full code and the partial hold in both directions."""
+    from array import array
+    from qec import block0_code
+
+    words = []
+    for w in range(1 << 14):
+        cells = [((w >> (12 - 2 * i)) & 1, (w >> (13 - 2 * i)) & 1) for i in range(7)]
+        local = all(cells[i][0] or cells[i][1] or cells[i - 1][0] for i in range(1, 7))
+        if local and next((b for g, b in cells if g), 1):
+            words.append(w)
+    assert len(words) == 4022
+    failures = 0
+    distinct = []
+    for build, free in ((block0_code.encode, block0_code.FREE),
+                        (block0_code.hold, (13,))):
+        C = Circuit()
+        W = C.alloc(14)
+        build(C, W)
+        init = sim.pack(words, W)
+        state = sim.run(C.ops, C.num_wires, init, len(words))
+        dirty = 0
+        for wire in [W[i] for i in free] + list(range(14, C.num_wires)):
+            dirty |= state[wire]
+        images = sim.unpack(state, W, len(words))
+        distinct.append(len(set(images)))
+        reverse = array('i', (v for k in range(len(C.ops) - 4, -1, -4)
+                              for v in C.ops[k:k + 4]))
+        restored = sim.run(reverse, C.num_wires, dict(enumerate(state)), len(words))
+        wrong = 0
+        for wire, value in enumerate(restored):
+            wrong |= value ^ init.get(wire, 0)
+        failures += (dirty | wrong).bit_count() + len(words) - len(set(images))
+    return {"lanes": len(words), "failures": failures, "distinct_images": distinct}
+
+
 def main():
     q = 2**256 - 2**32 - 977
     n = q.bit_length()
@@ -123,6 +205,20 @@ def main():
         out[f"add_const_ctrl_cout[{name}]"] = run_case(b_addc, [(c, b, o) for c in (0, 1) for b in near for o in (0, 1)],
                                                       lambda c, b, o, v=v: (c, (b + c * v) % 2**n, o ^ (c & (b + v >= 2**n))))
 
+    reflection = []
+    for a in sorted({a_G, 0, 1, q - 1, q - 2, 2**255 % q}):
+        near = sorted(set(pool) | {v % q for v in (0, a - 1, a, a + 1, q - 1)})
+
+        def b_reflect(C, a=a):
+            c, b = C.alloc(1), C.alloc(n)
+            mod.creflect(C, c[0], a, b)
+            return [c, b], [c, b]
+        row = run_case(b_reflect, [(c, b) for c in (0, 1) for b in near],
+                       lambda c, b, a=a: (c, (a - b) % q if c else b))
+        reflection.append({"a": hex(a), **row})
+    out["creflect_ctrl"] = {"lanes": sum(r["lanes"] for r in reflection),
+                            "failures": sum(r["failures"] for r in reflection), "constants": reflection}
+
     def b_mul(C):
         x, y = C.alloc(n), C.alloc(n)
         x_in, y_in = list(x), list(y)
@@ -131,9 +227,12 @@ def main():
     xs = [0, 1, 2, q - 1, q - 2, 2**255] + long_x + [rng.randrange(1, q) for _ in range(16)]
     ys = [0, 1, q - 1, 2**255 % q, rng.randrange(q)]
     mul_in = [(x, ys[i % len(ys)]) for i, x in enumerate(xs)] + [(0, y) for y in ys] + [(x, q - 1) for x in long_x[:6]]
+    mul_in = [(x, y) for x, y in mul_in if x != 0]
     t = time.time()
     out["dialog_mul"] = run_case(b_mul, mul_in, lambda x, y: (x, x * y % q if x else y))
     out["dialog_mul"]["seconds"] = round(time.time() - t, 1)
+    out["tail_code"] = tail_code_check()
+    out["block0_code"] = block0_code_check()
     print(json.dumps(out, indent=1))
     sys.exit(1 if any(isinstance(v, dict) and v["failures"] for v in out.values()) else 0)
 
@@ -184,12 +283,18 @@ def _bz_exhaust(q, m=None, inverse=False, step=False):
     C, ins, outs = _bz_build(q, m, inverse, step)
     batch, wants = [], []
     failures = lanes = 0
+    # With no neighbours a tick's B1 is the last of a pass, whose R is 0.
+    merged = step and DialogMultiplier(Circuit(), Mod(q)).narrow.merged
     for g in range(4 if step else 2):
         for r in range(q):
             for s in range(q):
+                if merged and g == 0 and r:
+                    continue
                 batch.append((g, r, s))
                 v = ((s - g * r) * pow(2, -1, q) if inverse else 2 * s + (g & 1) * r) % q
-                wants.append((g, v, r) if step and g & 2 else (g, r, v))
+                if step and g == 2:
+                    v = 4 * s % q
+                wants.append((g, v, r) if step and g == 3 else (g, r, v))
                 if len(batch) == 8192:
                     wrong, _, _, _ = _bz_state(C, ins, outs, batch, wants)
                     failures += wrong.bit_count(); lanes += len(batch)
