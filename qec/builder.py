@@ -42,10 +42,14 @@ def flatten(regs):
 
 
 def unflatten_into(regs, flat):
+    """Every register keeps its length except the last, which takes the rest,
+    so a block may grow or shrink its last register (the packed dialog)."""
     i = 0
-    for r in regs:
+    for r in regs[:-1]:
         r[:] = flat[i:i + len(r)]
         i += len(r)
+    if regs:
+        regs[-1][:] = flat[i:]
 
 
 class Circuit:
