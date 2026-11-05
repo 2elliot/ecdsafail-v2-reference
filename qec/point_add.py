@@ -4,17 +4,91 @@ affine (x, y) with infinity = (0, 0)."""
 from .arith import Mod, cswap, gt_into, load_const, sub
 from .builder import Circuit
 from .curve import Curve
-from .model import iteration_bound, width_schedule
+from .model import TRIT_GROUP, dialog_groups, iteration_bound, trit_width, width_schedule
+
+
+def _div3_window(C, a, b, c):
+    """One restoring-division-by-3 step on three adjacent wires. With
+    r' = a + 2b + 4c in [0, 6), it leaves r' - 3q in (a, b) and q = [r' >= 3]
+    in c. Exact on those six inputs; 2 CCX, found by exhaustive search."""
+    C.ccx(a, b, c)
+    C.ccx(a, c, b)
+    C.cx(c, a)
+
+
+def _mul3_window(C, a, b, c):
+    """Inverse of _div3_window: (r, q) with r < 3 -> r + 3q in (a, b, c)."""
+    C.cx(c, a)
+    C.ccx(a, c, b)
+    C.ccx(a, b, c)
+
+
+def pack_trits(C, trits):
+    """Pack Euclid dialog pairs into base 3, in place.
+
+    Each pair is (b0, sw) with sw = b0 AND [u > v], so it takes only the
+    three values 00, 10, 11. CX(sw, b0) turns it into the trit t = b0 + sw,
+    stored as (t & 1, t >> 1). Horner's rule P <- 3P + t then absorbs the
+    trits one at a time: with t in the low two wires and P above them, the
+    register holds (remainder t, quotient P) of a division of 3P + t by 3, so
+    running the division windows backwards, low to high, leaves 3P + t. The
+    top window of that division always sees r' < 2 and is skipped, and the
+    top wire it would touch is zero and is freed.
+
+    Returns the trit_width(k) wires that hold sum t_j * 3^(k-1-j). On the
+    promise domain (every pair valid) every freed wire is zero. Groups whose
+    packing frees nothing (k <= 2) are returned raw."""
+    k = len(trits)
+    if trit_width(k) >= 2 * k:
+        return [w for g in trits for w in g]
+    P = []
+    for j, g in enumerate(trits, 1):
+        C.cx(g[1], g[0])
+        if j == 1:
+            P = list(g)
+            continue
+        wj = trit_width(j)
+        R = list(g) + P + C.alloc(wj - len(P) - 1)
+        for i in range(wj - 1):
+            _mul3_window(C, R[i], R[i + 1], R[i + 2])
+        C.free([R[wj]])
+        P = R[:wj]
+    return P
+
+
+def unpack_trits(C, P, k):
+    """Exact inverse of pack_trits: k pairs (b0, sw) in dialog order."""
+    if trit_width(k) >= 2 * k:
+        return [P[2 * i:2 * i + 2] for i in range(k)]
+    trits = []
+    for j in range(k, 1, -1):
+        wj = trit_width(j)
+        R = list(P) + C.alloc(1)
+        for i in reversed(range(wj - 1)):
+            _div3_window(C, R[i], R[i + 1], R[i + 2])
+        g, P = R[:2], R[2:]
+        # The quotient is below 3^(j-1), so its wires above trit_width(j-1) are zero.
+        C.free(P[trit_width(j - 1):])
+        P = P[:trit_width(j - 1)]
+        C.cx(g[1], g[0])
+        trits.append(g)
+    C.cx(P[1], P[0])
+    trits.append(list(P))
+    return trits[::-1]
 
 
 class DialogMultiplier:
-    """M(x, y) = (x, x*y mod q) for x != 0, M(0, y) = (0, y); see model.py."""
+    """M(x, y) = (x, x*y mod q) for x != 0, M(0, y) = (0, y); see model.py.
+
+    The dialog is stored packed: each group of TRIT_GROUP Euclid iterations
+    keeps its pairs in trit_width(TRIT_GROUP) = 8 wires instead of 10."""
 
     def __init__(self, C, mod):
         self.C, self.mod = C, mod
         q, n = mod.q, mod.n
         self.iters = iteration_bound(q)
         self.widths = width_schedule(q, self.iters)
+        self.groups = dialog_groups(self.iters)
         self.zbit = next(j for j in range(1, n) if q >> j & 1)
         self._euclid_steps = {}
         self._bezout_step = None
@@ -57,17 +131,35 @@ class DialogMultiplier:
         C, q, n, T = self.C, self.mod.q, self.mod.n, self.iters
         U = C.alloc(n)
         load_const(C, U, q)
-        G = C.alloc(2 * T)
+        # G starts empty and grows by one packed group per TRIT_GROUP iterations,
+        # so the dialog never occupies more than its packed width.
+        G = []
 
         def euclid(U, V, G):
-            for i in range(T):
-                C.apply(self._euclid_step(self.widths[i]), [U, V, G[2 * i:2 * i + 2]])
+            for s, k in self.groups:
+                trits = []
+                for i in range(s, s + k):
+                    g = C.alloc(2)
+                    C.apply(self._euclid_step(self.widths[i]), [U, V, g])
+                    trits.append(g)
+                G.extend(pack_trits(C, trits))
 
         E = C.run(euclid, [U, Xr, G])
+        assert len(G) == sum(trit_width(k) if trit_width(k) < 2 * k else 2 * k for _, k in self.groups)
         S = C.alloc(n)
         bz = self._bezout()
-        for i in reversed(range(T)):
-            C.apply(bz, [G[2 * i:2 * i + 2], Yr, S])
+        offsets, off = [], 0
+        for _, k in self.groups:
+            w = trit_width(k) if trit_width(k) < 2 * k else 2 * k
+            offsets.append((off, w))
+            off += w
+        # Bezout reads the dialog last iteration first: unpack one group, run
+        # its steps, and pack it again before moving to the previous group.
+        for (s, k), (off, w) in zip(reversed(self.groups), reversed(offsets)):
+            trits = unpack_trits(C, G[off:off + w], k)
+            for g in reversed(trits):
+                C.apply(bz, [g, Yr, S])
+            G[off:off + w] = pack_trits(C, trits)
         cswap(C, U[self.zbit], Yr, S)
         C.apply(E, [U, Xr, G], inverse=True)
         load_const(C, U, q)
