@@ -48,6 +48,29 @@ def inplace_mul(q, x, y, iters=None):
     return s
 
 
+TRIT_GROUP = 5  # 3^5 = 243 <= 256: five dialog pairs fit in 8 wires instead of 10
+
+
+def trit_width(k):
+    """Wires needed to hold k packed trits, sum t_j 3^j < 3^k."""
+    return (3 ** k - 1).bit_length()
+
+
+def dialog_groups(iters, group=TRIT_GROUP):
+    """(first iteration, length) of each packed dialog group."""
+    return [(s, min(group, iters - s)) for s in range(0, iters, group)]
+
+
+def pack_value(dialog):
+    """Integer the packed register holds for one group of (b0, sw) pairs:
+    Horner over t = b0 + sw, first iteration most significant."""
+    P = 0
+    for b0, sw in dialog:
+        assert sw <= b0, "sw implies b0"
+        P = 3 * P + b0 + sw
+    return P
+
+
 def width_schedule(q, iters):
     """Bits needed for u and v before iteration i while v != 0."""
     n = q.bit_length()
