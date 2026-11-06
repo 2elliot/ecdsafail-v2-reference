@@ -2,7 +2,7 @@
 
 ## Start here
 
-This repository holds the reference circuit for the ecdsafail-v2 controlled point addition, an exact and complete |c>|R>|0> -> |c>|R + c*A>|0> on secp256k1. Fork it to make the circuit cheaper. The benchmark that will judge your change is not published yet, so `scripts/accept.py` checks the invariants a change must keep.
+This repository holds the reference circuit for the ecdsafail-v2 controlled point addition, an exact and complete |c>|R>|0> -> |c>|R + c*A>|0> on secp256k1. Fork it to make the circuit cheaper. A live board tests uploads, and its benchmark source is not public yet, so `scripts/accept.py` checks the invariants a change must keep.
 
 ```sh
 python3 scripts/accept.py --quick   # about 80 s of CPU, stdlib Python only
@@ -14,11 +14,37 @@ The checkers run in parallel, so wall time depends on your cores and load. On an
 - `INVARIANTS.md` says what each check protects, what no script can check, where the CCX are, and how to hand a change back.
 - `.claude/skills/verify-reference-circuit/` is a Claude Code skill that drives the generator, the checks, the cost report and the limits, with a feature map under `features/`.
 
+## Result on the live board
+
+The board tested this circuit on 2026-11-06 as `reference-c4`, evaluation `eval-6d612fd4c6156cdb`, in round 2. It ended `TESTED_UNQUALIFIED`, with 0 of 10 boundary cases and 0 of 10,000 seeded draws failing. That is a sampled pass and not a qualification. Its raw costs are the line to beat.
+
+| | Reference | Board limit |
+|---|---|---|
+| `lowered_t` | 50,465,933 | |
+| `qubit_time` | 164,135,627,418 | |
+| `toffoli` | 7,209,419 | |
+| `allocated_wires` | 2,311 | 4,096 |
+| `scheduled_ticks` | 71,023,638 | |
+| `expanded_ops` charge | 20,960,620 | 21,696,718 |
+| encoded records | 974,699 | 10,000,000 |
+| listed call wires | 1,055,748 | 10,000,000 |
+| upload bytes | 43,423,435 | 104,857,600 |
+
+The charge leaves 736,098 of room, about 3.4% of the limit, and a call costs about 64 of it.
+
+To start from the circuit on the board, emit the hierarchical file. The flat file is 822,274,918 bytes, which is over the upload limit.
+
+```sh
+python3 -I -B scripts/emit.py --hier --out my-circuit.json
+```
+
+The SHA-256 of `my-circuit.json` is `01eab537d5cd4c81680c17d94f0e664f5b616fc9e4818dc15937c839cdbfee00`. The upload wraps those exact bytes in a `SubmittedMethod` with `public_key` set to G. The top-level `artifact_hash` in the board's receipt is the SHA-256 of that upload, `666d5595e59e0755f91acf327cac07884e0fc58226d6abe8ee9b0845c7018457`. Another wrapper, such as one with a different `method_id`, changes that hash and leaves the circuit unchanged, so compare `my-circuit.json` to check your starting point.
+
 ## What this circuit is
 
 This directory holds a generator for the arithmetic kernel that the `secp256k1-controlled-exact-v1` profile asks for: |c>|R>|0> -> |c>|R + c*A>|0> for a fixed public point A. It covers every R on secp256k1, including infinity and R in {A, -A, -2A}. It is built from the exact core of Schrottenloher's dialog Euclid and Bezout multiplier (arXiv 2606.02235). It is emitted in the challenge's own `ArithmeticCircuit` JSON and checked with the challenge's own executor.
 
-**It does not pass the challenge at 256 bits, as the benchmark is published today.** It is exact and complete, and it runs correctly on the challenge's executor. The published service rejects it on size: it has 1.90x the operation cap and 7.84x the upload cap. No route to qualification exists in the repository today in any case. See "Unresolved gates" below.
+**It does not qualify at 256 bits.** It is exact and complete, and its hierarchical upload passes the live board's sampled test. No route to qualification exists in the repository today. See "Unresolved gates" below.
 
 `DESIGN.md` records the contract reading, the three designs compared, the data shape, and the completeness argument.
 
@@ -92,9 +118,7 @@ The circuit is pure X, CX, CCX and SWAP, so it is a phase-free permutation. Basi
 
 ## Unresolved gates
 
-This section describes the benchmark as published. Its next release accepts a hierarchical upload of definitions and calls. The hierarchical JSON for G is 43,422,940 bytes, which `scripts/accept.py` checks against the 100 MiB upload cap. How that release charges a hierarchical upload is pending its publication.
-
-These are listed in the order they would block a 256-bit submission on the published benchmark.
+These gates are listed in the order they blocked the flat upload on the earlier benchmark. Gates 1 and 2 do not block the hierarchical upload on the live board, which has the limits in "Result on the live board" above. Gates 3 to 5 remain open.
 
 1. **Operation cap.** 18,995,461 ops against a cap of 10,000,000 (`MAX_DECLARED_RECORDS`). One multiplier alone is 8,685,300 ops. The paper reports about 2^24 total gates per addition even for its approximate circuits, so no published point addition fits this cap.
 2. **Upload cap.** The service parses plain JSON, at about 43 bytes per op. 100 MiB therefore holds about 2.4M ops, roughly 8x fewer than this circuit needs. This also binds before the operation cap does.
@@ -104,7 +128,7 @@ These are listed in the order they would block a 256-bit submission on the publi
 
 ## Optimization headroom (estimates, not built)
 
-These estimates are against the published benchmark's caps.
+These estimates are against the earlier benchmark's caps, not the live board's limits.
 
 - The dialog garbage compression from the paper's Fig. 1 saves qubits, not ops.
 - The exact equivalent of the paper's pseudo-Mersenne reduction still needs a full-width carry, so that saving is smaller here than in the paper.
