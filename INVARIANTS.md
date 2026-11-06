@@ -2,7 +2,7 @@
 
 This page is for you if you change `qec/` to make the circuit cheaper. It says what `scripts/accept.py` protects and why, what no script can check for you, and how to hand a change back.
 
-The benchmark that will judge your change is not published yet. `accept.py` encodes the invariants that the circuit must keep under any scoring rule we expect. A change that passes it is likely to be accepted once the benchmark ships. Nothing here is a promise about the final scoring.
+A live board tests uploads, and its benchmark source is not public yet. `accept.py` encodes the invariants that the circuit must keep under any scoring rule we expect. A change can pass the gate and still be refused or fail on the board, because the gate does not compute the charge or run the board's test. Nothing here is a promise about the final scoring.
 
 ## Run the gate
 
@@ -41,7 +41,7 @@ Each checker must reach the coverage pinned in `COVERAGE` at the top of `scripts
 
 **I7 limits.** Wires stay at most 4,096. The hierarchical JSON for G, which the gate writes to `verify-out/accept/emit/`, stays under 104,857,600 bytes, and so does the JSON for every built addend. Every built addend also stays at most 4,096 wires. The reference is 43,422,940 bytes.
 
-**I7.charge.** The next benchmark release charges a hierarchical upload with a formula that is not public. This check stays pending until it is.
+**I7.charge.** The live board charges a hierarchical upload against a limit of 21,696,718. The charge is the expanded ops, plus about 64 per call and about 0.84 per call wire. Calls and call wires count over the expanded circuit, so a call inside a definition counts once each time that definition runs. The reference is charged 20,960,620, which leaves 736,098. An upload over the limit comes back `REJECTED` with `StructuralCapExceeded`. The gate does not compute the charge, so this check stays pending. The older limit and charge that `verify-out/accept.json` records for this check do not apply to the board. Before you upload, check your charge with `qcheck.py` from the member guide.
 
 **R1 run hygiene.** The gate records every tracked file and every untracked file git does not ignore, before and after it runs. For each path it records the file type, the permission bits and a hash of the contents, or of the link target for a symlink, without following links. Every checker writes under `verify-out/`, so a run that changes one of those files is a bug in the gate. It compares these records, not git status, so a second edit to a file you already changed still shows, and so do a lost executable bit and a file replaced by a symlink.
 
@@ -67,22 +67,22 @@ The multipliers and the lambda-squared subtract hold 99.8% of the CCX, and none 
 
 ## Report cost over a sample of addends
 
-Cost depends on A. [2]G and [3]G each cost 7,209,427 CCX, 8 more than G. Over 1,024 sampled addends at the reference, T ranged from 50,465,177 to 50,465,989. The benchmark may test any addend, and a whole attack runs hundreds of them.
+Cost depends on A. [2]G and [3]G each cost 7,209,427 CCX, 8 more than G. Over 1,024 sampled addends at the reference, T ranged from 50,465,177 to 50,465,989. The live board tests A = G. A later benchmark may test any addend, and a whole attack runs hundreds of them.
 
 The sample maximum that I6 prints is the largest cost among the addends the gate built. It does not bound the cost at other addends. The true maximum over every A is unproven. A change can raise the cost at an addend outside the sample, and the gate will not see it. So keep the cost of your change independent of A. A change inside the definitions does that, because I5 holds them identical across addends. If your change touches the top level, where A enters, argue its maximum over every A. A change that helps G and hurts another addend is a regression. Quote the I6 sample maximum with the sample it came from, not the cost at G.
 
 ## Don't trade ops for many small calls
 
-The next benchmark release charges per call and per definition, and those terms may rise before it ships. Splitting the circuit into many small definitions or many calls can lower the op count and still raise the charge. Prefer changes that remove CCX and ops outright.
+The live board charges per call and per call wire on top of the expanded ops. Splitting the circuit into many small definitions or many calls can lower the op count and still raise the charge. Calls and call wires add 1,965,159 to the reference's charge, about 87% of it from call wires, and the room left is about 3.4% of the limit. Prefer changes that remove CCX and ops outright.
 
 ## Not settled yet
 
-- The scoring rule and the caps of the next benchmark release.
+- The official scoring rule and caps. The live board's costs are raw per-call counts, and the board qualifies nothing.
 - Which whole-attack route comes first. One candidate is the binary wrapper with 512 controlled additions of fixed points. The other is a windowed kernel with a coherent addend.
 
 ## Hand a change back
 
-Open a pull request against this repository with:
+To enter a circuit on the board, follow the pull request format in your member guide. To hand back a change to the generator, open a pull request against this repository with:
 
 1. The change, with nothing under `receipts/` edited by hand.
 2. The output of `python3 scripts/accept.py` in full mode, pasted into the description, and its `verify-out/accept.json` attached.
