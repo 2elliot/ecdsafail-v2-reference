@@ -432,3 +432,10 @@ On odd Euclid ticks, the pass holds the most recently freed wire around the gene
 Each step takes clean scratch and restores it to zero, so selecting another clean wire preserves the step function and its inverse on the same reachable domain.
 Alternating scratch lets the next carry sweep overlap the previous strip sweep without changing the arithmetic or allocator.
 At secp256k1 this keeps 1,246 wires, 3,301,711 CCX and 12,144,387 expanded operations, while scheduled depth falls from 37,219,511 to 34,257,903 ticks.
+
+### Parallel final coefficient swap
+
+The final coefficient swap copies its control through a breadth-first CX tree onto scratch wires already touched and freed by that tick.
+The free-wire contract makes those copies equal to the control, and the reverse tree clears them after the swap while restoring the allocator stack exactly.
+Using only the tick's own wires preserves its arity and peak space, while distributing the swap controls reduces scheduled depth without adding CCX gates.
+At secp256k1 the circuit uses 1,246 wires and 32,866,267 scheduled ticks, with 3,301,711 CCX and 12,171,527 expanded primitive operations.
