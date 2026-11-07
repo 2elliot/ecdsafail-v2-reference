@@ -457,3 +457,12 @@ Each block computes carries for zero and one input carry; their XOR is propagati
 Reversing the combine and block computations restores the inputs, clears borrowed scratch and restores the allocator stack exactly.
 The 255-bit comparison adds 888 CCX per tick call without increasing arity, trading T for shorter depth.
 On the coefficient-swap base this gives 1,246 wires, 29,830,617 scheduled ticks, 3,981,919 CCX and T 27,873,433.
+
+## Depth pass
+
+`write_circuit` runs `qec/depth_pass.py` on the hierarchical branch after the definition ids are fixed.
+Per definition, in emission order, it sorts each CCX's controls, list-schedules the definition's commutation DAG forward and backward under the board's lowering, and keeps the input unless a schedule has fewer standalone forward plus inverse ticks.
+It then gives each CCX the control order its own standalone forward and inverse runs prefer.
+It reads definition bodies only, so definitions stay identical over addends, and a second application returns its input.
+The flat branch never changes, so `check_hier.py` checks the builder with `depth_pass=False`, and `receipts/baseline/flat_ops.sha256` does not move.
+At G the pass takes the board's ticks from 28,547,627 to 26,332,479 with the same wires, CCX, ops, call records and bytes.
