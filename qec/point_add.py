@@ -232,7 +232,10 @@ class DialogMultiplier:
             if tick0 is not None and tick0.wires <= set(tick0.flat_in) and set(tick0.flat_out) == set(tick0.flat_in):
                 self.C.apply(tick0, [U, V, E, cell, available[:k]])
             else:
+                # Alternate clean scratch so adjacent carry and strip sweeps can overlap.
+                hold = self.C.alloc(1) if i % 2 else []
                 self.C.apply(self._euclid_step(w), [U[:w], V, E, cell])
+                self.C.free(hold)
             G.extend(cell)
             next_width = self.widths[i + 1] if i + 1 < self.iters else self.pass_tail_width
             assert w - 1 <= next_width <= w

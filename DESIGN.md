@@ -425,3 +425,10 @@ Each of the six wrong-control substitutions fails the domain contract.
 The merged Euclid sweep carries one mark equal to NOT g_k AND NOT g_(k-1) across the pass, updating it before the next block encode and clearing it before block zero is encoded.
 Each update toggles the mark by NOT g_(k-1) AND (g_k XOR g_(k-2)), so every g read is still raw.
 At 384 ticks this saves 382 CCX per Euclid pass, 1,528 per point addition, while the nonmerged sweep is unchanged.
+
+## Euclid scratch scheduling
+
+On odd Euclid ticks, the pass holds the most recently freed wire around the general step call, then returns it.
+Each step takes clean scratch and restores it to zero, so selecting another clean wire preserves the step function and its inverse on the same reachable domain.
+Alternating scratch lets the next carry sweep overlap the previous strip sweep without changing the arithmetic or allocator.
+At secp256k1 this keeps 1,246 wires, 3,301,711 CCX and 12,144,387 expanded operations, while scheduled depth falls from 37,219,511 to 34,257,903 ticks.
