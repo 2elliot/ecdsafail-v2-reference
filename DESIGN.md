@@ -466,3 +466,17 @@ It then gives each CCX the control order its own standalone forward and inverse 
 It reads definition bodies only, so definitions stay identical over addends, and a second application returns its input.
 The flat branch never changes, so `check_hier.py` checks the builder with `depth_pass=False`, and `receipts/baseline/flat_ops.sha256` does not move.
 At G the pass takes the board's ticks from 28,547,627 to 26,332,479 with the same wires, CCX, ops, call records and bytes.
+
+## Out-of-place Euclid unwind
+
+When at least three clean tape wires are available, the unwind copies carries onto a ring of at most seventeen wires; otherwise it retains the existing unwind.
+The restore chain undoes each MAJ through U[i-1], and a following CX from restored U[i+1] fixes the temporary a_i XOR a_(i+1).
+Each bit selects its outputs using the saved carry, leaving that copy as c_i.
+The uncopy clears K_(i+1) with MAJ(A_i, B_i, c_i), where A_i is U_out XOR g1 and B_i is V_out XOR g0.
+This majority equals c_(i+1) on each reachable branch: g0=0, g0=1 with g1=0, and g1=1.
+The final carry copy is cleared from U[0] while it holds c1, and the control copies and parity wire are uncomputed.
+Two carry slots suffice for the pipelined descending chains; the remaining ring wires hold the parity and repeated controls to reduce serialization.
+The ring uses only the pass's available clean wires and restores them before the rotation reuses them.
+On the rotation baseline, U1 keeps 1,246 wires and gives 25,670,489 ticks, 3,820,863 CCX and 26,746,041 T, with 13,759,163 expanded operations.
+
+On the integrated compare-and-depth-pass head, U1 gives 1,246 wires, 20,776,137 scheduled ticks and 31,507,497 T.

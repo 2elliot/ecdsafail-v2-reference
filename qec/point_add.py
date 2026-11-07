@@ -53,6 +53,102 @@ def _par_rotate(C, two, V, cp):
     _unfanout(C, two, cp)
 
 
+RCAP = 6
+
+
+def ring_layout(n):
+    """Split n ring wires: h, r copies each of g0 and g1 (every bit's select reads both, and one
+    wire for all bits serializes them), and m >= 2 carry-copy slots."""
+    L = n - 1
+    r = min(RCAP, max(0, (L - 2) // 3))
+    return r, L - 2 * r
+
+def shared_difference_u1(C, U, V, g0, g1, ring):
+    w = len(U)
+    assert w >= 2 and len(ring) >= 3
+    r, m = ring_layout(len(ring))
+    h = ring[0]
+    G0, G1, slots = list(ring[1:1 + r]), list(ring[1 + r:1 + 2 * r]), list(ring[1 + 2 * r:])
+    assert len(slots) == m >= 2
+    (cin,) = C.alloc(1)
+    carries = [cin] + U[:-1]
+    for wire in V:
+        C.x(wire)
+    for c in G0:
+        C.cx(g0, c)
+    for i in range(w):
+        if i == 0:
+            C.cx(U[i], V[i])
+            C.cx(U[i], carries[i])
+            C.cx(V[i], U[i])
+        else:
+            _maj(C, carries[i], V[i], U[i])
+    C.ccx(g0, U[-1], g1)
+    for c in G1:
+        C.cx(g1, c)
+    C.cx(g0, h)
+    C.cx(g1, h)
+    C.x(h)
+    K = {}
+    a0 = lambda i: G0[i % r] if r else g0
+    a1 = lambda i: G1[i % r] if r else g1
+
+    def select(i):
+        u, v, k = U[i], V[i], K[i]
+        C.cx(u, v)
+        C.ccx(a0(i), k, v)
+        C.cx(u, k)
+        C.cx(k, v)
+        C.ccx(a1(i), v, u)
+        C.cx(k, v)
+
+    def finish(i):
+        # unc(i) clears K[i + 1]; then the bit's final values
+        u, v = U[i], V[i]
+        if i + 1 in K:
+            C.cx(a0(i), v)
+            C.cx(u, v)
+            C.ccx(K[i], v, K[i + 1])
+            C.cx(u, v)
+            C.ccx(u, v, K[i + 1])
+            C.cx(h, v)
+            del K[i + 1]
+        else:
+            C.x(v)
+            C.cx(a1(i), v)
+        C.cx(a1(i), u)
+
+    for i in reversed(range(1, w)):
+        K[i] = slots[i % m]
+        C.cx(U[i - 1], K[i])
+        C.ccx(U[i - 1], V[i], U[i])
+        if i != w - 1:
+            C.cx(U[i + 1], U[i])
+            select(i + 1)
+            finish(i + 1)
+    C.cx(U[1], U[0])
+    select(1)
+    finish(1)
+    C.cx(U[0], K[1])
+    del K[1]
+    assert not K
+    # bit 0 as the tree with R
+    C.cx(V[0], U[0])
+    C.cx(g0, V[0])
+    C.cx(carries[0], V[0])
+    C.cx(U[0], carries[0])
+    C.cx(carries[0], V[0])
+    C.free([cin])
+    C.x(V[0])
+    C.x(h)
+    C.cx(g1, h)
+    C.cx(g0, h)
+    for c in G1:
+        C.cx(g1, c)
+    for c in G0:
+        C.cx(g0, c)
+
+
 class DialogMultiplier:
     """M(x, y) = (x, x*y mod q) for canonical 1 <= x < q; see model.py."""
 
@@ -151,7 +247,10 @@ class DialogMultiplier:
         self.C.apply(self._encoder(j, swept),
                      [self._block_wires(G, j, swept)], inverse=True)
 
-    def _shared_difference(self, U, V, g0, g1):
+    def _shared_difference(self, U, V, g0, g1, ring_wires=()):
+        if len(ring_wires) >= 3:
+            shared_difference_u1(self.C, U, V, g0, g1, list(ring_wires[:17]))
+            return
         """Compare and form the even difference using one majority chain."""
         C = self.C
         (cin,) = C.alloc(1)
@@ -197,7 +296,7 @@ class DialogMultiplier:
                 offset = E[0]
                 C.cx(offset, V[0])
                 C.cx(V[0], g0)
-                self._shared_difference(U[:w], V[:w], g0, b)
+                self._shared_difference(U[:w], V[:w], g0, b, list(cp))
                 V[:] = V[1:] + V[:1]
                 # A subtract keeps its swap on E and moves the old offset to the cell.
                 cswap(C, g0, [offset], [b])
@@ -281,7 +380,7 @@ class DialogMultiplier:
             else:
                 # Alternate clean scratch so adjacent carry and strip sweeps can overlap.
                 hold = self.C.alloc(1) if i % 2 else []
-                self.C.apply(self._euclid_step(w, min(max(0, (w - 1) // 2 - 1), len(available))), [U[:w], V, E, cell, available[:min(max(0, (w - 1) // 2 - 1), len(available))]])
+                self.C.apply(self._euclid_step(w, min(max(17, (w - 1) // 2 - 1), len(available))), [U[:w], V, E, cell, available[:min(max(17, (w - 1) // 2 - 1), len(available))]])
                 self.C.free(hold)
             G.extend(cell)
             next_width = self.widths[i + 1] if i + 1 < self.iters else self.pass_tail_width
