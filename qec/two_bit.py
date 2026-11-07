@@ -526,7 +526,75 @@ class TwoBitMod(Mod):
 
         (z,) = C.alloc(1)
         mark_even(z)
-        gt_into(C, a[1:], low[1:], k1, ctrl=z)
+        # Carry-select blocks borrow only clean wires already touched by this tick.
+        cmp_a, cmp_b = a[1:], low[1:]
+        width = len(cmp_a)
+        if width:
+            (cin,) = C.alloc(1)
+            touched = set(C.prims[tick_start + 1::4])
+            touched.update(C.prims[tick_start + 2::4])
+            touched.update(C.prims[tick_start + 3::4])
+            saved_free = list(C.free_stack)
+            scratch = sorted(touched.intersection(saved_free))
+            blocks = min(7, width, 1 + len(scratch) // 2)
+            zs = scratch[:blocks - 1]
+            xs = scratch[blocks - 1:2 * (blocks - 1)]
+            borrowed = set(zs) | set(xs)
+            C.free_stack[:] = [wire for wire in saved_free if wire not in borrowed]
+            bounds = [width * j // blocks for j in range(blocks + 1)]
+            chains = []
+            for j in range(blocks):
+                lo, hi = bounds[j:j + 2]
+                carry = cin if j == 0 else zs[j - 1]
+                chain = [(C.cx, (cmp_a[lo], cmp_b[lo])), (C.cx, (cmp_a[lo], carry))]
+                for i in range(lo, hi):
+                    if i + 1 < hi:
+                        chain += [(C.cx, (cmp_a[i + 1], cmp_b[i + 1])),
+                                  (C.cx, (cmp_a[i + 1], cmp_a[i]))]
+                    chain.append((C.ccx, (carry if i == lo else cmp_a[i - 1], cmp_b[i], cmp_a[i])))
+                chains.append(chain)
+
+            def emit_chain(j, reverse=False):
+                for gate, args in reversed(chains[j]) if reverse else chains[j]:
+                    gate(*args)
+
+            tops = [cmp_a[bounds[j + 1] - 1] for j in range(blocks)]
+            for wire in cmp_b:
+                C.x(wire)
+            for j in range(blocks):
+                emit_chain(j)
+            for j in range(1, blocks):
+                C.cx(tops[j], xs[j - 1])
+            for j in range(1, blocks):
+                emit_chain(j, True)
+            for j in range(1, blocks):
+                C.x(zs[j - 1])
+                emit_chain(j)
+            combine = []
+            carry = tops[0]
+            for j in range(1, blocks):
+                combine += [(C.cx, (xs[j - 1], tops[j])),
+                            (C.ccx, (carry, tops[j], xs[j - 1]))]
+                carry = xs[j - 1]
+            for gate, args in combine:
+                gate(*args)
+            C.ccx(z, carry, k1)
+            for gate, args in reversed(combine):
+                gate(*args)
+            for j in range(1, blocks):
+                emit_chain(j, True)
+                C.x(zs[j - 1])
+            for j in range(1, blocks):
+                emit_chain(j)
+            for j in range(1, blocks):
+                C.cx(tops[j], xs[j - 1])
+            for j in range(1, blocks):
+                emit_chain(j, True)
+            emit_chain(0, True)
+            for wire in cmp_b:
+                C.x(wire)
+            C.free_stack[:] = saved_free
+            C.free([cin])
         mark_even(z)
         C.free([z])
         if p is not None:

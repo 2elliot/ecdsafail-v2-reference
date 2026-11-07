@@ -450,3 +450,10 @@ A reversible CX tree copies the rotation control onto available clean tape wires
 The pass supplies at most `(w - 1) // 2 - 1` copies from its unused, vacated or lent clean wires; sharing fewer copies round-robin preserves the same permutation.
 The zero-copy case retains the original step shape and serial rotation, including the smallest widths.
 Together these changes retain 1,246 wires and 3,301,711 CCX while reducing expanded operations to 11,901,731 and scheduled depth to 31,583,277 ticks on the current circuit before emission reordering.
+### Block carry-select coefficient comparison
+
+The coefficient tick splits its comparison into at most seven blocks, borrowing two clean touched scratch wires per additional block.
+Each block computes carries for zero and one input carry; their XOR is propagation, so combining the copied zero-carry result with the incoming carry produces the full comparison carry.
+Reversing the combine and block computations restores the inputs, clears borrowed scratch and restores the allocator stack exactly.
+The 255-bit comparison adds 888 CCX per tick call without increasing arity, trading T for shorter depth.
+On the coefficient-swap base this gives 1,246 wires, 29,830,617 scheduled ticks, 3,981,919 CCX and T 27,873,433.
