@@ -458,6 +458,17 @@ Reversing the combine and block computations restores the inputs, clears borrowe
 The 255-bit comparison adds 888 CCX per tick call without increasing arity, trading T for shorter depth.
 On the coefficient-swap base this gives 1,246 wires, 29,830,617 scheduled ticks, 3,981,919 CCX and T 27,873,433.
 
+### Split coefficient add and shift
+
+The coefficient add-or-shift separates the add on not-J from the rotation on J.
+The forward gate modifies a sum bit while its carry wire is idle; x*x = x makes the added term cancel in the ordinary carry undo.
+This leaves one CCX per bit in the back pass, followed by two layers of reversal swaps as soon as their bits are final.
+Four clean copies of J supply the gates and swaps, and the reverse copy tree clears them before the original allocator order is restored.
+On the block-compare base the circuit has 1,246 wires, 26,720,097 scheduled ticks and T 29,235,381.
+
+The three extra copies increase small-prime M allocation by one wire at q=7 and two at q=31 and q=127, and toy127 point-add by two wires, while secp256k1 stays at 1,246 wires with unchanged tick arities.
+On the integrated unwind-and-depth-pass head, the split add gives 1,246 wires, 17,970,862 scheduled ticks and T 32,869,445.
+
 ## Depth pass
 
 `write_circuit` runs `qec/depth_pass.py` on the hierarchical branch after the definition ids are fixed.
