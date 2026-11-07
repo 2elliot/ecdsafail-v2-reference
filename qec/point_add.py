@@ -11,6 +11,48 @@ from . import block0_code, tail_code, tape_block
 from .tape_block import FREE, TICKS
 
 
+def _fanout(C, src, copies):
+    have, todo = [src], list(copies)
+    while todo:
+        nxt = []
+        for h in list(have):
+            if not todo:
+                break
+            t = todo.pop(0)
+            C.cx(h, t)
+            nxt.append(t)
+        have += nxt
+
+def _unfanout(C, src, copies):
+    # The doubling tree's CX in reverse order.
+    rec = []
+    have, todo = [src], list(copies)
+    while todo:
+        nxt = []
+        for h in list(have):
+            if not todo:
+                break
+            t = todo.pop(0)
+            rec.append((h, t))
+            nxt.append(t)
+        have += nxt
+    for h, t in reversed(rec):
+        C.cx(h, t)
+
+def _par_rotate(C, two, V, cp):
+    """Rotate V left by one under `two`: reverse V[0..L-1], then reverse V[0..L-2]."""
+    L = len(V)
+    # With fewer clean wires than L // 2 - 1, the copies are shared round-robin; the rotation is
+    # the same permutation, only less parallel.
+    ctl = [two] + cp
+    _fanout(C, two, cp)
+    for p in range(L // 2):
+        cswap(C, ctl[p % len(ctl)], [V[p]], [V[L - 1 - p]])
+    for p in range((L - 1) // 2):
+        cswap(C, ctl[p % len(ctl)], [V[p]], [V[L - 2 - p]])
+    _unfanout(C, two, cp)
+
+
 class DialogMultiplier:
     """M(x, y) = (x, x*y mod q) for canonical 1 <= x < q; see model.py."""
 
@@ -132,26 +174,25 @@ class DialogMultiplier:
             else:
                 C.ccx(carries[i], V[i], U[i])
                 C.ccx(g0, carries[i], V[i])
-            C.cx(U[i], carries[i])
-            C.cx(U[i], V[i])
-            # S_i XOR c_i XOR 1 is a_i XOR v_i on the swap branch.
             C.cx(carries[i], V[i])
-            C.x(V[i])
+            C.cx(U[i], carries[i])
             if i != 0:
                 C.ccx(g1, V[i], U[i])
-            C.x(V[i])
+                C.cx(g1, U[i])
             C.cx(carries[i], V[i])
+            if i != 0:
+                C.cx(g1, V[i])
         C.free([cin])
         for wire in V:
             C.x(wire)
-        for wire in V[1:]:
-            C.cx(g1, wire)
 
-    def _euclid_step(self, w: int):
-        if w not in self._euclid_steps:
+    def _euclid_step(self, w: int, k: int = 0):
+        if k == 0 and w in self._euclid_steps:
+            return self._euclid_steps[w]
+        if (w, k) not in self._euclid_steps:
             C = self.C
 
-            def step(U, V, E, cell):
+            def step(U, V, E, cell, cp=()):
                 g0, b = cell
                 offset = E[0]
                 C.cx(offset, V[0])
@@ -171,15 +212,21 @@ class DialogMultiplier:
                 C.cx(offset, V[0])
                 C.cx(two, b)
                 C.ccx(two, offset, V[0])
-                for i in range(w - 2):
-                    cswap(C, two, [V[i]], [V[i + 1]])
+                if cp:
+                    _par_rotate(C, two, V[:w - 1], list(cp))
+                else:
+                    for i in range(w - 2):
+                        cswap(C, two, [V[i]], [V[i + 1]])
                 C.x(g0)
                 C.ccx(g0, b, two)
                 C.x(g0)
                 C.free([two])
 
-            self._euclid_steps[w] = C.record_shape(step, [w, w, 1, 2])
-        return self._euclid_steps[w]
+            if k:
+                self._euclid_steps[w, k] = C.record_shape(step, [w, w, 1, 2, k])
+            else:
+                self._euclid_steps[w] = C.record_shape(step, [w, w, 1, 2])
+        return self._euclid_steps[w] if k == 0 else self._euclid_steps[w, k]
 
     def _euclid_tick0(self):
         """First Euclid step on U=q, E=0, using unwritten tape for carries."""
@@ -234,7 +281,7 @@ class DialogMultiplier:
             else:
                 # Alternate clean scratch so adjacent carry and strip sweeps can overlap.
                 hold = self.C.alloc(1) if i % 2 else []
-                self.C.apply(self._euclid_step(w), [U[:w], V, E, cell])
+                self.C.apply(self._euclid_step(w, min(max(0, (w - 1) // 2 - 1), len(available))), [U[:w], V, E, cell, available[:min(max(0, (w - 1) // 2 - 1), len(available))]])
                 self.C.free(hold)
             G.extend(cell)
             next_width = self.widths[i + 1] if i + 1 < self.iters else self.pass_tail_width
