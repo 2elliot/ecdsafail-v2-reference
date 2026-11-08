@@ -425,3 +425,10 @@ Each of the six wrong-control substitutions fails the domain contract.
 The merged Euclid sweep carries one mark equal to NOT g_k AND NOT g_(k-1) across the pass, updating it before the next block encode and clearing it before block zero is encoded.
 Each update toggles the mark by NOT g_(k-1) AND (g_k XOR g_(k-2)), so every g read is still raw.
 At 384 ticks this saves 382 CCX per Euclid pass, 1,528 per point addition, while the nonmerged sweep is unchanged.
+
+## Uncontrolled top add bit
+
+Without carry output or control, the top majority and unmajority reduce to b XOR a XOR the incoming carry.
+Two CX gates replace that pair while every lower bit retains the original chain.
+Controlled and carry-output calls keep their existing implementation.
+The full circuit loses 44 CCX.
