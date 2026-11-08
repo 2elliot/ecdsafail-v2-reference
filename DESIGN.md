@@ -507,3 +507,10 @@ The ring uses only the pass's available clean wires and restores them before the
 On the rotation baseline, U1 keeps 1,246 wires and gives 25,670,489 ticks, 3,820,863 CCX and 26,746,041 T, with 13,759,163 expanded operations.
 
 On the integrated compare-and-depth-pass head, U1 gives 1,246 wires, 20,776,137 scheduled ticks and 31,507,497 T.
+
+## Top bit without a carry output
+
+For an uncontrolled add without a carry output, the top majority and unmajority cancel to b XOR a XOR the incoming carry.
+The lower bits retain their majority chain and the top bit uses two CX gates.
+Controlled adds and adds with a carry output retain their existing chain.
+This removes 44 CCX and 88 operations from the full circuit, leaving 14,808,479 operations and T 32,869,137.

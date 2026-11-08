@@ -41,11 +41,16 @@ def add(C, a, b, cout=None, ctrl=None, cin=None):
     if own:
         (cin,) = C.alloc(1)
     carries = [cin] + a[:-1]
-    for i in range(w):
+    # With no carry out and no control the top _maj and _uma cancel to b ^= a ^ c.
+    top = w - 1 if cout is None and ctrl is None else w
+    for i in range(top):
         _maj(C, carries[i], b[i], a[i])
     if cout is not None:
         _cx(C, ctrl, a[-1], cout)
-    for i in reversed(range(w)):
+    if top < w:
+        C.cx(a[-1], b[-1])
+        C.cx(carries[-1], b[-1])
+    for i in reversed(range(top)):
         if ctrl is None:
             _uma(C, carries[i], b[i], a[i])
         else:
