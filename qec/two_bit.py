@@ -571,9 +571,12 @@ class TwoBitMod(Mod):
                     chain.append((C.ccx, (carry if i == lo else cmp_a[i - 1], cmp_b[i], cmp_a[i])))
                 chains.append(chain)
 
-            def emit_chain(j, reverse=False):
+            # A block's chain equals its CX followed by its CCX ladder, and the CX only write the
+            # carry-in. Around X on the carry-in they cancel, so only the ladder is undone and redone.
+            def emit_chain(j, reverse=False, ladder=False):
                 for gate, args in reversed(chains[j]) if reverse else chains[j]:
-                    gate(*args)
+                    if not ladder or gate == C.ccx:
+                        gate(*args)
 
             tops = [cmp_a[bounds[j + 1] - 1] for j in range(blocks)]
             for wire in cmp_b:
@@ -583,10 +586,10 @@ class TwoBitMod(Mod):
             for j in range(1, blocks):
                 C.cx(tops[j], xs[j - 1])
             for j in range(1, blocks):
-                emit_chain(j, True)
+                emit_chain(j, True, ladder=True)
             for j in range(1, blocks):
                 C.x(zs[j - 1])
-                emit_chain(j)
+                emit_chain(j, ladder=True)
             combine = []
             carry = tops[0]
             for j in range(1, blocks):
@@ -599,10 +602,10 @@ class TwoBitMod(Mod):
             for gate, args in reversed(combine):
                 gate(*args)
             for j in range(1, blocks):
-                emit_chain(j, True)
+                emit_chain(j, True, ladder=True)
                 C.x(zs[j - 1])
             for j in range(1, blocks):
-                emit_chain(j)
+                emit_chain(j, ladder=True)
             for j in range(1, blocks):
                 C.cx(tops[j], xs[j - 1])
             for j in range(1, blocks):

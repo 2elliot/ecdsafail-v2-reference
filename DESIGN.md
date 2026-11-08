@@ -469,6 +469,13 @@ On the block-compare base the circuit has 1,246 wires, 26,720,097 scheduled tick
 The three extra copies increase small-prime M allocation by one wire at q=7 and two at q=31 and q=127, and toy127 point-add by two wires, while secp256k1 stays at 1,246 wires with unchanged tick arities.
 On the integrated unwind-and-depth-pass head, the split add gives 1,246 wires, 17,970,862 scheduled ticks and T 32,869,445.
 
+### Compare carry-pair cancellation
+
+A block chain equals its CX gates followed by its CCX ladder.
+The CX gates only write the carry-in and commute with its X, so their undo-redo pairs cancel around each carry flip.
+Only the ladder is undone and redone at the two compare carry transitions; all other chain calls remain complete.
+On the U1 head the circuit has 1,246 wires, 17,824,402 scheduled ticks and T 32,869,445.
+
 ## Depth pass
 
 `write_circuit` runs `qec/depth_pass.py` on the hierarchical branch after the definition ids are fixed.
