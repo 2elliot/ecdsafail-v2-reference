@@ -85,6 +85,82 @@ def gt_into(C, a, b, t, ctrl=None):
     C.free([cin])
 
 
+def _gt_up(C, cin, a, b):
+    """a[-1] = carry out of (b + a + cin), for b already complemented; _gt_down undoes it."""
+    carries = [cin] + a[:-1]
+    for i in range(len(a)):
+        _maj(C, carries[i], b[i], a[i])
+
+
+def _gt_down(C, cin, a, b):
+    carries = [cin] + a[:-1]
+    for i in reversed(range(len(a))):
+        C.ccx(carries[i], b[i], a[i])
+        C.cx(a[i], carries[i])
+        C.cx(a[i], b[i])
+
+
+def gt_into_blocked(C, a, b, t, ctrl, sizes, zeros=(), dirty=()):
+    """t ^= ctrl*[a > b], a and b restored: gt_into's map, with the words cut into blocks of the
+    given sizes, low first, whose ripples run side by side.
+
+    Block 0 ripples once with carry in 0, so its top a wire holds the carry into block 1. Each
+    other block j ripples with a carry in c, copies its carry out v1 onto a wire G, ripples back,
+    and holds the carry out v2 for carry in not c. With g = [a_j > b_j] and e = [a_j == b_j],
+    v1 = g ^ e*c and v2 = g ^ e*(1 - c), so for any c the carry into block j + 1 is
+    MAJ(v1, v2, carry into j), one more ripple over the blocks onto G that ends in t. All of it is
+    then undone, and a third ripple clears G.
+
+    Block 0's carry in and each G read 0: a fresh wire, or one of zeros, idle wires that read 0
+    whenever ctrl is 1. A higher block's carry in may be one of dirty, idle wires of any value,
+    taken bottom block first. Every wire but t is restored on every input.
+    """
+    m = len(sizes)
+    assert ctrl not in (*a, *b, t, *zeros, *dirty)
+    assert sum(sizes) == len(a) == len(b) and min(sizes) > 0
+    dirty = list(dirty)[:m - 1]
+    zeros = list(zeros)[:2 * m - 1 - len(dirty)]
+    fresh = C.alloc(2 * m - 1 - len(dirty) - len(zeros))
+    # Roles in the order they are first needed take the wires idle longest: the allocator hands
+    # out the last freed first, and zeros come last.
+    clean = fresh[::-1] + zeros
+    cins = [None] + [dirty.pop(0) if dirty else clean.pop(0) for _ in range(1, m)]
+    cins[0] = clean.pop(0)
+    gs = [None] + clean
+    blocks, lo = [], 0
+    for s in sizes:
+        blocks.append((a[lo:lo + s], b[lo:lo + s]))
+        lo += s
+    tops = [a_j[-1] for a_j, _ in blocks]
+    for x in b:
+        C.x(x)
+    for j in range(1, m):
+        _gt_up(C, cins[j], *blocks[j])
+        C.cx(tops[j], gs[j])
+        _gt_down(C, cins[j], *blocks[j])
+        C.x(cins[j])
+        _gt_up(C, cins[j], *blocks[j])
+    _gt_up(C, cins[0], *blocks[0])
+    carries = tops[:1] + gs[1:]
+    for j in range(1, m):
+        _maj(C, carries[j - 1], tops[j], gs[j])
+    _cx(C, ctrl, carries[-1], t)
+    for j in reversed(range(1, m)):
+        C.ccx(carries[j - 1], tops[j], gs[j])
+        C.cx(gs[j], carries[j - 1])
+        C.cx(gs[j], tops[j])
+    _gt_down(C, cins[0], *blocks[0])
+    for j in range(1, m):
+        _gt_down(C, cins[j], *blocks[j])
+        C.x(cins[j])
+        _gt_up(C, cins[j], *blocks[j])
+        C.cx(tops[j], gs[j])
+        _gt_down(C, cins[j], *blocks[j])
+    for x in b:
+        C.x(x)
+    C.free(fresh)
+
+
 def load_const(C, reg, value, ctrl=None):
     for i, w in enumerate(reg):
         if value >> i & 1:
@@ -197,6 +273,32 @@ def cswap(C, ctrl, a, b):
         C.cx(bi, ai)
         C.ccx(ctrl, ai, bi)
         C.cx(bi, ai)
+
+
+def crotate(C, ctrls, a):
+    """Under ctrls[0]: a[i] <- a[i + 1] for i < len(a) - 1 and a[-1] <- a[0]. ctrls[1:] are
+    clean wires that carry copies of the control while the swaps run, clean again after.
+
+    The rotation is a reversal of a followed by a reversal of a[:-1]. Each reversal is a layer
+    of disjoint swaps, so no swap waits on a chain through a or on one shared control: the
+    layers are interleaved low pairs first, so low wires settle first, and dealt round robin
+    to the copies."""
+    m, k = len(a), len(ctrls)
+    first = [(i, m - 1 - i) for i in range(m // 2)]
+    second = [(i, m - 2 - i) for i in range((m - 1) // 2)]
+    # second[i] reads the wires first[i] and first[i + 1] wrote, and no other first swap.
+    order = first[:1]
+    for i in range(1, len(first)):
+        order += [first[i], second[i - 1]]
+    order += second[max(len(first) - 1, 0):]
+    # Copy j is made from copy j minus its top bit: a fan-out tree of depth log2(k).
+    fan = [(ctrls[j - (1 << (j.bit_length() - 1))], ctrls[j]) for j in range(1, k)]
+    for src, dst in fan:
+        C.cx(src, dst)
+    for t, (i, j) in enumerate(order):
+        cswap(C, ctrls[t % k], [a[i]], [a[j]])
+    for src, dst in reversed(fan):
+        C.cx(src, dst)
 
 
 def _selected_carry(C, bit, selectors, masks, i, incoming, target):

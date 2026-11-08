@@ -1,7 +1,7 @@
 """Exact, complete, controlled fixed-addend point addition:
 |c>|R>|0> -> |c>|R + c*A>|0> for every R in E(F_q) encoded as little-endian
 affine (x, y) with infinity = (0, 0)."""
-from .arith import Mod, _maj, add_const, cswap, load_const
+from .arith import Mod, _maj, add_const, crotate, cswap, load_const
 from .builder import Circuit
 from .curve import Curve
 from .square import SquareFold
@@ -9,6 +9,10 @@ from .two_bit import TwoBitMod
 from .model import tick_bound, tick_widths
 from . import block0_code, tail_code, tape_block
 from .tape_block import FREE, TICKS
+
+# Copies of the Euclid step's shift control. More stop paying at 4 on secp256k1, and the
+# step's scratch stays under the circuit's peak, so they cost no wire there.
+SHIFT_COPIES = 4
 
 
 class DialogMultiplier:
@@ -141,11 +145,12 @@ class DialogMultiplier:
                 C.ccx(g1, V[i], U[i])
             C.x(V[i])
             C.cx(carries[i], V[i])
+            # Complement V[1:] under g1 as the unwind passes, not in a chain on g1 after it.
+            if i != 0:
+                C.cx(g1, V[i])
         C.free([cin])
         for wire in V:
             C.x(wire)
-        for wire in V[1:]:
-            C.cx(g1, wire)
 
     def _euclid_step(self, w: int):
         if w not in self._euclid_steps:
@@ -153,6 +158,11 @@ class DialogMultiplier:
 
             def step(U, V, E, cell):
                 g0, b = cell
+                # Taken before the difference so that two and its copies do not reuse its
+                # carry-in wire. Every step gets the same scratch wires, and the next step's
+                # carry chain starts on that one; held by two, it would wait for this shift.
+                ctl = C.alloc(SHIFT_COPIES)
+                two = ctl[0]
                 offset = E[0]
                 C.cx(offset, V[0])
                 C.cx(V[0], g0)
@@ -161,7 +171,6 @@ class DialogMultiplier:
                 # A subtract keeps its swap on E and moves the old offset to the cell.
                 cswap(C, g0, [offset], [b])
                 # A no-subtract tick strips a second bit when V + E is even.
-                (two,) = C.alloc(1)
                 C.cx(offset, V[0])
                 C.x(g0)
                 C.x(V[0])
@@ -171,12 +180,11 @@ class DialogMultiplier:
                 C.cx(offset, V[0])
                 C.cx(two, b)
                 C.ccx(two, offset, V[0])
-                for i in range(w - 2):
-                    cswap(C, two, [V[i]], [V[i + 1]])
+                crotate(C, ctl, V[:w - 1])
                 C.x(g0)
                 C.ccx(g0, b, two)
                 C.x(g0)
-                C.free([two])
+                C.free(ctl)
 
             self._euclid_steps[w] = C.record_shape(step, [w, w, 1, 2])
         return self._euclid_steps[w]

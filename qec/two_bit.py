@@ -21,7 +21,45 @@ hold H's two top bits between the ticks, and nothing clean is held across them.
 from functools import lru_cache
 import heapq
 
-from .arith import Mod, _maj, _selected_carry, cswap, gt_into
+from .arith import Mod, _maj, _selected_carry, cswap, gt_into_blocked
+
+
+# Copies of the A1 bit for the tick's last swap: the clean wires the tick's peak leaves there.
+FAN = 18
+# Blocks of the clear's compare.
+COMPARE_BLOCKS = 10
+
+
+def _compare_blocks(w, m):
+    """Block sizes for gt_into_blocked over w bits, low first. Block 0 ripples once and the
+    others three times, so block 0 takes two shares; above it sizes rise half a bit per block,
+    since the unwind reaches higher blocks first."""
+    m = max(1, min(m, w // 2))
+    first = 2 * w // (m + 1) if m > 1 else w
+    rest = w - first
+    cuts = [round(rest * j / (m - 1) + j * (j - m + 1) / 4) for j in range(m)] if m > 1 else [0]
+    sizes = [first] + [y - x for x, y in zip(cuts, cuts[1:])]
+    assert sum(sizes) == w and min(sizes) > 0
+    return sizes
+
+
+def _fanned_cswap(C, ctrl, a, b, k):
+    """cswap(C, ctrl, a, b) with ctrl copied onto k - 1 clean wires, so no control wire is
+    shared by more than ceil(len(a) / k) CCX. Pair i reads copy i mod k."""
+    k = max(1, min(k, len(a)))
+    copies = [ctrl] + C.alloc(k - 1)
+    h = 1
+    while h < k:
+        for j in range(min(h, k - h)):
+            C.cx(copies[j], copies[j + h])
+        h *= 2
+    for i, (x, y) in enumerate(zip(a, b)):
+        cswap(C, copies[i % k], [x], [y])
+    while h > 1:
+        h //= 2
+        for j in reversed(range(min(h, k - h))):
+            C.cx(copies[j], copies[j + h])
+    C.free(copies[1:])
 
 
 @lru_cache(maxsize=None)
@@ -525,7 +563,12 @@ class TwoBitMod(Mod):
 
         (z,) = C.alloc(1)
         mark_even(z)
-        gt_into(C, a[1:], low[1:], k1, ctrl=z)
+        # z = 1 forces k0 = 0, and wire k2 = 0 on the domain by S7, so both stand in for clean
+        # wires. Three idle wires of any value serve as carry ins: the next g0, R's bit 0 and b
+        # have been free longest, prev and p next. A pebbled tick has one clean wire fewer here.
+        dirty = [x for x in (nxt, a[0], b, *(prev or []), p) if x is not None][:3]
+        sizes = _compare_blocks(n - 1, COMPARE_BLOCKS - pebble)
+        gt_into_blocked(C, a[1:], low[1:], k1, z, sizes, [k0, k2], dirty)
         mark_even(z)
         C.free([z])
         if p is not None:
@@ -558,5 +601,5 @@ class TwoBitMod(Mod):
         C.ccx(g0, a[0], l0)
         C.free([l0, spill, high])
         s[:] = s[-1:] + s[:-1]
-        cswap(C, sw, a, s)
+        _fanned_cswap(C, sw, a, s, FAN)
         self._end(C, g0, b, sw)
