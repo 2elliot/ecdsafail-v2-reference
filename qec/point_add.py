@@ -230,6 +230,10 @@ def shared_difference_u6(C, U, V, g0, g1, ring):
     C.free([cin])
 
 
+# Hand each Bezout tick's B1 mark to the next tick when nothing runs between them.
+HAND_OFF_MARK = True
+
+
 class DialogMultiplier:
     """M(x, y) = (x, x*y mod q) for canonical 1 <= x < q; see model.py."""
 
@@ -527,17 +531,21 @@ class DialogMultiplier:
             self._bezout_step = C.record_shape(step, [2, mod.n, mod.n])
         return self._bezout_step
 
-    def _bezout_tick(self, first, last, pebble=False):
-        if (first, last, pebble) not in self._bezout_ticks:
+    def _bezout_tick(self, first, last, pebble=False, consume=False, produce=False):
+        """consume: the previous cell's B1 mark arrives on a wire from the tick before.
+        produce: this tick leaves the next tick's mark, NOR of its own cell, on a given clean wire."""
+        key = first, last, pebble, consume, produce
+        if key not in self._bezout_ticks:
             C, n = self.C, self.mod.n
 
-            def tick(prev, g, nxt, R, S):
+            def tick(prev, g, nxt, R, S, pin, pout):
                 self.narrow.tick(C, prev or None, g, nxt[0] if nxt else None,
-                                 R, S, pebble=pebble)
+                                 R, S, pebble=pebble, pin=pin[0] if pin else None,
+                                 pout=pout[0] if pout else None)
 
-            sizes = [0 if first else 2, 2, 0 if last else 1, n, n]
-            self._bezout_ticks[first, last, pebble] = C.record_shape(tick, sizes)
-        return self._bezout_ticks[first, last, pebble]
+            sizes = [0 if first else 2, 2, 0 if last else 1, n, n, int(consume), int(produce)]
+            self._bezout_ticks[key] = C.record_shape(tick, sizes)
+        return self._bezout_ticks[key]
 
     def _b1_step(self, G, i, both):
         """Use the pass-wide mark while both cells are still raw."""
@@ -575,6 +583,20 @@ class DialogMultiplier:
                 and tick_widths(self.mod.q, T)[T - tail_code.CELLS] <= 6)
         lo = 2 * (T - tail_code.CELLS)
         tail_encoded = False
+
+        def quiet(i):
+            """Nothing is emitted between tick call i and tick call i - 1, which has a prev."""
+            j = i - 1
+            if not HAND_OFF_MARK or i == T - 1 or j < 0:
+                return False
+            enc = (i + 1) % TICKS == 0 and i + 1 < T and (i + 1) // TICKS < self.blocks
+            tl = tail and i == T - tail_code.CELLS - 1
+            dec = j % TICKS == 0 and 0 <= j // TICKS - 1 < self.blocks
+            hold = j == 1 and self.blocks
+            np = lend_tail and j == T - 2
+            return not (enc or tl or dec or hold or np)
+
+        hand, mark_at = None, None
         for i in reversed(range(T)):
             nxt_block = i // TICKS - 1
             if i % TICKS == 0 and 0 <= nxt_block < self.blocks:
@@ -605,8 +627,17 @@ class DialogMultiplier:
                 for r, s in zip(Yr, S):
                     C.ccx(G[2 * i], r, s)
             else:
-                C.apply(self._bezout_tick(first, last, pebble),
-                        [prev, G[2 * i:2 * i + 2], nxt, Yr, S])
+                consume, produce = hand is not None, quiet(i)
+                if consume:
+                    # The mark is valid only if nothing ran since the tick that made it.
+                    assert mark_at == (len(C.prims), len(C.calls or ())) and not first
+                pin = [hand] if consume else []
+                pout = C.alloc(1) if produce else []
+                C.apply(self._bezout_tick(first, last, pebble, consume, produce),
+                        [prev, G[2 * i:2 * i + 2], nxt, Yr, S, pin, pout])
+                C.free(pin)
+                hand = pout[0] if produce else None
+                mark_at = (len(C.prims), len(C.calls or ()))
             prev_block = (i + 1) // TICKS
             if (i + 1) % TICKS == 0 and i + 1 < T and prev_block < self.blocks:
                 C.free(self._encode(G, prev_block, swept))

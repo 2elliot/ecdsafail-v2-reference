@@ -172,6 +172,11 @@ MAX_BLOCKS = 11
 LOOKAHEAD_ADD = True
 # The tick's P as PrefixR, whose write runs its blocks in parallel.
 PARALLEL_PREFIX = True
+# Put the final swap's sw and control copies on scratch the next tick reaches only after its add.
+LATE_FINAL_WIRES = True
+LATE_MIN_COPIES = 6
+# Copies of p for un-copying it from the word after the add (1 = none).
+P_FAN = 1
 
 
 def weighted_bounds(width, blocks):
@@ -886,7 +891,7 @@ class TwoBitMod(Mod):
         C.free(extra)
         C.free([cin, D, carry, t])
 
-    def tick(self, C, prev, g, nxt, a, s, pebble=False):
+    def tick(self, C, prev, g, nxt, a, s, pebble=False, pin=None, pout=None):
         """One tick of a swept tape. prev is the cell before, or None on the first tick.
         nxt is the next cell's g0 wire, or None on the last tick, whose B1 reduces normally."""
         n, f, w = self.n, self.f, self.window
@@ -894,7 +899,8 @@ class TwoBitMod(Mod):
         g0, b = g
         (spill, high) = C.alloc(2)
         word = s + [spill, high]
-        p = self._after_b1(C, prev)
+        # pin: the previous tick already left this tick's B1 mark on a wire.
+        p = pin if pin is not None else self._after_b1(C, prev)
         if p is not None:
             cswap(C, p, [s[0]], [spill])
             cswap(C, p, [g0], [high])
@@ -904,18 +910,31 @@ class TwoBitMod(Mod):
             for x in word:
                 C.cx(p, x)
         self._add_or_shift(C, b, a, word)
+        add_end = len(C.prims)
         if p is not None:
             # The rotation finishes word's bits in mirror pairs from the middle out, so un-copy p in
             # that order. These CX all share the control p and commute, so the order is free.
             done, order = set(), [word[n + 1]]
             for i in reversed(range(n // 2 + 1)):
                 order += [word[i], word[n - i]]
-            for x in order + list(word):
-                if x not in done:
-                    done.add(x)
+            order = [x for x in order + list(word) if not (x in done or done.add(x))]
+            if P_FAN > 1:
+                # p on clean wires the add just freed (the free stack's top, so no new wires), each
+                # copy un-copying one contiguous slice, so the CX don't queue on one control.
+                pc = [p] + C.alloc(P_FAN - 1)
+                ptree = [(pc[j - (1 << (j.bit_length() - 1))], pc[j]) for j in range(1, len(pc))]
+                for src, dst in ptree:
+                    C.cx(src, dst)
+                for i, x in enumerate(order):
+                    C.cx(pc[i * len(pc) // len(order)], x)
+                for src, dst in reversed(ptree):
+                    C.cx(src, dst)
+                C.free(pc[1:])
+            else:
+                for x in order:
                     C.cx(p, x)
         self._drop_after_b1(C, prev, p)
-        (l0,) = C.alloc(1)
+        (l0,) = [pout] if pout is not None else C.alloc(1)
         C.ccx(g0, a[0], l0)
         low = [l0] + word[:n - 1]
         L, H = low[:w], low[w:]
@@ -1060,6 +1079,17 @@ class TwoBitMod(Mod):
             bit_one(m)
             C.free([m])
         self._drop_after_b1(C, prev, p)
+        if LATE_FINAL_WIRES:
+            # The next tick maps its scratch as this one does, so wires this tick first touched
+            # after its add are ones the next tick also reaches only late: put sw there.
+            first_touch = {}
+            for pos in range(tick_start, len(C.prims), 4):
+                for w in C.prims[pos + 1:pos + 4]:
+                    first_touch.setdefault(w, pos)
+            late = [w for w in C.free_stack if first_touch.get(w, -1) >= add_end]
+            if late:
+                C.free_stack.remove(late[-1])
+                C.free_stack.append(late[-1])
         sw = self._begin(C, g0, b)
         C.ccx(b, low[1], k1)
         if f >> 1 & 1:
@@ -1073,7 +1103,15 @@ class TwoBitMod(Mod):
             C.cx(g0, b)
         C.cx(sw, b)
         C.ccx(g0, a[0], l0)
-        C.free([l0, spill, high])
+        if pout is not None:
+            # l0 is clean again and g0, b are final: leave the next tick's mark, NOR(g0, b), on it.
+            C.x(l0)
+            C.cx(g0, l0)
+            C.cx(b, l0)
+            C.ccx(g0, b, l0)
+            C.free([spill, high])
+        else:
+            C.free([l0, spill, high])
         s[:] = s[-1:] + s[:-1]
         # Reuse only this tick's clean scratch, keeping its recorded arity fixed.
         touched = set(C.prims[tick_start + 1::4])
@@ -1081,6 +1119,14 @@ class TwoBitMod(Mod):
         touched.update(C.prims[tick_start + 3::4])
         saved_free = list(C.free_stack)
         copies = sorted(touched.intersection(saved_free))
+        if LATE_FINAL_WIRES:
+            # Only wires the next tick first reaches after its add, so its start doesn't wait on them.
+            first_touch = {}
+            for pos in range(tick_start, len(C.prims), 4):
+                for w in C.prims[pos + 1:pos + 4]:
+                    first_touch.setdefault(w, pos)
+            late = [w for w in copies if first_touch[w] >= add_end]
+            copies = late if len(late) >= LATE_MIN_COPIES else copies
         C.free_stack[:] = [wire for wire in saved_free if wire not in copies]
         sources, tree = [sw], []
         filled = 0
