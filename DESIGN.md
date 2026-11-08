@@ -505,7 +505,7 @@ At the tick's 221-bit high word the blocks are 3, 7, 15, 31, 37, 37, 37, 37 and 
 
 The 1,253–1,256-wire variants reduce qubit-time by at most 3.941 percent versus the uncapped head.
 
-Cap 37 retains two fewer wires than cap 26 for only 0.010 percent higher qubit-time in the planner's sweep.
+Cap 37 uses two fewer wires than cap 26 for only 0.010 percent higher qubit-time.
 
 On the U7 head the circuit has 1,249 wires, 9,710,374 scheduled ticks and T 43,753,913.
 
