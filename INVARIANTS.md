@@ -269,6 +269,7 @@ The codec's primitives 4, 128, 145, 162, 188 and 197 use the six checked CX subs
 Its contract holds on all 8,042 window words and all 4,022 pre-map images; 6,254 window words have changed codewords, and each block uses the same shape for encoding and decoding.
 Each of the six wrong-control substitutions fails the domain contract.
 
-The merged Euclid sweep carries one mark equal to NOT g_k AND NOT g_(k-1) across the pass, updating it before the next block encode and clearing it before block zero is encoded.
+The merged Euclid sweep starts at mark(T - 2) and carries one mark equal to NOT g_k AND NOT g_(k-1), updating it before the next block encode and clearing it before block zero is encoded.
 Each update toggles the mark by NOT g_(k-1) AND (g_k XOR g_(k-2)), so every g read is still raw.
-At 384 ticks this saves 382 CCX per Euclid pass, 1,528 per point addition, while the nonmerged sweep is unchanged.
+The original carried-mark construction saved 382 CCX per Euclid pass at 384 ticks.
+The endpoint identities and skipped terminal transition now remove four further CCX per pass, sixteen per point addition; nonmerged sweeps use the endpoint identities without the merged terminal skip.

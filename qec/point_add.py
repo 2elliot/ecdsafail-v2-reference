@@ -259,12 +259,27 @@ class DialogMultiplier:
             self.C.x(G[2 * k - 2])
             self.C.x(G[2 * k])
 
+        # The pass reaches (1, 0) within T ticks: its last subtract leaves E = 0, and each
+        # no-subtract cell after it has b = 1. So at cell T - 1, g0 = 0 implies E ^ b = 1, and
+        # when cells T - 1 and T - 2 are both no-subtract their b are equal: the B1 step between
+        # them never swaps, and mark(T - 2) is made at once. Cell 0 is tick 0 on U = q > x, where
+        # a subtract always swaps, so there g0 = 1 implies E ^ b = 1.
+        late = swept and T >= 3
         if swept and T >= 2:
             (both,) = self.C.alloc(1)
-            mark(T - 1)
+            mark(T - 2 if late else T - 1)
         for i in range(T - 1, -1, -1):
-            cswap(self.C, G[2 * i], E, [G[2 * i + 1]])
-            if swept and i + 1 < T:
+            g0, b = G[2 * i], G[2 * i + 1]
+            if i == 0 or i == T - 1:
+                self.C.cx(b, E[0])
+                self.C.cx(g0, b)
+                if i:
+                    self.C.cx(E[0], b)
+                    self.C.x(b)
+                self.C.cx(b, E[0])
+            else:
+                cswap(self.C, g0, E, [b])
+            if swept and i + 1 < T and not (late and i == T - 2):
                 k = i + 1
                 self._b1_step(G, k, both)
                 if k >= 2:

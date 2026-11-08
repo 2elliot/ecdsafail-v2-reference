@@ -179,7 +179,8 @@ Write z_i for the unswept second bit: z_i=s_i on odd cells, z_i=z_(i-1) on later
 For i=T-1 down to 1, XOR (NOT(b_i))*z_(i-1) into z_i.
 Descending order reads the predecessor before it is changed, so even cells become zero and odd cells keep s_i.
 The swept tape is exactly the reference dialog, allowing the unchanged Bezout cell, reduction proof and F1-F5 cleanup to apply.
-The sweep costs T-1 CCX and runs inline in the pass body, so that blocks of the tape code can be decoded and coded between its steps.
+The first and last offset exchanges now use CX-only endpoint identities, and the merged sweep skips the terminal B1 step and its mark transition.
+The sweep remains inline in the pass body so tape blocks can be decoded and coded between steps.
 
 **E5: zero inputs and generic callers.**
 The multiplier remaps original x=0 to x'=1, covered by E2; the retained flag distinguishes it from original x=1.
@@ -422,9 +423,10 @@ The codec's primitives 4, 128, 145, 162, 188 and 197 use the six checked CX subs
 Its contract holds on all 8,042 window words and all 4,022 pre-map images; 6,254 window words have changed codewords, and each block uses the same shape for encoding and decoding.
 Each of the six wrong-control substitutions fails the domain contract.
 
-The merged Euclid sweep carries one mark equal to NOT g_k AND NOT g_(k-1) across the pass, updating it before the next block encode and clearing it before block zero is encoded.
+The merged Euclid sweep starts at mark(T - 2) and carries one mark equal to NOT g_k AND NOT g_(k-1), updating it before the next block encode and clearing it before block zero is encoded.
 Each update toggles the mark by NOT g_(k-1) AND (g_k XOR g_(k-2)), so every g read is still raw.
-At 384 ticks this saves 382 CCX per Euclid pass, 1,528 per point addition, while the nonmerged sweep is unchanged.
+The original carried-mark construction saved 382 CCX per Euclid pass at 384 ticks.
+The endpoint identities and skipped terminal transition now remove four further CCX per pass, sixteen per point addition; nonmerged sweeps use the endpoint identities without the merged terminal skip.
 
 ## Uncontrolled top add bit
 
@@ -450,3 +452,11 @@ When the preceding tick used the same width and the current width is at least th
 The pass marks precisely those calls with top_clear, and recorded shapes cache both width and that flag.
 Unflagged callers retain the full swap sequence.
 The full circuit loses 516 CCX.
+
+## Sweep endpoint identities
+
+The first cell has U = q greater than x, so a subtract swaps and g0 implies E XOR b equals one.
+At the last cell, no subtract implies E XOR b equals one, giving the other CX-only offset exchange.
+For a merged sweep with at least three cells, the last two no-subtract cells have equal b bits.
+Their B1 transition never swaps, so the sweep starts its carried mark at T - 2 and skips that terminal B1 step and mark transition.
+Together the endpoint and terminal changes remove four CCX per Euclid pass and sixteen per point addition.
