@@ -16,7 +16,9 @@ Add and shift now have complementary controls, so one rolling XOR wire D, the su
 so far, lets one CCX carry both: a pair of neighbouring word bits takes D, or on J its own XOR.
 
 H's bit 0 is R's, so it is not stored. On a B1 its wire and the next cell's g0, which must be 1,
-hold H's two top bits between the ticks, and nothing clean is held across them.
+hold H's two top bits between the ticks. The only other wire held across them is
+[this cell is B1], which the tick makes from its own sw with an X and two CX and the next tick
+reads as held, in place of computing it with a CCX.
 """
 from functools import lru_cache
 import heapq
@@ -360,29 +362,38 @@ class TwoBitMod(Mod):
             self._mark_b1(C, prev, p)
             C.free([p])
 
-    def _add_or_shift(self, C, J, a, word):
-        """On J, word = 2*word. Off J, word += a >> 1, through word's top two bits."""
+    def _add_or_shift(self, C, J, a, word, held_lane=True):
+        """On J, word = 2*word. Off J, word += a >> 1, through word's top two bits.
+
+        word[n] must be 0 on J: a J cell never follows a B1 (D1), so a J lane is never held.
+        held_lane=False promises that no lane is held, so word[n] = 0 on every lane."""
         n = self.n
-        (cin, D, carry, t) = C.alloc(4)
+        (cin, D, t) = C.alloc(3)
         ops, tgt = a[1:], word[:n - 1]
         carries = [cin] + ops[:-1]
         for i in range(n - 1):
             _maj(C, carries[i], tgt[i], ops[i])
             C.cx(carries[i], D)
-        C.x(J)
-        C.ccx(J, ops[-1], carry)
-        C.ccx(carry, word[n - 1], t)
-        C.ccx(t, word[n], word[n + 1])
-        C.cx(t, word[n])
-        C.cx(carry, word[n - 1])
-        C.x(word[n - 1])
-        C.ccx(carry, word[n - 1], t)
-        C.x(word[n - 1])
-        C.ccx(J, ops[-1], carry)
-        # The pair below hands word[n - 1] the rolling XOR, which has no pair above to cancel it.
-        C.ccx(J, D, word[n - 1])
-        C.x(J)
-        cswap(C, J, [word[n - 1]], [word[n]])
+        c, top, mid, hi = ops[-1], word[n - 1], word[n], word[n + 1]
+        # t = c * top is the carry out of bit n - 1 off J. On J it is junk, but there mid = 0, so
+        # neither hi's update nor mid's needs a J gate on t.
+        C.ccx(c, top, t)
+        if held_lane:
+            C.ccx(t, mid, hi)
+        # mid ^= t off J; on J, mid = 0 takes top, J's top move.
+        C.cx(t, top)
+        C.ccx(J, top, mid)
+        C.cx(t, top)
+        C.cx(t, mid)
+        C.ccx(c, top, t)
+        # top ^= c ^ D off J: its carry, and the cancel of the D that pair n - 2 hands it. On J top
+        # becomes 0, read through mid, which holds top's old value there.
+        C.cx(c, D)
+        C.cx(D, top)
+        C.cx(mid, D)
+        C.ccx(J, D, top)
+        C.cx(mid, D)
+        C.cx(c, D)
         for i in reversed(range(n - 1)):
             c, u, v, o = carries[i], word[i], word[i + 1], ops[i]
             C.ccx(c, u, o)
@@ -396,29 +407,43 @@ class TwoBitMod(Mod):
             C.cx(v, u)
             C.cx(c, D)
             C.cx(o, c)
-        C.free([cin, D, carry, t])
+        C.free([cin, D, t])
 
-    def tick(self, C, prev, g, nxt, a, s, pebble=False):
+    def tick(self, C, prev, g, nxt, a, s, pebble=False, held=None, cell0=False):
         """One tick of a swept tape. prev is the cell before, or None on the first tick.
-        nxt is the next cell's g0 wire, or None on the last tick, whose B1 reduces normally."""
+        nxt is the next cell's g0 wire, or None on the last tick, whose B1 reduces normally.
+
+        held is the wire the tick before handed over, holding [prev is B1], or None to compute
+        it here. cell0 says this is cell 0, where g0 implies b (Euclid's tick 0 runs on U = q > x,
+        so its subtract always swaps): there sw is g0 itself and J is b ^ g0.
+        Returns the wire that holds [this cell is B1] for the next tick, or None when nxt is None.
+        sw and [prev is B1] each stay on one wire for the whole tick."""
         n, f, w = self.n, self.f, self.window
         g0, b = g
         (spill, high) = C.alloc(2)
         word = s + [spill, high]
-        p = self._after_b1(C, prev)
+        if prev is None:
+            p = None
+        elif held is not None:
+            p = held
+        else:
+            p = self._after_b1(C, prev)
         if p is not None:
             cswap(C, p, [s[0]], [spill])
             cswap(C, p, [g0], [high])
             C.cx(p, g0)
-        sw = self._begin(C, g0, b)
+        if cell0:
+            sw = g0
+            C.cx(g0, b)
+        else:
+            sw = self._begin(C, g0, b)
         if p is not None:
             for x in word:
                 C.cx(p, x)
-        self._add_or_shift(C, b, a, word)
+        self._add_or_shift(C, b, a, word, held_lane=prev is not None)
         if p is not None:
             for x in word:
                 C.cx(p, x)
-        self._drop_after_b1(C, prev, p)
         (l0,) = C.alloc(1)
         C.ccx(g0, a[0], l0)
         low = [l0] + word[:n - 1]
@@ -480,7 +505,6 @@ class TwoBitMod(Mod):
             C.cx(b, one)
             C.cx(g0, one)
         C.cx(sw, b)
-        self._end(C, g0, b, sw)
         C.ccx(three, e, k2)
         C.ccx(k0, k1, three)
         C.free([three])
@@ -513,7 +537,6 @@ class TwoBitMod(Mod):
         C.free([one])
 
         # On a held lane k1 and k2 change wires, so the compare's target is k's top bit there.
-        p = self._after_b1(C, prev)
         if p is not None:
             cswap(C, p, [k1], [k2])
         def mark_even(z):
@@ -543,7 +566,7 @@ class TwoBitMod(Mod):
             bit_one(m)
             C.free([m])
         self._drop_after_b1(C, prev, p)
-        sw = self._begin(C, g0, b)
+        C.cx(sw, b)
         C.ccx(b, low[1], k1)
         if f >> 1 & 1:
             C.ccx(b, k0, k1)
@@ -559,4 +582,13 @@ class TwoBitMod(Mod):
         C.free([l0, spill, high])
         s[:] = s[-1:] + s[:-1]
         cswap(C, sw, a, s)
-        self._end(C, g0, b, sw)
+        if cell0:
+            return None
+        if nxt is None:
+            self._end(C, g0, b, sw)
+            return None
+        # [this cell is B1] = (1 ^ g0)(1 ^ b) = 1 ^ g0 ^ b ^ sw, the next tick's held.
+        C.x(sw)
+        C.cx(g0, sw)
+        C.cx(b, sw)
+        return sw
