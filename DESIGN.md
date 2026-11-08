@@ -514,3 +514,12 @@ For an uncontrolled add without a carry output, the top majority and unmajority 
 The lower bits retain their majority chain and the top bit uses two CX gates.
 Controlled adds and adds with a carry output retain their existing chain.
 This removes 44 CCX and 88 operations from the full circuit, leaving 14,808,479 operations and T 32,869,137.
+
+## Lookahead rows in the square
+
+The carry recurrence f_j = x_j XOR p_j f_(j-1) uses blocks of increasing size from each end, capped at eight.
+Each block computes its local prefix and product before receiving the incoming carry, then clears every temporary.
+The square rows borrow the clean workspace after the two product registers.
+Their add computes an up-sweep, selects the sum, and reverses the same sweep using the equal carries of a + b and a + complement(sum).
+The square retains the chain implementation and leaves its borrowed workspace clean.
+The full circuit has 15,306,887 operations, 4,998,159 CCX and T 34,987,113.

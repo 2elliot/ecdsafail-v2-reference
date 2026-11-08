@@ -11,7 +11,7 @@ Q = lo + 2^n*hi, and Y - hi = D is at least 0. The rest folds 2^n to f:
 If V >= 2^n, dropping that bit subtracts q and f together and leaves V - 2^n <= f*f - 1 < q.
 Otherwise V - f < q, so subtracting f is enough. So no comparison with q is needed.
 """
-from .arith import _carries, _uncarry, add, add_const, gt_into, sub
+from .arith import _carries, _uncarry, add, add_const, add_lookahead, gt_into, sub
 from .two_bit import Prefix
 
 
@@ -64,16 +64,17 @@ class SquareFold:
         gt_into(C, a, b, top, ctrl)
         C.free([top, t])
 
-    def _rows(self, C, Y, Q):
+    def _rows(self, C, Y, Q, temps):
         """Q = Y*(2^n - Y) on clean wires. After row i, Q < 2^(n + i + 1), so each carry
-        lands on a wire no earlier row reached. Y's wires walk through their Gray code."""
+        lands on a wire no earlier row reached. Y's wires walk through their Gray code.
+        The rows add in series, so each adds with add_lookahead, on clean temps."""
         n = self.n
         for y, q in zip(Y, Q):
             C.cx(y, q)
         for i in range(n - 1):
             for w in Y[i + 1:]:
                 C.cx(Y[i], w)
-            add(C, Y[i + 1:], Q[2 * i + 1:n + i], cout=Q[n + i])
+            add_lookahead(C, Y[i + 1:], Q[2 * i + 1:n + i], Q[n + i], temps)
         for i in range(1, n):
             C.cx(Y[i - 1], Y[i])
 
@@ -98,7 +99,8 @@ class SquareFold:
         n, f, b, m = self.n, self.f, self.b, self.m
         lo, hi, E, T = J[:n], J[n:2 * n], J[2 * n:2 * n + b], J[2 * n + b:2 * n + b + m]
         t, c, k = J[2 * n + b + m:]
-        self._rows(C, Y, lo + hi)
+        # E, T, t, c and k are clean until the rows are done
+        self._rows(C, Y, lo + hi, J[2 * n:])
         # hi = Y - hi = ~(hi + ~Y), and lo = ~lo.
         for w in Y:
             C.x(w)
