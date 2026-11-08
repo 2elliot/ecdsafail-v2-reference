@@ -728,8 +728,15 @@ class TwoBitMod(Mod):
                 C.cx(p, x)
         self._add_or_shift(C, b, a, word)
         if p is not None:
-            for x in word:
-                C.cx(p, x)
+            # The rotation finishes word's bits in mirror pairs from the middle out, so un-copy p in
+            # that order. These CX all share the control p and commute, so the order is free.
+            done, order = set(), [word[n + 1]]
+            for i in reversed(range(n // 2 + 1)):
+                order += [word[i], word[n - i]]
+            for x in order + list(word):
+                if x not in done:
+                    done.add(x)
+                    C.cx(p, x)
         self._drop_after_b1(C, prev, p)
         (l0,) = C.alloc(1)
         C.ccx(g0, a[0], l0)
