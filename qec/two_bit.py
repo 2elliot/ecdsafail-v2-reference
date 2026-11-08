@@ -156,6 +156,129 @@ class Prefix:
         C.free([self.first])
 
 
+# Cuts for the tick's 255-bit compare by block count, tuned on the emitted tick definitions 260 and 261
+# (pass off, weighted 546:216) with the wires this function hands out. With 11 blocks: a 38-bit
+# single-ripple block 0, two short blocks, then blocks of about 24 bits.
+CUTS_255 = {
+    7: (0, 55, 87, 120, 153, 186, 220, 255),
+    8: (0, 58, 76, 105, 134, 164, 194, 224, 255),
+    9: (0, 44, 58, 78, 107, 136, 166, 196, 226, 255),
+    10: (0, 41, 54, 74, 99, 125, 151, 177, 203, 231, 255),
+    11: (0, 38, 48, 61, 84, 108, 132, 155, 180, 204, 231, 255),
+    12: (0, 44, 54, 65, 77, 90, 113, 134, 157, 182, 206, 232, 255),
+}
+MAX_BLOCKS = 11
+
+
+def weighted_bounds(width, blocks):
+    """The generator's current cut rule, kept as the fallback for other widths and block counts."""
+    weights = [400] + [200 + 9 * (2 * j - blocks) for j in range(1, blocks)]
+    total, acc, bounds = sum(weights), 0, [0]
+    for weight in weights[:-1]:
+        acc += weight
+        bounds.append((2 * width * acc + total) // (2 * total))
+    bounds.append(width)
+    for j in range(1, blocks):
+        bounds[j] = max(bounds[j], bounds[j - 1] + 1)
+    for j in reversed(range(1, blocks)):
+        bounds[j] = min(bounds[j], bounds[j + 1] - 1)
+    return bounds
+
+
+def assign_wires(blocks, cin, clean, dirty, last):
+    """Carry-ins and gs wires for blocks 1..blocks-1, handed out top block first.
+
+    Every block j >= 1 needs one clean gs wire and one carry-in of any value. Clean wires beyond the
+    gs wires serve as carry-ins first, then dirty wires make up the rest, so a dirty wire is borrowed
+    only when the clean ones run out. Within that, each block takes whichever of the next clean and
+    the next dirty wire came free first."""
+    m = blocks - 1
+    order = lambda w: last.get(w, -1)
+    clean = sorted(clean, key=order)
+    n_dirty = max(0, m - (len(clean) - m))
+    dirty = sorted(dirty, key=order)[:n_dirty]
+    assert len(clean) >= m and len(dirty) == n_dirty
+    pool = clean[:2 * m - n_dirty]
+    quota = m - n_dirty
+    carry_ins, gs = [None] * blocks, [None] * blocks
+    for j in reversed(range(1, blocks)):
+        options = []
+        if dirty:
+            options.append((order(dirty[0]), "dirty"))
+        if quota and pool:
+            options.append((order(pool[0]), "clean"))
+        _, kind = min(options)
+        if kind == "dirty":
+            carry_ins[j] = dirty.pop(0)
+        else:
+            carry_ins[j] = pool.pop(0)
+            quota -= 1
+        gs[j] = pool.pop(0)
+    return carry_ins, gs
+
+
+def compare_blocks(C, A, B, z, t, cin, clean, dirty, last, max_blocks=MAX_BLOCKS):
+    width = len(A)
+    assert len(B) == width and width > 0
+    m = min(max_blocks - 1, width - 1, len(clean), (len(clean) + len(dirty)) // 2)
+    blocks = m + 1
+    if width == 255 and blocks in CUTS_255:
+        bounds = list(CUTS_255[blocks])
+    else:
+        bounds = weighted_bounds(width, blocks)
+    carry_ins, gs = assign_wires(blocks, cin, clean, dirty, last)
+    carry_ins[0] = cin
+    known_zero = {cin, *clean}
+
+    # Block j's chain: its CX gates, then its CCX ladder, in the generator's interleaving.
+    chains = []
+    for j in range(blocks):
+        lo, hi = bounds[j:j + 2]
+        carry = carry_ins[j]
+        chain = [(C.cx, (A[lo], B[lo])), (C.cx, (A[lo], carry))]
+        for i in range(lo, hi):
+            if i + 1 < hi:
+                chain += [(C.cx, (A[i + 1], B[i + 1])), (C.cx, (A[i + 1], A[i]))]
+            chain.append((C.ccx, (carry if i == lo else A[i - 1], B[i], A[i])))
+        chains.append(chain)
+
+    ops = []
+
+    def chain(j, reverse=False, ladder=False):
+        seq = [g for g in chains[j] if not ladder or g[0] == C.ccx]
+        ops.extend(reversed(seq) if reverse else seq)
+
+    tops = [A[bounds[j + 1] - 1] for j in range(blocks)]
+    ops.extend((C.x, (w,)) for w in B)
+    for j in range(blocks):
+        chain(j)
+    # Block j's top now holds v1 = g ^ e*d (d its carry-in's value); copy it, then flip d and redo the
+    # ladder so the top holds v2 = g ^ e*(1 ^ d). Only the ladder reads the carry-in, so only the
+    # ladder is undone and redone.
+    for j in range(1, blocks):
+        ops.append((C.cx, (tops[j], gs[j])))
+    for j in range(1, blocks):
+        chain(j, reverse=True, ladder=True)
+    for j in range(1, blocks):
+        ops.append((C.x, (carry_ins[j],)))
+        chain(j, ladder=True)
+    # Carry out of block j for carry in c is MAJ(v1, v2, c); with d = 0 it is v1 ^ (v1 ^ v2)*c,
+    # which leaves c's wire alone.
+    carry = tops[0]
+    for j in range(1, blocks):
+        g, top = gs[j], tops[j]
+        ops.append((C.cx, (g, top)))
+        if carry_ins[j] not in known_zero:
+            ops.append((C.cx, (g, carry)))
+        ops.append((C.ccx, (carry, top, g)))
+        carry = g
+    for gate, args in ops:
+        gate(*args)
+    C.ccx(z, carry, t)
+    for gate, args in reversed(ops):
+        gate(*args)
+
+
 class TwoBitMod(Mod):
     def __init__(self, q):
         super().__init__(q)
@@ -558,83 +681,17 @@ class TwoBitMod(Mod):
         width = len(cmp_a)
         if width:
             (cin,) = C.alloc(1)
-            touched = set(C.prims[tick_start + 1::4])
-            touched.update(C.prims[tick_start + 2::4])
-            touched.update(C.prims[tick_start + 3::4])
+            # Each wire's last op in this tick so far: the compare hands the top block the wires that
+            # came free first. Touched free wires read 0.
+            last = {}
+            for pos in range(tick_start, len(C.prims), 4):
+                last[C.prims[pos + 1]] = last[C.prims[pos + 2]] = last[C.prims[pos + 3]] = pos
             saved_free = list(C.free_stack)
-            scratch = sorted(touched.intersection(saved_free))
-            blocks = min(7, width, 1 + len(scratch) // 2)
-            zs = scratch[:blocks - 1]
-            xs = scratch[blocks - 1:2 * (blocks - 1)]
-            borrowed = set(zs) | set(xs)
-            C.free_stack[:] = [wire for wire in saved_free if wire not in borrowed]
-            # Block 0 runs its chain once each way; blocks j >= 1 also undo and redo their ladders
-            # around the carry flips and meet the serial combine in order. Block 0 weighs 400 and
-            # block j weighs 200 + 9(2j - blocks); each cut rounds half up, every block keeps a bit.
-            weights = [400] + [200 + 9 * (2 * j - blocks) for j in range(1, blocks)]
-            total, acc, bounds = sum(weights), 0, [0]
-            for weight in weights[:-1]:
-                acc += weight
-                bounds.append((2 * width * acc + total) // (2 * total))
-            bounds.append(width)
-            for j in range(1, blocks):
-                bounds[j] = max(bounds[j], bounds[j - 1] + 1)
-            for j in reversed(range(1, blocks)):
-                bounds[j] = min(bounds[j], bounds[j + 1] - 1)
-            chains = []
-            for j in range(blocks):
-                lo, hi = bounds[j:j + 2]
-                carry = cin if j == 0 else zs[j - 1]
-                chain = [(C.cx, (cmp_a[lo], cmp_b[lo])), (C.cx, (cmp_a[lo], carry))]
-                for i in range(lo, hi):
-                    if i + 1 < hi:
-                        chain += [(C.cx, (cmp_a[i + 1], cmp_b[i + 1])),
-                                  (C.cx, (cmp_a[i + 1], cmp_a[i]))]
-                    chain.append((C.ccx, (carry if i == lo else cmp_a[i - 1], cmp_b[i], cmp_a[i])))
-                chains.append(chain)
-
-            # A block's chain equals its CX followed by its CCX ladder, and the CX only write the
-            # carry-in. Around X on the carry-in they cancel, so only the ladder is undone and redone.
-            def emit_chain(j, reverse=False, ladder=False):
-                for gate, args in reversed(chains[j]) if reverse else chains[j]:
-                    if not ladder or gate == C.ccx:
-                        gate(*args)
-
-            tops = [cmp_a[bounds[j + 1] - 1] for j in range(blocks)]
-            for wire in cmp_b:
-                C.x(wire)
-            for j in range(blocks):
-                emit_chain(j)
-            for j in range(1, blocks):
-                C.cx(tops[j], xs[j - 1])
-            for j in range(1, blocks):
-                emit_chain(j, True, ladder=True)
-            for j in range(1, blocks):
-                C.x(zs[j - 1])
-                emit_chain(j, ladder=True)
-            combine = []
-            carry = tops[0]
-            for j in range(1, blocks):
-                combine += [(C.cx, (xs[j - 1], tops[j])),
-                            (C.ccx, (carry, tops[j], xs[j - 1]))]
-                carry = xs[j - 1]
-            for gate, args in combine:
-                gate(*args)
-            C.ccx(z, carry, k1)
-            for gate, args in reversed(combine):
-                gate(*args)
-            for j in range(1, blocks):
-                emit_chain(j, True, ladder=True)
-                C.x(zs[j - 1])
-            for j in range(1, blocks):
-                emit_chain(j, ladder=True)
-            for j in range(1, blocks):
-                C.cx(tops[j], xs[j - 1])
-            for j in range(1, blocks):
-                emit_chain(j, True)
-            emit_chain(0, True)
-            for wire in cmp_b:
-                C.x(wire)
+            scratch = [wire for wire in saved_free if wire in last]
+            # Wires the compare may borrow at any value; it restores them and nothing else runs meanwhile.
+            dirty = [w for w in (a[0], nxt, b, l0, *(prev or ()), p, k0, g0, k2) if w is not None]
+            C.free_stack[:] = [wire for wire in saved_free if wire not in last]
+            compare_blocks(C, cmp_a, cmp_b, z, k1, cin, scratch, dirty, last)
             C.free_stack[:] = saved_free
             C.free([cin])
         mark_even(z)
