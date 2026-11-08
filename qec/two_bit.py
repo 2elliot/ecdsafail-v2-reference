@@ -464,8 +464,6 @@ class TwoBitMod(Mod):
             C.x(one)
         ra, rb = self.run
         P, M = Prefix(C, H), Prefix(C, L[ra:rb])
-        # Only M's skip reads M before its write, so the top below its last is cleared until then.
-        M.release()
 
         # With at most one H bit, P reads a data wire or nothing, and there is nothing to borrow.
         spare = H[:] if len(H) > 1 else []
@@ -506,31 +504,21 @@ class TwoBitMod(Mod):
             C.cx(g0, one)
         C.cx(sw, b)
         C.ccx(three, e, k2)
-        C.ccx(k0, k1, three)
-        C.free([three])
+        # three = K0*K1 becomes k0*k1 = K0*K1 ^ e*K1 for k = K + e, so it reads k1 before k1 changes.
+        C.ccx(e, k1, three)
+        C.free([one])
+        one = three
         C.ccx(k0, e, k1)
         C.cx(e, k0)
-        if spare:
-            u = take()
-            C.cx(e, u)
-            C.ccx(P.top, u, e)
-            C.free([e])
-            e = u
-        C.ccx(k0, k1, one)
         selectors, masks = [one, k0, k1, k2], [self.corner, f, 2 * f, 4 * f]
         perch = self._perches(selectors, masks)
-        kept = self._kept_carries(perch)
-        schedule = self._pebble_schedule(perch) if pebble else None
-        moves = None
-        if schedule is not None:
-            moves, low_kept = schedule
-            kept = set(low_kept) | {self.run[0]}
-        chain = self._chain_up(C, L, selectors, masks, M, perch, alloc, kept, moves)
+        # Every low carry stays on its own wire until its fall, and e stays on its own wire.
+        chain = self._chain_up(C, L, selectors, masks, M, perch, alloc)
         if H:
             C.ccx(P.top, chain[w], e)
         else:
             C.cx(chain[w], e)
-        drop(e)
+        C.free([e])
         P.write(chain[w])
         self._chain_down(C, L, selectors, masks, M, perch, chain, drop, True, alloc)
         C.ccx(k0, k1, one)
