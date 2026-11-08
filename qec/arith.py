@@ -129,6 +129,128 @@ def _emit(C, ops):
         (C.cx if len(o) == 2 else C.ccx)(*o)
 
 
+def adjacent_xor(C, a):
+    """a[i] ^= a[i + 1] for i < len(a) - 1, from the old values, in about 2 log2 len(a) CX layers:
+    the inverse of an in-place suffix XOR done as a Brent-Kung prefix network (Brent and Kung,
+    1982), so that network's CXs in reverse order. The ripple it replaces is len(a) - 1 CXs in
+    series, since each shares a wire with the next."""
+    n = len(a)
+    ops = []
+    d = 1
+    while d < n:
+        for p in range(2 * d - 1, n, 2 * d):
+            ops.append((p - d, p))
+        d *= 2
+    while d > 1:
+        d //= 2
+        for p in range(3 * d - 1, n, 2 * d):
+            ops.append((p - d, p))
+    # prefix position p is suffix index n - 1 - p: a[n - 1 - p] ^= a[n - 1 - p + d]
+    for s, t in reversed(ops):
+        C.cx(a[n - 1 - s], a[n - 1 - t])
+
+
+class _TempQueue:
+    """Clean temps handed out in turn; a freed temp goes to the back, so it is reused as late as
+    possible. Counts the most taken at once."""
+
+    def __init__(self, temps):
+        self.free, self.live, self.peak = list(temps), 0, 0
+
+    def take(self):
+        self.live += 1
+        self.peak = max(self.peak, self.live)
+        return self.free.pop(0)
+
+    def give(self, t):
+        self.live -= 1
+        self.free.append(t)
+
+
+def lookahead_tree(C, U, V, temps, r):
+    """f_j = x_j ^ p_j f_(j-1) in place on U for j = 1 .. len(U) - 1 from the chain input U[0],
+    with U[j] holding x_j and V[j] holding p_j, as lookahead_chain, but with the blocks joined by a
+    Brent-Kung prefix tree (Brent and Kung, 1982; in place as in Draper et al., quant-ph/0406142)
+    instead of a chain: about 2 log2 of the block count CCX layers in series, for
+    tree_temps(len(U), r) temps. Blocks of r bits: local prefix in place and the block's product on
+    a temp (inner products cleared and made again for the fixes when r >= 3); up-sweep G_R ^=
+    P_R G_L with each segment's product on a new temp unless the segment starts at the input;
+    down-sweep; products cleared in reverse; then each block's fixes U[i+j] ^= T_j U[i]."""
+    _lookahead_tree(C, U, V, _TempQueue(temps), r)
+
+
+def tree_temps(n, r):
+    """The most temps lookahead_tree holds at once for len(U) = n and blocks of r."""
+    q = _TempQueue(range(4 * n))
+    _lookahead_tree(_Gates(), list(range(n)), list(range(n, 2 * n)), q, r)
+    return q.peak
+
+
+def _lookahead_tree(C, U, V, q, r):
+    n = len(U)
+    blocks = []
+    i = 0
+    while i < n - 1:
+        b = min(r, n - 1 - i)
+        for j in range(2, b + 1):
+            C.ccx(U[i + j - 1], V[i + j], U[i + j])
+        T = {1: V[i + 1]}
+        for j in range(2, b + 1):
+            T[j] = q.take()
+            C.ccx(T[j - 1], V[i + j], T[j])
+        for j in range(b - 1, 1, -1):
+            C.ccx(T[j - 1], V[i + j], T[j])
+            q.give(T.pop(j))
+        blocks.append((i, b, T))
+        i += b
+    G = [U[0]] + [U[i + b] for i, b, _ in blocks]
+    P = [None] + [T[b] for _, b, T in blocks]
+    made = []
+    m = len(G)
+    d = 1
+    while d < m:
+        for R in range(2 * d - 1, m, 2 * d):
+            L = R - d
+            C.ccx(G[L], P[R], G[R])
+            if P[L] is None:
+                P[R] = None
+            else:
+                t = q.take()
+                C.ccx(P[L], P[R], t)
+                made.append((P[L], P[R], t))
+                P[R] = t
+        d *= 2
+    while d > 1:
+        d //= 2
+        for R in range(3 * d - 1, m, 2 * d):
+            C.ccx(G[R - d], P[R], G[R])
+    for a, c, t in reversed(made):
+        C.ccx(a, c, t)
+        q.give(t)
+    for i, b, T in blocks:
+        for j in range(2, b):
+            T[j] = q.take()
+            C.ccx(T[j - 1], V[i + j], T[j])
+        for j in range(1, b):
+            C.ccx(U[i], T[j], U[i + j])
+        for j in range(b, 1, -1):
+            C.ccx(T[j - 1], V[i + j], T[j])
+            q.give(T.pop(j))
+
+
+def lookahead_sweep(C, U, V, temps):
+    """lookahead_chain's map (f_j = x_j ^ p_j f_(j-1) in place on U from U[0]): lookahead_tree with
+    the smallest block size from 3 up whose tree_temps fits len(temps), else lookahead_chain with
+    lookahead_sizes. Blocks of 3 keep one temp a block through the tree and need about 2 len(U) / 3
+    temps; larger blocks need fewer and are slower."""
+    n = len(U)
+    for r in (3, 4, 5, 6, 8):
+        if tree_temps(n, r) <= len(temps):
+            lookahead_tree(C, U, V, temps, r)
+            return
+    lookahead_chain(C, U, V, temps, lookahead_sizes(n - 1))
+
+
 def add_lookahead(C, a, b, cout, temps):
     """b += a mod 2^w and cout ^= the carry out, as add, with both sweeps in lookahead form.
     The up-sweep leaves add's state after its last _maj (b_i = p_i, the carry wire c_0 ^ a_0,

@@ -523,3 +523,14 @@ The square rows borrow the clean workspace after the two product registers.
 Their add computes an up-sweep, selects the sum, and reverses the same sweep using the equal carries of a + b and a + complement(sum).
 The square retains the chain implementation and leaves its borrowed workspace clean.
 The full circuit has 15,306,887 operations, 4,998,159 CCX and T 34,987,113.
+
+## Tree sweeps in the Euclid difference
+
+The shared difference uses a ring of at most 193 clean tape wires for its carry sweeps and repeated controls.
+The adjacent XOR network exposes the same inputs as the serial ripple with logarithmic depth.
+A Brent–Kung tree links block prefixes and clears its segment products before fixing the lower bits of each block.
+The sweep selects the smallest fitting block size from three, four, five, six and eight, falling back to the carry chain when necessary.
+On the step domain U is odd, g0 equals the low bit of V, and g1 and the ring start clean.
+The middle selection and reversed sweep produce the original unwind map and restore the ring before reuse.
+Smaller rings retain the existing unwind implementations; the square keeps its lookahead chain.
+The full circuit has 1,246 wires, 10,475,194 ticks, 6,336,351 CCX, T 44,354,457 and 17,125,135 operations.
