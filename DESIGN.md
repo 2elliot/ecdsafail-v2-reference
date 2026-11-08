@@ -432,3 +432,13 @@ Without carry output or control, the top majority and unmajority reduce to b XOR
 Two CX gates replace that pair while every lower bit retains the original chain.
 Controlled and carry-output calls keep their existing implementation.
 The full circuit loses 44 CCX.
+
+## Bounded square digit adds
+
+Each digit bounds the accumulator before and after its addition using the corners of the caller's input box.
+A subtract bounds the complemented value, -v - 1.
+Above the first bit containing every bounded value, the remaining bits hold the sign.
+A known zero sign allows truncation; a variable sign uses the add's carry output and copies it above that bit before and after the add.
+A positive digit added to an initially zero accumulator with no carry input copies its source.
+The first fold accepts arbitrary n-bit source and accumulator values, and the second accepts a source at most f and a zero accumulator.
+This saves 984 CCX after the top-bit edit; 20 CCX overlap that edit's standalone saving.

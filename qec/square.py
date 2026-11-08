@@ -11,7 +11,7 @@ Q = lo + 2^n*hi, and Y - hi = D is at least 0. The rest folds 2^n to f:
 If V >= 2^n, dropping that bit subtracts q and f together and leaves V - 2^n <= f*f - 1 < q.
 Otherwise V - f < q, so subtracting f is enough. So no comparison with q is needed.
 """
-from .arith import _carries, _uncarry, add, add_const, gt_into, sub
+from .arith import _carries, _uncarry, add, add_const, gt_into
 from .two_bit import Prefix
 
 
@@ -77,19 +77,47 @@ class SquareFold:
         for i in range(1, n):
             C.cx(Y[i - 1], Y[i])
 
-    def _multiple(self, C, a, T, cin=None):
-        """T += f*a mod 2^len(T), plus 1 if cin holds 1."""
+    def _multiple(self, C, a, T, a_max, t_max=0, cin=None):
+        """T += f*a mod 2^len(T), plus 1 if cin holds 1, for a <= a_max and T <= t_max on entry.
+
+        Around each digit T holds t + d*a, plus 1 once cin is in, with d the digits so far.
+        Those values at the corners of the box bound every input. A subtract adds onto ~T, so
+        it bounds -v - 1 instead. Where every bound lies in [-2^i, 2^i) for a bit i at or above
+        a's top, the digit's bits from i up all hold the sign. A sign that is always 0 never
+        moves, so the digit adds below bit i only. Otherwise bit i takes the carry out and the
+        bits above copy it. A digit onto a T that is 0, with no carry in, copies a."""
+        inc, done, d = int(cin is not None), 0, 0
         for s, sign in self.digits:
+            box = [(t, x) for t in (0, t_max) for x in (0, a_max)]
+            before = [t + done + x * d for t, x in box]
+            d += sign << s
+            after = [t + inc + x * d for t, x in box]
+            done = inc
             target = T[s:]
             if not target:
                 continue
-            pad = C.alloc(max(0, len(target) - len(a)))
-            b = a[:len(target)] + pad
-            if sign > 0:
-                add(C, b, target, cin=cin)
-            else:
-                sub(C, b, target)
+            if not any(before) and cin is None and sign > 0:
+                for x, w in zip(a, target):
+                    C.cx(x, w)
+                continue
+            ends = [v >> s for v in before + after]
+            lo, hi = (min(ends), max(ends)) if sign > 0 else (-max(ends) - 1, -min(ends) - 1)
+            top = next((i for i in range(len(a), len(target)) if -(1 << i) <= lo and hi < 1 << i),
+                       len(target))
+            carry = lo < 0 and top < len(target)
+            above = target[top + 1:] if carry else []
+            flips = [] if sign > 0 else target if carry else target[:top]
+            for w in flips:
+                C.x(w)
+            for w in above:
+                C.cx(target[top], w)
+            pad = C.alloc(max(0, top - len(a)))
+            add(C, a[:top] + pad, target[:top], cout=target[top] if carry else None, cin=cin)
             C.free(pad)
+            for w in above:
+                C.cx(target[top], w)
+            for w in flips:
+                C.x(w)
             cin = None
 
     def compute(self, C, Y, J):
@@ -109,10 +137,11 @@ class SquareFold:
             C.x(w)
         (one,) = C.alloc(1)
         C.x(one)
-        self._multiple(C, hi, lo + E, one)
+        # hi is any n-bit D, and lo + E holds ~lo, below 2^n.
+        self._multiple(C, hi, lo + E, (1 << n) - 1, (1 << n) - 1, one)
         C.x(one)
         C.free([one])
-        self._multiple(C, E, T)
+        self._multiple(C, E, T, f)
         high = lo[m:]
         add(C, T, lo[:m], cout=t)
         if high:
