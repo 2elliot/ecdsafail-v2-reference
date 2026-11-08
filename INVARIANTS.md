@@ -237,7 +237,7 @@ The inherited narrowed zero-caller row and standalone M domain x in [1, q) remai
 
 The merged Bezout pass codes five raw tail cells when the tail lend applies, at least five cells are uncoded, and the width at tick T - 5 is at most six.
 The code applies after tick T - 6 and its block encode check, and reverses after block zero is encoded but before the lend restore.
-Its 168 primitives cost 21 CCX per apply, return FREE = (2,) zero, and restore three clean ancillas.
+Its 168 primitives cost 19 CCX per apply, return FREE = (2,) zero, and restore three clean ancillas.
 The domain is all 230 L6 words on nine live wires; the exhaustive tail_code component row checks distinct images, zero FREE and ancillas, and exact reverse restoration.
 A real-tape corpus reaches 84 of those words; the remaining words are covered by the exhaustive component row, not claimed as reached tape states.
 The new row adds one component and 230 lanes, changing the census from 50 / 9,615 to 51 / 9,845 without changing any other row.
