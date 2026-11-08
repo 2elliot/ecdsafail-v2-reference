@@ -147,8 +147,10 @@ class DialogMultiplier:
         for wire in V[1:]:
             C.cx(g1, wire)
 
-    def _euclid_step(self, w: int):
-        if w not in self._euclid_steps:
+    def _euclid_step(self, w: int, top_clear: bool = False):
+        """top_clear: the tick before ran at the same width, so V is below 2^(w - 1) on entry
+        and the second strip's last swap, of two zero bits, never fires."""
+        if (w, top_clear) not in self._euclid_steps:
             C = self.C
 
             def step(U, V, E, cell):
@@ -171,15 +173,15 @@ class DialogMultiplier:
                 C.cx(offset, V[0])
                 C.cx(two, b)
                 C.ccx(two, offset, V[0])
-                for i in range(w - 2):
+                for i in range(w - 3 if top_clear else w - 2):
                     cswap(C, two, [V[i]], [V[i + 1]])
                 C.x(g0)
                 C.ccx(g0, b, two)
                 C.x(g0)
                 C.free([two])
 
-            self._euclid_steps[w] = C.record_shape(step, [w, w, 1, 2])
-        return self._euclid_steps[w]
+            self._euclid_steps[w, top_clear] = C.record_shape(step, [w, w, 1, 2])
+        return self._euclid_steps[w, top_clear]
 
     def _euclid_tick0(self):
         """First Euclid step on U=q, E=0, using unwritten tape for carries."""
@@ -232,7 +234,9 @@ class DialogMultiplier:
             if tick0 is not None and tick0.wires <= set(tick0.flat_in) and set(tick0.flat_out) == set(tick0.flat_in):
                 self.C.apply(tick0, [U, V, E, cell, available[:k]])
             else:
-                self.C.apply(self._euclid_step(w), [U[:w], V, E, cell])
+                # A tick leaves V below 2^(w' - 1), w' its own width.
+                top_clear = i >= 1 and w >= 3 and self.widths[i - 1] == w
+                self.C.apply(self._euclid_step(w, top_clear), [U[:w], V, E, cell])
             G.extend(cell)
             next_width = self.widths[i + 1] if i + 1 < self.iters else self.pass_tail_width
             assert w - 1 <= next_width <= w

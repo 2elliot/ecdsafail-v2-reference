@@ -442,3 +442,11 @@ A known zero sign allows truncation; a variable sign uses the add's carry output
 A positive digit added to an initially zero accumulator with no carry input copies its source.
 The first fold accepts arbitrary n-bit source and accumulator values, and the second accepts a source at most f and a zero accumulator.
 This saves 984 CCX after the top-bit edit; 20 CCX overlap that edit's standalone saving.
+
+## Repeated-width strip boundary
+
+A Euclid tick leaves V below the top bit of that tick's width.
+When the preceding tick used the same width and the current width is at least three, the second strip's final swap exchanges two zero bits.
+The pass marks precisely those calls with top_clear, and recorded shapes cache both width and that flag.
+Unflagged callers retain the full swap sequence.
+The full circuit loses 516 CCX.
