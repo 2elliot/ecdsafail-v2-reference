@@ -62,9 +62,9 @@ Python is stdlib only. The harness is a Rust crate whose dependencies are path r
 All numbers are measured unless marked as estimates.
 
 **This branch.**
-At G the circuit is 1,246 wires, 3,300,151 CCX, 23,101,057 T and 12,140,205 ops, measured from the unchanged emitter and baseline script.
-Wires × T is 28,783,917,022, which is 75.32% below the reference's 2,311 × 50,465,933.
-The hierarchical JSON for G is 39,150,961 bytes, under the 100 MiB upload cap; the flat circuit is still over the 10,000,000 operation cap.
+At G the circuit is 1,246 wires, 3,300,143 CCX, 23,101,001 T and 12,140,221 ops, measured from the unchanged emitter and baseline script.
+Wires × T is 28,783,847,246, which is 75.32% below the reference's 2,311 × 50,465,933.
+The hierarchical JSON for G is 39,151,049 bytes, under the 100 MiB upload cap; the flat circuit is still over the 10,000,000 operation cap.
 Two named limits apply.
 `I2.model`'s zero-caller row is narrowed from the reference's gate.
 The standalone multiplier is restricted to x in [1, q), and nonzero x at its entries rests on the kernel's flag code and the non-full build refusal.

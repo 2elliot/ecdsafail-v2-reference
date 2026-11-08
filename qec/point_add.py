@@ -200,7 +200,17 @@ class DialogMultiplier:
                     C.ccx(g0, V[i], U[i])
                     if q >> i & 1:
                         C.x(V[i])
-                add_const(C, V, f1, ctrl=g0)
+                # The select left U[j] = q_j ^ g0*(v_j ^ q_j), so the first carry g0*v_j,
+                # j the lowest set bit of f1, is U[j], or U[j] ^ g0 ^ 1 when q_j = 1.
+                j = (f1 & -f1).bit_length() - 1
+
+                def low(t):
+                    C.cx(U[j], t)
+                    if q >> j & 1:
+                        C.cx(g0, t)
+                        C.x(t)
+
+                add_const(C, V, f1, ctrl=g0, low=low)
                 for wire in V:
                     C.cx(g0, wire)
                 C.cx(g0, E[0])

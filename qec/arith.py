@@ -99,14 +99,18 @@ def load_const(C, reg, value, ctrl=None):
                 C.cx(ctrl, w)
 
 
-def _carry_into(C, b, bit, c, t, ctrl=None):
+def _carry_into(C, b, bit, c, t, ctrl=None, low=None):
     """t ^= MAJ(b, ctrl*bit, c), where c is a wire or None for 0. With ctrl, c
-    must imply ctrl, which holds for every carry of reg + ctrl*value."""
+    must imply ctrl, which holds for every carry of reg + ctrl*value. low(t), if
+    given, XORs ctrl*b into t, for the one b that meets the first set bit."""
     if not bit:
         if c is not None:
             C.ccx(b, c, t)
     elif c is None:
-        _cx(C, ctrl, b, t)
+        if low is None:
+            _cx(C, ctrl, b, t)
+        else:
+            low(t)
     elif ctrl is None:
         C.ccx(b, c, t)
         C.cx(b, t)
@@ -119,7 +123,7 @@ def _carry_into(C, b, bit, c, t, ctrl=None):
         C.cx(c, t)
 
 
-def _carries(C, reg, value, ctrl=None):
+def _carries(C, reg, value, ctrl=None, low=None):
     """cs[i] is the carry into reg[i] of reg + ctrl*value. Each entry is None
     when the carry is always 0, reg[i - 1] itself when it equals that bit, or a
     fresh wire. Release the fresh wires with _uncarry."""
@@ -132,27 +136,28 @@ def _carries(C, reg, value, ctrl=None):
             cs.append(reg[i])
         else:
             (t,) = C.alloc(1)
-            _carry_into(C, reg[i], bit, c, t, ctrl)
+            _carry_into(C, reg[i], bit, c, t, ctrl, low)
             cs.append(t)
     return cs
 
 
-def _uncarry(C, reg, value, cs, i, ctrl=None):
+def _uncarry(C, reg, value, cs, i, ctrl=None, low=None):
     """Clear and free cs[i]. reg[i - 1] and cs[i - 1] must still hold what they held in _carries."""
     if i and cs[i] is not None and cs[i] != reg[i - 1]:
-        _carry_into(C, reg[i - 1], value >> (i - 1) & 1, cs[i - 1], cs[i], ctrl)
+        _carry_into(C, reg[i - 1], value >> (i - 1) & 1, cs[i - 1], cs[i], ctrl, low)
         C.free([cs[i]])
 
 
-def add_const(C, reg, value, ctrl=None, cout=None):
+def add_const(C, reg, value, ctrl=None, cout=None, low=None):
     """reg += ctrl*value mod 2^w, cout ^= ctrl*carry out. The carry chain reads
-    the constant's bits, so 0 bits below the first 1 cost nothing."""
+    the constant's bits, so 0 bits below the first 1 cost nothing. low(t), if
+    given, XORs ctrl*reg[j] into t for the lowest set bit j of value."""
     w = len(reg)
     value %= 1 << w
     assert ctrl is None or ctrl not in (*reg, cout)
-    cs = _carries(C, reg, value, ctrl)
+    cs = _carries(C, reg, value, ctrl, low)
     if cout is not None:
-        _carry_into(C, reg[-1], value >> (w - 1) & 1, cs[-1], cout, ctrl)
+        _carry_into(C, reg[-1], value >> (w - 1) & 1, cs[-1], cout, ctrl, low)
     for i in reversed(range(w)):
         if value >> i & 1:
             if ctrl is None:
@@ -161,7 +166,7 @@ def add_const(C, reg, value, ctrl=None, cout=None):
                 C.cx(ctrl, reg[i])
         if cs[i] is not None:
             C.cx(cs[i], reg[i])
-        _uncarry(C, reg, value, cs, i, ctrl)
+        _uncarry(C, reg, value, cs, i, ctrl, low)
 
 
 def gt_const_into(C, value, b, t, ctrl=None):

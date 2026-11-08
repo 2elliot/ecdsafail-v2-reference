@@ -357,6 +357,7 @@ For odd v its output is U=v, V=(q-v)/2-1, E=1, cell=(1,0).
 For v=2 mod4 it leaves U=q, E=0 and cell=(0,0), with V=v/2; for v=0 mod4, V=v/4 and cell=(0,1).
 The V list rotates exactly as in the general step.
 Controlled addition of 2^n-q+1 uses the borrowed wires as carries; it uncomputes them before returning.
+Its first carry uses the preceding select identity through the optional low callback rather than another controlled gate.
 The recorded block's input/output wire sets agree and contain every used wire.
 If width, supply or that shape contract fails, the first step falls back to `_euclid_step`; later steps always use the general block.
 The borrowed wires are zero at tick 0's entry/exit and the mirror points in the inverse pass.
@@ -460,3 +461,10 @@ At the last cell, no subtract implies E XOR b equals one, giving the other CX-on
 For a merged sweep with at least three cells, the last two no-subtract cells have equal b bits.
 Their B1 transition never swaps, so the sweep starts its carried mark at T - 2 and skips that terminal B1 step and mark transition.
 Together the endpoint and terminal changes remove four CCX per Euclid pass and sixteen per point addition.
+
+## First carry in tick zero
+
+The tick-zero select leaves U[j] = q_j XOR g0 times (v_j XOR q_j).
+For the lowest set bit j of the following constant, the first carry g0 times v_j is U[j], complemented with g0 and one when q_j is one.
+An optional low callback supplies that carry during computation and uncomputation; every other adder caller retains the default carry primitive.
+The full circuit loses eight CCX and keeps the same clean-wire contract.
