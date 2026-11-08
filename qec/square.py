@@ -15,6 +15,129 @@ from .arith import _carries, _uncarry, add, add_const, gt_into
 from .two_bit import Prefix
 
 
+def _keep_add(C, a, b, cout, K):
+    """b += a, cout ^= carry out, each inner carry left on a junk wire popped from K."""
+    c = None
+    for k, (x, y) in enumerate(zip(a, b)):
+        t = cout if k == len(a) - 1 else K.pop(0)
+        if c is None:
+            C.ccx(x, y, t)
+            C.cx(x, y)
+        else:
+            # MAJ(x, y, c) = c ^ (x ^ c)(y ^ c); the sum x ^ y ^ c lands on y.
+            C.cx(c, x)
+            C.cx(c, y)
+            C.ccx(x, y, t)
+            C.cx(c, t)
+            C.cx(x, y)
+            C.cx(c, y)
+            C.cx(c, x)
+        c = t
+
+
+def _rows(C, Y, Q, copy=True, K=None):
+    """Q = Y*(2^w - Y) on 2w clean wires, w = len(Y), or Y*(2^w - 1 - Y) without the copy.
+    After row i, Q < 2^(w + i + 1), so each carry lands on a wire no earlier row reached; the
+    uncopied sums are smaller. Y's wires walk through their Gray code. K, if given, is a list
+    of junk wires, and a row whose inner carries fit there keeps them, at one CCX a bit."""
+    n = len(Y)
+    if copy:
+        for y, q in zip(Y, Q):
+            C.cx(y, q)
+    for i in range(n - 1):
+        for w in Y[i + 1:]:
+            C.cx(Y[i], w)
+        if K is not None and len(K) >= n - 2 - i:
+            _keep_add(C, Y[i + 1:], Q[2 * i + 1:n + i], Q[n + i], K)
+        else:
+            add(C, Y[i + 1:], Q[2 * i + 1:n + i], cout=Q[n + i])
+    for i in range(1, n):
+        C.cx(Y[i - 1], Y[i])
+
+
+def _change(C, a, b, sign=1, cin=None, signed=False):
+    """b += sign*a (+ cin) mod 2^len(b); a zero-extended, or sign-extended when signed."""
+    assert len(a) <= len(b)
+    pad = C.alloc(len(b) - len(a))
+    if signed:
+        for p in pad:
+            C.cx(a[-1], p)
+    if sign < 0:
+        for w in b:
+            C.x(w)
+    add(C, list(a) + pad, b, cin=cin)
+    if sign < 0:
+        for w in b:
+            C.x(w)
+    if signed:
+        for p in pad:
+            C.cx(a[-1], p)
+    C.free(pad)
+
+
+def karatsuba_junk(w, thr):
+    """Junk wires _karatsuba takes for width w with leaves of width at most thr."""
+    if w <= thr:
+        return 0
+    h = (w + 1) // 2
+    ws = h + 1
+    return karatsuba_junk(h, thr) + karatsuba_junk(w - h, thr) + 3 * ws + karatsuba_junk(ws, thr)
+
+
+def _karatsuba(C, Y, Q, J, thr, kind="R", K=None):
+    """Q = R(Y) = Y*(2^w - Y) (kind R) or T(Y) = Y*(2^w - 1 - Y) (kind T) on 2w clean wires.
+
+    Y = A + 2^h*B with h = ceil(w/2), m = w - h, and S = A + B on ws = h + 1 bits. Then
+        R(Y) = R(A) + 2^(2h)*T(B) + 2^h*V,   V = T(S) - R(A) - T(B) - [h != m]*2^m*S
+        T(Y) = T(A) + 2^(2h)*T(B) + 2^h*V,   V = R(~S) - T(A) - T(B) - [h != m]*2^m*S
+                                                  - (2^ws - 1)
+    where ~S = 2^ws - 1 - S, so R(~S) = T(S) - S + 2^ws - 1. V is A*~B + B*~A, plus B for R,
+    so 0 <= V < 2^(w + 1), and V is formed mod 2^(w + 1). R(A) and T(B) go straight onto Q's
+    halves; S and the S child's output take wires from J, a list of clean junk wires, and
+    keep values fixed by Y. Leaves of width at most thr are the XOR rows."""
+    w = len(Y)
+    if w <= thr:
+        _rows(C, Y, Q, kind == "R", K)
+        return
+    h = (w + 1) // 2
+    m = w - h
+    A, B = Y[:h], Y[h:]
+    _karatsuba(C, A, Q[:2 * h], J, thr, kind, K)
+    _karatsuba(C, B, Q[2 * h:], J, thr, "T", K)
+    ws = h + 1
+    S = [J.pop(0) for _ in range(ws)]
+    for x, s in zip(A, S):
+        C.cx(x, s)
+    pad = C.alloc(h - m)
+    add(C, B + pad, S[:h], cout=S[h])
+    C.free(pad)
+    W = [J.pop(0) for _ in range(2 * ws)]
+    if kind == "T":
+        for x in S:
+            C.x(x)
+    _karatsuba(C, S, W, J, thr, "R" if kind == "T" else "T", K)
+    if kind == "T":
+        for x in S:
+            C.x(x)
+    V = W[:w + 1]
+    _change(C, Q[:2 * h], V, -1)
+    _change(C, Q[2 * h:], V, -1)
+    if h != m:
+        _change(C, S, V[m:], -1)
+    if kind == "R":
+        _change(C, V, Q[h:])
+        return
+    # V holds the cross term plus 2^ws - 1. Take 2^ws off its top bits, which leaves at
+    # least -1 on w + 1 bits, then add it sign-extended with a carry in of 1.
+    add_const(C, V[ws:], (1 << (w + 1 - ws)) - 1)
+    (one,) = C.alloc(1)
+    C.x(one)
+    _change(C, V, Q[h:], cin=one, signed=True)
+    C.x(one)
+    C.free([one])
+
+
+
 def signed_digits(v):
     """Non-adjacent form of v, as (position, sign)."""
     out, s = [], 0
@@ -29,13 +152,18 @@ def signed_digits(v):
 
 
 class SquareFold:
+    KEEP = 0
     def __init__(self, mod):
         self.mod, self.n = mod, mod.n
         self.f = f = (1 << mod.n) - mod.q
         self.b, self.m = f.bit_length(), (f * f).bit_length()
         # The low digit is +1 whatever f is, so its carry in can hold Z's + 1.
         self.digits = [(0, 1)] + signed_digits(f - 1)
-        self.junk = 2 * mod.n + self.b + self.m + 3
+        # Karatsuba leaves of at most n // 6 bits: 42 at n = 256, and 3 at the toy sizes so
+        # the recursion runs there. KEEP junk wires hold row carries, one CCX saved per wire.
+        self.thr = max(3, mod.n // 6)
+        self.fixed_junk = 2 * mod.n + self.b + self.m + 3
+        self.junk = self.fixed_junk + karatsuba_junk(mod.n, self.thr) + self.KEEP
 
     @staticmethod
     def applies(q):
@@ -63,19 +191,6 @@ class SquareFold:
                 C.cx(top, b[i])
         gt_into(C, a, b, top, ctrl)
         C.free([top, t])
-
-    def _rows(self, C, Y, Q):
-        """Q = Y*(2^n - Y) on clean wires. After row i, Q < 2^(n + i + 1), so each carry
-        lands on a wire no earlier row reached. Y's wires walk through their Gray code."""
-        n = self.n
-        for y, q in zip(Y, Q):
-            C.cx(y, q)
-        for i in range(n - 1):
-            for w in Y[i + 1:]:
-                C.cx(Y[i], w)
-            add(C, Y[i + 1:], Q[2 * i + 1:n + i], cout=Q[n + i])
-        for i in range(1, n):
-            C.cx(Y[i - 1], Y[i])
 
     def _multiple(self, C, a, T, a_max, t_max=0, cin=None):
         """T += f*a mod 2^len(T), plus 1 if cin holds 1, for a <= a_max and T <= t_max on entry.
@@ -125,8 +240,11 @@ class SquareFold:
         The other wires of J hold values fixed by Y, for the reverse of this block."""
         n, f, b, m = self.n, self.f, self.b, self.m
         lo, hi, E, T = J[:n], J[n:2 * n], J[2 * n:2 * n + b], J[2 * n + b:2 * n + b + m]
-        t, c, k = J[2 * n + b + m:]
-        self._rows(C, Y, lo + hi)
+        t, c, k = J[2 * n + b + m:self.fixed_junk]
+        junk = list(J[self.fixed_junk:self.junk - self.KEEP])
+        keep = list(J[self.junk - self.KEEP:]) if self.KEEP else None
+        _karatsuba(C, Y, lo + hi, junk, self.thr, "R", keep)
+        assert not junk
         # hi = Y - hi = ~(hi + ~Y), and lo = ~lo.
         for w in Y:
             C.x(w)

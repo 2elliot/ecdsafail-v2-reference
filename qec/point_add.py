@@ -14,6 +14,11 @@ from .tape_block import FREE, TICKS
 class DialogMultiplier:
     """M(x, y) = (x, x*y mod q) for canonical 1 <= x < q; see model.py."""
 
+    # The tape stays decoded: no block, block-zero or tail code, and so no pebbled ticks. Every
+    # code call below is gated on blocks or tail, and each encode was paired with a decode that
+    # nothing between reads past, so the passes are the same maps on the same states.
+    RAW_TAPE = True
+
     def __init__(self, C, mod):
         self.C, self.mod = C, mod
         q, n = mod.q, mod.n
@@ -38,7 +43,7 @@ class DialogMultiplier:
 
     @property
     def blocks(self):
-        return self.iters // TICKS
+        return 0 if self.RAW_TAPE else self.iters // TICKS
 
     @property
     def u_lent(self):
@@ -391,7 +396,7 @@ class DialogMultiplier:
         # The final swept cell is (1, 0) or (0, 1): the terminal subtract
         # is followed only by no-subtract cells. Lend its b only when uncoded.
         lend_tail = T > 1 and self.blocks * TICKS < T
-        tail = (lend_tail and T >= tail_code.CELLS + 1
+        tail = (not self.RAW_TAPE and lend_tail and T >= tail_code.CELLS + 1
                 and T - self.blocks * TICKS >= tail_code.CELLS
                 and tick_widths(self.mod.q, T)[T - tail_code.CELLS] <= 6)
         lo = 2 * (T - tail_code.CELLS)
