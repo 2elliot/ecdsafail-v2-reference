@@ -541,15 +541,12 @@ class ControlledPointAdd:
             if not inverse:
                 C.cx(gen, c)
                 C.cx(gen, f0)
+            # gen ^= NOT c AND (f0 XOR f1): no c = 0 word has f0 = 0 and f1 = 1.
+            C.cx(f1, f0)
             C.x(c)
-            C.x(f1)
-            (t,) = C.alloc(1)
-            C.ccx(c, f0, t)
-            C.ccx(t, f1, gen)
-            C.ccx(c, f0, t)
-            C.free([t])
-            C.x(f1)
+            C.ccx(c, f0, gen)
             C.x(c)
+            C.cx(f1, f0)
             if inverse:
                 C.cx(gen, f0)
                 C.cx(gen, c)

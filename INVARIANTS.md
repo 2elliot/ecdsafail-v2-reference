@@ -224,11 +224,12 @@ The flag trie shares x-bit chains where 0, a and x(2A) agree, with an uncontroll
 At either M boundary, (c, f0, f1, gen) is one of 0000, 0110, 1000, 1100, 1010, 1110 and 1001.
 With c = 0 the word is 0000, or 0110 with the zero marker; with c = 1 it is 1001 on the generic path and 1000, 1100, 1010 or 1110 on an exception.
 A change to `_eq_flags`, the exception list or `build`'s flag compression must preserve these seven words, or the recode releases a nonzero wire.
-CX(gen, c) and CX(gen, f0) move 1001 to 0101, then gen XOR= NOT c AND f0 AND NOT f1 clears gen using three CCX and one temporary wire.
+CX(gen, c) and CX(gen, f0) move 1001 to 0101, then gen XOR= NOT c AND (f0 XOR f1) clears gen using one CCX and no temporary wire.
+The equivalent XOR form relies on the absence of a c = 0 word with f0 = 0 and f1 = 1.
 The other six words are unchanged, and the seven remaining (c, f0, f1) words are distinct.
 The kernel releases zero gen before each M apply and allocates a zero wire before reversing the recode, restoring c, f0, f1 and gen before any subsequent reader.
 The released physical wire may become M scratch or an output register; the reallocated wire carries the restored logical gen and is returned to build.
-Four recodes cost twelve CCX in total and free one live wire throughout both M applies.
+Four recodes cost four CCX in total and free one live wire throughout both M applies.
 Direct observation checks both boundaries on all 25,800 toy lanes and twelve secp256k1 special-point lanes, including zero at release and reallocation, word restoration and final data/control/scratch.
 Removing gen's clearing CCX is the freed-wire control of record; removing CX(gen, f0) is a sensitivity control, each checked over the full toy population.
 The inherited narrowed zero-caller row and standalone M domain x in [1, q) remain unchanged.
