@@ -168,6 +168,8 @@ CUTS_255 = {
     12: (0, 44, 54, 65, 77, 90, 113, 134, 157, 182, 206, 232, 255),
 }
 MAX_BLOCKS = 11
+# The tick's add as a blocked-lookahead chain (add_or_shift_la) instead of the ripple.
+LOOKAHEAD_ADD = True
 
 
 def weighted_bounds(width, blocks):
@@ -277,6 +279,163 @@ def compare_blocks(C, A, B, z, t, cin, clean, dirty, last, max_blocks=MAX_BLOCKS
     C.ccx(z, carry, t)
     for gate, args in reversed(ops):
         gate(*args)
+
+
+# Blocked-lookahead add-or-shift (design swarm, work/swarm/add/design2.py), same map as the ripple.
+def _la_fan(C, src, dsts):
+    sources, tree, filled = [src], [], 0
+    while filled < len(dsts):
+        layer = []
+        for s in list(sources):
+            if filled == len(dsts):
+                break
+            t = dsts[filled]
+            filled += 1
+            C.cx(s, t)
+            tree.append((s, t))
+            layer.append(t)
+        sources.extend(layer)
+    return tree
+
+
+def _la_spread(m, k, ends=1):
+    """Chain block sizes, bottom up: k blocks of 2 spread evenly among ripple steps, keeping
+    `ends` ripple steps at each end."""
+    k = max(0, min(k, (m - 2 * ends) // 2))
+    if k == 0:
+        return [1] * m
+    inner = m - 2 * k - 2 * ends
+    gaps = [inner * (i + 1) // (k + 1) - inner * i // (k + 1) for i in range(k + 1)]
+    out = [1] * ends
+    for i in range(k):
+        out += [1] * gaps[i] + [2]
+    out += [1] * gaps[k] + [1] * ends
+    assert sum(out) == m
+    return out
+
+
+def _la_blocks(sizes):
+    out, s = [], 0
+    for r in sizes:
+        out.append((s, r))
+        s += r
+    return out
+
+
+class _LaTemps:
+    """Clean temps in turn; a returned temp goes to the back."""
+
+    def __init__(self, wires):
+        self.free = list(wires)
+
+    def take(self):
+        assert self.free, "out of temps"
+        return self.free.pop(0)
+
+    def give(self, w):
+        self.free.append(w)
+
+
+def add_or_shift_la(C, J, a, word, n, k2f=None, k2b=None, ntemps=5, ncopies=6):
+    """k2f / k2b: number of 2-blocks in F / B (None = as many as fit). Wires: cin, ntemps temps,
+    carry and t for the top, ncopies copies of J: 1 + ntemps + 2 + ncopies (14 by default)."""
+    m = n - 1
+    if k2f is None:
+        k2f = m
+    if k2b is None:
+        k2b = m
+    (cin,) = C.alloc(1)
+    tw = C.alloc(ntemps)
+    carry, t = C.alloc(2)
+    K = C.alloc(ncopies)
+    U = [cin] + a[1:]
+    V = word[:m]
+
+    # J holds ~J from here to the end; the copies hold ~J during F and J after it.
+    C.x(J)
+    tree = _la_fan(C, J, K)
+    ki = [0]
+
+    def copy():
+        w = K[ki[0] % len(K)]
+        ki[0] += 1
+        return w
+
+    for j in range(m):
+        C.cx(U[j + 1], V[j])
+        C.cx(U[j + 1], U[j])
+
+    temps = _LaTemps(tw)
+    for s, r in _la_blocks(_la_spread(m, k2f)):
+        if r == 1:
+            C.ccx(U[s], V[s], U[s + 1])
+        else:
+            C.ccx(U[s + 1], V[s + 1], U[s + 2])        # local: U[s+2] = x ^ p x
+            T = temps.take()
+            C.ccx(V[s], V[s + 1], T)                    # T = p_s p_(s+1)
+            C.ccx(U[s], T, U[s + 2])                    # the chain step
+            C.ccx(V[s], V[s + 1], T)
+            temps.give(T)
+            C.ccx(U[s], V[s], U[s + 1])                 # fix the inner bit
+        for j in range(s, s + r):
+            g = copy()
+            C.cx(g, V[j])
+            C.ccx(U[j], g, V[j])                        # W_j: V[j] ^= ~J & ~f_j
+    for g in K:
+        C.x(g)
+
+    # word[m..m+2] += ~J c_m, with c_m on U[m]: the generator's gates, J holding ~J.
+    cm = U[m]
+    C.ccx(cm, J, carry)
+    C.ccx(carry, word[n - 1], t)
+    C.ccx(t, word[n], word[n + 1])
+    C.cx(t, word[n])
+    C.cx(carry, word[n - 1])
+    C.x(word[n - 1])
+    C.ccx(carry, word[n - 1], t)
+    C.x(word[n - 1])
+    C.ccx(cm, J, carry)
+
+    bb = _la_blocks(_la_spread(m, k2b))
+    # Each block's inner unfix reads U[s] = f_s, which the next block down overwrites, so all
+    # of them go first; then the chain runs down one CCX a block.
+    for s, r in bb:
+        if r == 2:
+            C.ccx(U[s], V[s], U[s + 1])
+    for s, r in reversed(bb):
+        if r == 1:
+            C.ccx(U[s], V[s], U[s + 1])
+        else:
+            T = temps.take()
+            C.ccx(V[s], V[s + 1], T)
+            C.ccx(U[s], T, U[s + 2])
+            C.ccx(V[s], V[s + 1], T)
+            temps.give(T)
+            C.ccx(U[s + 1], V[s + 1], U[s + 2])
+
+    for j in reversed(range(m)):
+        C.cx(U[j + 1], U[j])
+        C.cx(U[j + 1], V[j])
+        C.cx(J, V[j])                                   # V ^= ~J
+
+    def cswap(c, x, y):
+        C.cx(y, x)
+        C.ccx(c, x, y)
+        C.cx(y, x)
+
+    for i in reversed(range(n)):
+        if i < (n + 1) // 2:
+            cswap(copy(), word[i], word[n - i])
+        if i < n // 2:
+            cswap(copy(), word[i + 1], word[n - i])
+
+    C.x(J)
+    for s_, t_ in reversed(tree):
+        C.cx(s_, t_)
+    C.free(K)
+    C.free(tw)
+    C.free([cin])
+    C.free([carry, t])      # top of the stack: idle first, so the tick's next alloc gets them
 
 
 class TwoBitMod(Mod):
@@ -495,6 +654,8 @@ class TwoBitMod(Mod):
 
     def _add_or_shift(self, C, J, a, word):
         """Off J add a >> 1; on J rotate word's low n+1 bits left."""
+        if LOOKAHEAD_ADD and self.n > 3:
+            return add_or_shift_la(C, J, a, word, self.n)
         n = self.n
         (cin, D, carry, t) = C.alloc(4)
         extra = C.alloc(3)
