@@ -485,6 +485,17 @@ The first two bits take the same form with t, and every Prefix.write caller uses
 CCX, T and wires are unchanged; the extra X and CX gates trade operation count for shorter depth.
 On the U1 head the circuit has 1,246 wires, 16,313,762 scheduled ticks and T 32,869,445.
 
+### Weighted compare block bounds
+
+Block zero runs its carry chain once each way, while the later blocks also undo and redo their ladders around two carry flips.
+Weighting block zero by 400 and block j by 200 + 9 times (2j minus the block count) balances these unequal costs.
+Cuts round each cumulative weight's share of the width half up, then clamp to retain nonempty blocks and both endpoints.
+At 255 bits and seven blocks the cuts are 0, 64, 88, 116, 146, 180, 216 and 255.
+The comparison contract requires clean borrowed scratch at entry; moving a cut preserves that contract, not arbitrary dirty-wire states.
+On the U1 head the circuit has 1,246 wires, 16,075,064 scheduled ticks and T 32,268,901.
+
+On the U7 head the circuit has 1,246 wires, 10,236,496 scheduled ticks and T 43,753,913.
+
 ## Depth pass
 
 `write_circuit` runs `qec/depth_pass.py` on the hierarchical branch after the definition ids are fixed.

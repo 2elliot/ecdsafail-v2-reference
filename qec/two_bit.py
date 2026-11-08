@@ -568,7 +568,19 @@ class TwoBitMod(Mod):
             xs = scratch[blocks - 1:2 * (blocks - 1)]
             borrowed = set(zs) | set(xs)
             C.free_stack[:] = [wire for wire in saved_free if wire not in borrowed]
-            bounds = [width * j // blocks for j in range(blocks + 1)]
+            # Block 0 runs its chain once each way; blocks j >= 1 also undo and redo their ladders
+            # around the carry flips and meet the serial combine in order. Block 0 weighs 400 and
+            # block j weighs 200 + 9(2j - blocks); each cut rounds half up, every block keeps a bit.
+            weights = [400] + [200 + 9 * (2 * j - blocks) for j in range(1, blocks)]
+            total, acc, bounds = sum(weights), 0, [0]
+            for weight in weights[:-1]:
+                acc += weight
+                bounds.append((2 * width * acc + total) // (2 * total))
+            bounds.append(width)
+            for j in range(1, blocks):
+                bounds[j] = max(bounds[j], bounds[j - 1] + 1)
+            for j in reversed(range(1, blocks)):
+                bounds[j] = min(bounds[j], bounds[j + 1] - 1)
             chains = []
             for j in range(blocks):
                 lo, hi = bounds[j:j + 2]
