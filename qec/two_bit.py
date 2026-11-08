@@ -170,6 +170,8 @@ CUTS_255 = {
 MAX_BLOCKS = 11
 # The tick's add as a blocked-lookahead chain (add_or_shift_la) instead of the ripple.
 LOOKAHEAD_ADD = True
+# The tick's P as PrefixR, whose write runs its blocks in parallel.
+PARALLEL_PREFIX = True
 
 
 def weighted_bounds(width, blocks):
@@ -436,6 +438,181 @@ def add_or_shift_la(C, J, a, word, n, k2f=None, k2b=None, ntemps=5, ncopies=6):
     C.free(tw)
     C.free([cin])
     C.free([carry, t])      # top of the stack: idle first, so the tick's next alloc gets them
+
+
+# Block-parallel prefix write for the tick's P (design swarm, work/swarm/prefix/design_r.py).
+def tree_gates(x, u, seg=2):
+    """Gates putting AND(x) on carriers u (len(x) - 1 of them, used in order): sub-chains of at most
+    seg leaves, then a balanced tree over their tops. Returns (gates, root)."""
+    m = len(x)
+    if m == 1:
+        return [], x[0]
+    gates, tops, pos = [], [], 0
+    for a in range(0, m, seg):
+        part = x[a:a + seg]
+        v = part[0]
+        for i in range(1, len(part)):
+            gates.append((v, part[i], u[pos]))
+            v = u[pos]
+            pos += 1
+        tops.append(v)
+    level = tops
+    while len(level) > 1:
+        nxt = []
+        for k in range(0, len(level) - 1, 2):
+            gates.append((level[k], level[k + 1], u[pos]))
+            nxt.append(u[pos])
+            pos += 1
+        if len(level) % 2:
+            nxt.append(level[-1])
+        level = nxt
+    assert pos == m - 1
+    return gates, level[0]
+
+
+class PrefixR:
+    """sizes: block sizes after the first two bits (each at most 1 + the carriers below it);
+    cap: today's rule (grow as fast as carriers allow, at most cap) when sizes is None;
+    seg, host, reorder: W2 tree shape, hosting and nested carrier order (defaults are the design)."""
+
+    def __init__(self, C, bits, sizes=None, cap=None, seg=2, host=True, reorder=True):
+        self.C, self.bits, self.seg, self.host, self.reorder = C, bits, seg, host, reorder
+        self.starts = []
+        self.blocks = []
+        h = len(bits)
+        self.top = bits[0] if h == 1 else None
+        if h < 2:
+            return
+        (self.first,) = C.alloc(1)
+        C.ccx(bits[0], bits[1], self.first)
+        tops, start = [self.first], 2
+        sizes = list(sizes) if sizes is not None else None
+        while start < h:
+            carriers = bits[:start] + tops[:-1]
+            if sizes:
+                m = sizes.pop(0)
+                assert 1 <= m <= len(carriers) + 1 and start + m <= h, (m, start)
+            else:
+                m = min(len(carriers) + 1, h - start, cap or h)
+            x, u = bits[start:start + m], carriers[:m - 1]
+            for w in u:
+                C.x(w)
+            v = x[0]
+            for i in range(1, m):
+                C.ccx(v, x[i], u[i - 1])
+                v = u[i - 1]
+            (p,) = C.alloc(1)
+            C.ccx(tops[-1], v, p)
+            self.blocks.append((tops[-1], p, x, u, v))
+            self.starts.append(start)
+            tops.append(p)
+            start += m
+        assert sizes is None or not sizes
+        self.top = tops[-1]
+
+    def write(self, t):
+        C, bits, blocks = self.C, self.bits, self.blocks
+        if not bits:
+            return
+        if len(bits) == 1:
+            C.cx(t, bits[0])
+            return
+        # W1
+        for a, p, x, u, v in reversed(blocks):
+            C.cx(t, v)
+            C.ccx(a, v, p)
+            C.cx(t, v)
+            m = len(x)
+            for i in reversed(range(1, m)):
+                below = x[0] if i == 1 else u[i - 2]
+                C.x(below)
+                C.ccx(p, below, x[i])
+                C.x(below)
+                C.ccx(below, x[i], u[i - 1])
+                C.x(u[i - 1])
+            for i in reversed(range(m)):
+                C.cx(p, x[i])
+        C.x(bits[0])
+        C.ccx(t, bits[0], bits[1])
+        C.x(bits[0])
+        C.ccx(bits[0], bits[1], self.first)
+        C.cx(t, bits[1])
+        C.cx(t, bits[0])
+        if not blocks:
+            C.free([self.first])
+            return
+        # W2: F (t-free, recorded) with t's clears interleaved.
+        F = []
+
+        def f(op, *w):
+            F.append((op, w))
+            (C.x if op == "x" else C.ccx)(*w)
+
+        leaves = bits[:len(bits) - len(blocks[-1][2])]      # the top block's bits are no leaf
+        for w in leaves:
+            f("x", w)
+        f("ccx", bits[0], bits[1], self.first)
+        # Plan every block's carriers first, so a deferred vv restore can be checked against
+        # every later use of that wire.
+        plan, order = [], [bits[0], bits[1]]
+        gate = self.first
+        for j, (a, p, x, u, v) in enumerate(blocks[:-1]):
+            m = len(x)
+            hosted = self.host and j >= 1 and len(blocks[j - 1][2]) >= m - 1
+            if hosted:
+                carriers = blocks[j - 1][2][:m - 1]
+            else:
+                carriers = (order if self.reorder else u)[:m - 1]
+                assert set(carriers) <= set(u) | set(bits[:self.starts[j]]), "carrier above block"
+            order = list(x) + order + [gate]
+            gates, vv = tree_gates(x, carriers, self.seg)
+            plan.append((gate, p, carriers, hosted, gates, vv))
+            gate = p
+        deferred = []
+        for j, (gate, p, carriers, hosted, gates, vv) in enumerate(plan):
+            # Nested carriers read 1 when N_j = 1 (H' bits, lower trees, lower N wires); a hosted
+            # carrier is put back from H' to the raw new bit, which is 0 then. One X each.
+            for w in carriers:
+                f("x", w)
+            for g in gates:
+                f("ccx", *g)
+            C.cx(t, vv)
+            f("ccx", gate, vv, p)                # p: c_j -> N_(j+1); F's own part: 0 -> N_(j+1)
+            later = set()
+            for gate2, p2, carriers2, hosted2, gates2, vv2 in plan[j + 1:]:
+                later |= set(carriers2) | {w for g in gates2 for w in g} | {gate2}
+            if vv in later:
+                C.cx(t, vv)
+            else:
+                deferred.append(vv)
+        ntop = plan[-1][1] if plan else self.first
+        C.ccx(t, ntop, blocks[-1][1])            # c_K ^= t*N_K
+        for vv in deferred:
+            C.cx(t, vv)
+        # W3: F reversed.
+        for op, w in reversed(F):
+            (C.x if op == "x" else C.ccx)(*w)
+        # free in the order the wires become idle: p_K first, then the tops W3 clears first
+        C.free([blocks[-1][1]] + [b[1] for b in reversed(blocks[:-1])] + [self.first])
+
+
+def sizes_for(h, dcap=31, top=30):
+    """A block-size list for width h: today's doubling (each block as large as its carriers allow)
+    up to a block of dcap bits, then sizes falling by one from `top` (at most one more than the
+    block below, so every upper tree can sit on it) and never below top // 2, the last block taking
+    what is left. At h = 221: 3, 7, 15, 31, 30, 29, 28, 27, 26, 23 (11 tops, one more than today)."""
+    sizes, start, ntops = [], 2, 1
+    while start < h:
+        m = min(start + ntops, dcap, h - start)
+        sizes.append(m); start += m; ntops += 1
+        if m == dcap:
+            break
+    s, floor = top, max(2, top // 2)
+    while start < h:
+        m = max(1, min(s, h - start, start + ntops, (sizes[-1] + 1) if sizes else s))
+        sizes.append(m); start += m; ntops += 1
+        s = max(floor, s - 1)
+    return sizes
 
 
 class TwoBitMod(Mod):
@@ -757,7 +934,11 @@ class TwoBitMod(Mod):
             cswap(C, one, [k1], [nxt])
             C.x(one)
         ra, rb = self.run
-        P, M = Prefix(C, H, cap=37), Prefix(C, L[ra:rb])
+        if PARALLEL_PREFIX and len(H) > 1:
+            P = PrefixR(C, H, sizes=[3, 7, 14, 30, 37, 35, 33, 31, 29] if len(H) == 221 else sizes_for(len(H)))
+        else:
+            P = Prefix(C, H, cap=37)
+        M = Prefix(C, L[ra:rb])
         # Only M's skip reads M before its write, so the top below its last is cleared until then.
         M.release()
 
