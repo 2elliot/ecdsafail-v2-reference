@@ -102,6 +102,20 @@ class DialogMultiplier:
             G[slot] = None
         return wires
 
+    def _block0_places(self, U, pool):
+        """Where a merged pass leaves block 0's free wires: the last of its zero words, which fill
+        U's top u_lent wires and then the pool's first lent_after_pass."""
+        n = self.mod.n
+        places = [(U, i) for i in range(n - self.u_lent, n)] + [(pool, i) for i in range(self.lent_after_pass)]
+        return places[len(places) - len(self._block_free(0, self.swept)):]
+
+    def _code_block0(self, U, pool):
+        """Code block 0 of a pass that left it raw, with its free wires at _block0_places."""
+        G = self.coded_tape(pool)
+        for slot, (reg, i) in zip(self._free_slots(0, self.swept), self._block0_places(U, pool)):
+            G[slot] = reg[i]
+        self._encode(G, 0, self.swept)
+
     def _decode(self, G, j, wires, swept):
         assert len(wires) == len(self._block_free(j, swept))
         for slot, wire in zip(self._free_slots(j, swept), wires):
@@ -226,7 +240,7 @@ class DialogMultiplier:
             self._euclid_tick0_block = C.record_shape(step, [n, n, 1, 2, k])
         return self._euclid_tick0_block
 
-    def _euclid_pass(self, U: list[int], pool: list[int]) -> None:
+    def _euclid_pass(self, U: list[int], pool: list[int], block0_raw: bool = False) -> None:
         # The pool starts as V plus clean external tape. It ends as the zero wires U did not
         # take back, then tape; U ends as its low wires and those zero wires. The boundary is a
         # permutation of U and the pool together.
@@ -306,12 +320,19 @@ class DialogMultiplier:
                 clean.extend(self._encode(G, done // TICKS, swept))
         if both is not None:
             self.C.free([both])
-        if swept and self.blocks:
-            clean.extend(self._encode(G, 0, swept))
         self.C.free(E)
-        zeros = V + clean
+        # Block 0's free wires take their places among the zero words raw, and block 0 is coded
+        # last, unless block0_raw leaves that to the caller.
+        raw = []
+        if swept and self.blocks:
+            raw = [G[slot] for slot in self._free_slots(0, swept)]
+            for slot in self._free_slots(0, swept):
+                G[slot] = None
+        zeros = V + clean + raw
         U[:] = U[:n - self.u_lent] + zeros[:self.u_lent]
         pool[:] = zeros[self.u_lent:] + [w for w in G if w is not None]
+        if raw and not block0_raw:
+            self._code_block0(U, pool)
 
     def _bezout(self):
         if self._bezout_step is None:
@@ -339,9 +360,9 @@ class DialogMultiplier:
         """Use the pass-wide mark while both cells are still raw."""
         cswap(self.C, both, [G[2 * i + 1]], [G[2 * i - 1]])
 
-    def _bezout_pass(self, G, Yr, S):
+    def _bezout_pass(self, G, Yr, S, block0_raw=False):
         """G is the coded tape. Each block is decoded on a clean wire before a tick reads it and
-        coded again once no tick reads it."""
+        coded again once no tick reads it, except block 0 on the merged path with block0_raw."""
         C, T, swept = self.C, self.iters, self.swept
         if not self.narrow.merged:
             bz = self._bezout()
@@ -412,7 +433,7 @@ class DialogMultiplier:
                 tail_encoded = True
                 C.free([W[tail_code.FREE[0]]])
                 G[lo + tail_code.FREE[0]] = None
-        if self.blocks:
+        if self.blocks and not block0_raw:
             C.free(self._encode(G, 0, swept))
         if tail:
             assert tail_encoded, "tail inverse requires its forward apply"
@@ -429,7 +450,12 @@ class DialogMultiplier:
         load_const(C, U, q)
         pool = list(Xr) + C.alloc(self.tape_external)
 
-        E = C.run(self._euclid_pass, [U, pool])
+        # On the merged path block 0 stays decoded from Bezout's end into the inverse pass, so
+        # the pass is recorded without its last encode, which runs here instead.
+        raw0 = self.swept and self.blocks > 0
+        E = C.run(lambda U, pool: self._euclid_pass(U, pool, raw0), [U, pool])
+        if raw0:
+            self._code_block0(U, pool)
         lent = self.lent_after_pass
         G = self.coded_tape(pool)
         # Terminal V and the wires the code freed are zero; lend them during Bezout.
@@ -438,11 +464,21 @@ class DialogMultiplier:
         # the surviving V wire stays zero for the inverse Euclid boundary.
         C.x(U[0])
         S = U
-        self._bezout_pass(G, Yr, S)
+        self._bezout_pass(G, Yr, S, raw0)
+        if raw0:
+            raw = [G[slot] for slot in self._free_slots(0, True)]
+            for slot in self._free_slots(0, True):
+                G[slot] = None
         # Restore the tape boundary using the newly allocated tail wire.
         pool[lent:] = [w for w in G if w is not None]
         C.x(Yr[0])
         pool[:lent] = C.alloc(lent)
+        if raw0:
+            # Block 0's free wires take the places of the last zero words, which are released.
+            places = self._block0_places(Yr, pool)
+            C.free([reg[i] for reg, i in places])
+            for (reg, i), w in zip(places, raw):
+                reg[i] = w
         C.apply(E, [Yr, pool], inverse=True)
         load_const(C, Yr, q)
         Xr[:] = pool[:n]

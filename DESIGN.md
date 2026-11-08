@@ -411,6 +411,16 @@ A one-CCX HOLD frees b0 while ticks 7 through 2 run and restores it before tick 
 Nonmerged paths keep the original codec, and no new per-prime domain refusal is needed.
 The exhaustive D1 component row checks encode and HOLD both ways, clean FREE and ancillas, and distinct images, increasing the census only to 52 rows and 13,867 lanes.
 
+### Holding block zero across the inverse pass
+
+The merged multiplier records the Euclid pass with block zero raw and codes that block immediately after the recorded call.
+The default pass remains the raw variant followed by the same block-zero encode, with identical operations and output wire lists.
+The Bezout pass leaves block zero decoded at its end only when the multiplier requests this variant.
+Before the inverse Euclid pass, the multiplier places the block's two free-slot wires in the raw pass's output positions and releases the zero wires previously occupying them.
+The default pass and every existing gate-script caller retain their encoded boundary.
+This removes the adjacent encode and inverse decode in both multiplier calls, saving 204 CCX and one listed call without increasing the 1,246-wire peak.
+The existing breakdown script still measures default passes; its rows include the removed encode/decode work and therefore do not sum to the optimized multiplier's cost.
+
 ## Pooled tick schedule
 
 Selected merged ticks use a cap-four reversible pebble search on the second chain's unperched prefix, derived from that shape's length and quiet-run top wire.
