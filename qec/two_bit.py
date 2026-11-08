@@ -66,7 +66,7 @@ class Prefix:
     Nothing may read bits between this and write, and write runs top down.
     """
 
-    def __init__(self, C, bits):
+    def __init__(self, C, bits, cap=None):
         self.C, self.bits = C, bits
         self.blocks = []
         self.released = None
@@ -79,7 +79,7 @@ class Prefix:
         tops, start = [self.first], 2
         while start < h:
             carriers = bits[:start] + tops[:-1]
-            m = min(len(carriers) + 1, h - start)
+            m = min(len(carriers) + 1, h - start, cap or h)
             x, u = bits[start:start + m], carriers[:m - 1]
             for w in u:
                 C.x(w)
@@ -466,7 +466,7 @@ class TwoBitMod(Mod):
             cswap(C, one, [k1], [nxt])
             C.x(one)
         ra, rb = self.run
-        P, M = Prefix(C, H), Prefix(C, L[ra:rb])
+        P, M = Prefix(C, H, cap=37), Prefix(C, L[ra:rb])
         # Only M's skip reads M before its write, so the top below its last is cleared until then.
         M.release()
 

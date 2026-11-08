@@ -485,6 +485,30 @@ The first two bits take the same form with t, and every Prefix.write caller uses
 CCX, T and wires are unchanged; the extra X and CX gates trade operation count for shorter depth.
 On the U1 head the circuit has 1,246 wires, 16,313,762 scheduled ticks and T 32,869,445.
 
+### Cap the tick's prefix blocks
+
+Prefix accepts an optional block-length cap, preserving its AND-top and increment contracts for every block partition.
+Only the tick's high-word P uses cap 37; other Prefix callers retain the uncapped default.
+The shorter P blocks add three top wires without changing CCX or T, and the compare keeps its existing weights.
+At the tick's 221-bit high word the blocks are 3, 7, 15, 31, 37, 37, 37, 37 and 15.
+
+| Cap | Wires | Ticks | Qubit-time |
+|---|---:|---:|---:|
+| none | 1246 | 10236496 | 12754674016 |
+| 62 | 1247 | 9849259 | 12282025973 |
+| 47 | 1248 | 9743813 | 12160278624 |
+| 37 | 1249 | 9710374 | 12128257126 |
+| 30 | 1250 | 9708694 | 12135867500 |
+| 26 | 1251 | 9693851 | 12127007601 |
+| 23 | 1252 | 9705667 | 12151495084 |
+| 21, 19, 17, 16 | 1253–1256 | 9778105 or more | not tabulated |
+
+The 1,253–1,256-wire variants reduce qubit-time by at most 3.941 percent versus the uncapped head.
+
+Cap 37 retains two fewer wires than cap 26 for only 0.010 percent higher qubit-time in the planner's sweep.
+
+On the U7 head the circuit has 1,249 wires, 9,710,374 scheduled ticks and T 43,753,913.
+
 ### Weighted compare block bounds
 
 Block zero runs its carry chain once each way, while the later blocks also undo and redo their ladders around two carry flips.
