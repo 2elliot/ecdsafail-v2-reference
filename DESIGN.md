@@ -476,6 +476,15 @@ The CX gates only write the carry-in and commute with its X, so their undo-redo 
 Only the ladder is undone and redone at the two compare carry transitions; all other chain calls remain complete.
 On the U1 head the circuit has 1,246 wires, 17,824,402 scheduled ticks and T 32,869,445.
 
+### Increment prefix before uncompute
+
+Prefix.write increments each bit on x XOR p times not-below before uncomputing its AND chain.
+The uncompute is unchanged because below times (x XOR p times not-below) equals below times x.
+The remaining CX from p to each bit waits until the block's last bit, so the carry chain contains only the uncompute CCX.
+The first two bits take the same form with t, and every Prefix.write caller uses this identity, including the square.
+CCX, T and wires are unchanged; the extra X and CX gates trade operation count for shorter depth.
+On the U1 head the circuit has 1,246 wires, 16,313,762 scheduled ticks and T 32,869,445.
+
 ## Depth pass
 
 `write_circuit` runs `qec/depth_pass.py` on the hierarchical branch after the definition ids are fixed.
