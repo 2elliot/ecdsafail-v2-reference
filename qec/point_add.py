@@ -128,22 +128,28 @@ class DialogMultiplier:
         self.C.apply(self._encoder(j, swept),
                      [self._block_wires(G, j, swept)], inverse=True)
 
-    def _shared_difference(self, U, V, g0, g1):
-        """Compare and form the even difference using one majority chain."""
+
+    def _shared_difference(self, U, V, g0, g1, top=None):
+        """Compare and form the even difference using one majority chain. With top set, bit w - 1
+        is done by _top_bit on the domain that mode names."""
         C = self.C
         (cin,) = C.alloc(1)
         carries = [cin] + U[:-1]
         for wire in V:
             C.x(wire)
-        for i in range(len(U)):
+        chain = len(U) if top is None else len(U) - 1
+        for i in range(chain):
             if i == 0:
                 C.cx(U[i], V[i])
                 C.cx(U[i], carries[i])
                 C.cx(V[i], U[i])
             else:
                 _maj(C, carries[i], V[i], U[i])
-        C.ccx(g0, U[-1], g1)
-        for i in reversed(range(len(U))):
+        if top is None:
+            C.ccx(g0, U[-1], g1)
+        else:
+            self._top_bit(C, top, g0, U[-1], V[-1], U[-2], g1)
+        for i in reversed(range(chain)):
             # Restore a_i and select S_i while unwinding the carry chain.
             if i == 0:
                 C.cx(V[i], U[i])
@@ -166,18 +172,92 @@ class DialogMultiplier:
         for wire in V[1:]:
             C.cx(g1, wire)
 
-    def _euclid_step(self, w: int, top_clear: bool = False):
+    @staticmethod
+    def _top_bit(C, mode, g0, A, B, Cw, H):
+        """Bit w - 1 of the shared difference in place of its MAJ, g1 and unwind (5 CCX). On entry
+        A = U[w-1] holds a, B = V[w-1] holds b = NOT vhat_top, Cw = U[w-2] holds the carry c into
+        bit w - 1, H = g1 is 0. On exit A = U'_top, B = b ^ g0*(a ^ c), Cw = c, H = g0*MAJ(a, b, c),
+        as the five CCX leave them, on the domain the mode names:
+        top_clear: b = 1 (V's top wire is 0 on entry), so g1 = g0*(a | c) and U'_top = a & ~g0.
+        narrow: the step leaves U's top wire 0, so a implies g0 & b, g1 = a ^ g0*c*(a ^ b) and
+            B = a ^ b ^ g0*c.
+        both: both hold."""
+        if mode == "top_clear":
+            C.cx(Cw, A)
+            C.ccx(g0, A, B)
+            C.cx(Cw, A)
+            C.ccx(g0, A, H)
+            C.cx(H, A)
+            C.x(B)
+            C.ccx(Cw, B, H)
+            C.x(B)
+        elif mode == "narrow":
+            C.ccx(g0, Cw, H)
+            C.cx(A, B)
+            C.ccx(H, B, A)
+            C.cx(H, B)
+            C.ccx(g0, Cw, H)
+            C.cx(A, H)
+            C.cx(H, A)
+        elif mode == "both":
+            # P1 = ~a & ~c on B, P2 = ~g0 & ~c on A; then g1 = g0 ^ P1 ^ P2, B = a ^ g0 ^ c ^ P2.
+            C.x(B)
+            C.x(A)
+            C.x(Cw)
+            C.ccx(A, Cw, B)
+            C.x(A)
+            C.x(Cw)
+            C.cx(A, B)
+            C.x(g0)
+            C.x(Cw)
+            C.ccx(g0, Cw, A)
+            C.x(g0)
+            C.x(Cw)
+            C.cx(A, H)
+            C.cx(B, H)
+            C.cx(g0, H)
+            C.cx(H, B)
+            C.cx(Cw, B)
+            C.cx(B, A)
+            C.cx(g0, A)
+            C.cx(Cw, A)
+        else:
+            raise ValueError(mode)
+
+    def _euclid_step(self, w: int, top_clear: bool = False, narrow: bool = False, last: bool = False):
         """top_clear: the tick before ran at the same width, so V is below 2^(w - 1) on entry
-        and the second strip's last swap, of two zero bits, never fires."""
-        if (w, top_clear) not in self._euclid_steps:
+        and the second strip's last swap, of two zero bits, never fires.
+        narrow: the next width is w - 1, so by E7 this step leaves U below 2^(w - 1).
+        last: the pass's last tick, whose input reaches (U, V, E) = (1, 0, 0) by E3."""
+        if last:
+            top_clear = narrow = False
+        key = (w, top_clear, narrow, last)
+        if key not in self._euclid_steps:
             C = self.C
 
             def step(U, V, E, cell):
                 g0, b = cell
                 offset = E[0]
+                if last:
+                    # The input is (1, 0, 0), (1, 1, 0) or (1, 0, 1), and the cell becomes
+                    # (V0 ^ E, NOT V0): only V[0], E and the cell change, all by CX.
+                    C.cx(V[0], g0)
+                    C.cx(offset, g0)
+                    C.x(b)
+                    C.cx(V[0], b)
+                    C.cx(b, V[0])
+                    C.x(V[0])
+                    C.cx(g0, offset)
+                    C.cx(b, offset)
+                    C.x(offset)
+                    V[:] = V[1:] + V[:1]
+                    return
+                top = None
+                if w >= 2 and (top_clear or narrow):
+                    top = "both" if top_clear and narrow else "top_clear" if top_clear else "narrow"
                 C.cx(offset, V[0])
                 C.cx(V[0], g0)
-                self._shared_difference(U[:w], V[:w], g0, b)
+                self._shared_difference(U[:w], V[:w], g0, b, top)
                 V[:] = V[1:] + V[:1]
                 # A subtract keeps its swap on E and moves the old offset to the cell.
                 cswap(C, g0, [offset], [b])
@@ -199,8 +279,8 @@ class DialogMultiplier:
                 C.x(g0)
                 C.free([two])
 
-            self._euclid_steps[w, top_clear] = C.record_shape(step, [w, w, 1, 2])
-        return self._euclid_steps[w, top_clear]
+            self._euclid_steps[key] = C.record_shape(step, [w, w, 1, 2])
+        return self._euclid_steps[key]
 
     def _euclid_tick0(self):
         """First Euclid step on U=q, E=0, using unwritten tape for carries."""
@@ -265,7 +345,10 @@ class DialogMultiplier:
             else:
                 # A tick leaves V below 2^(w' - 1), w' its own width.
                 top_clear = i >= 1 and w >= 3 and self.widths[i - 1] == w
-                self.C.apply(self._euclid_step(w, top_clear), [U[:w], V, E, cell])
+                # E7: the next tick's U fits its width. E3: the last tick ends at (1, 0, 0).
+                last = i == self.iters - 1
+                narrow = not last and self.widths[i + 1] == w - 1
+                self.C.apply(self._euclid_step(w, top_clear, narrow, last), [U[:w], V, E, cell])
             G.extend(cell)
             next_width = self.widths[i + 1] if i + 1 < self.iters else self.pass_tail_width
             assert w - 1 <= next_width <= w
