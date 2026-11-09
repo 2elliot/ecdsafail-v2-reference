@@ -630,3 +630,10 @@ After `qec/gate_pass.py` it has 7,203,633 CCX and 6,091,268 ticks: qubit-time 7,
 Before, a decode or encode between two ticks took the scratch the tick before it had just freed, and the tick after it took the codec's wires, so each codec call sat on the tick chain: about 360 ticks for each of 108 calls a pass.
 The allocator hands out only clean wires in any order, so the change permutes which clean wire each fresh slot gets and nothing else; wires and CCX are unchanged.
 After `qec/gate_pass.py` the circuit has 1,249 wires and 6,204,501 ticks, against 6,270,603.
+
+## Rotating encoder wires in the Euclid sweep
+
+The Euclid pass's down-sweep encodes its blocks back to back, and every encode took the same two clean wires from the top of the free stack, so each one waited for the one before it to return them.
+Block j's encode now holds `ANCILLAS * (j % ENCODE_SETS)` free wires around itself, so with `ENCODE_SETS = 3` three consecutive encodes use three different pairs.
+The held wires are clean and freed unchanged, and the extra wires sit below the Bezout pass's high-water mark, so wires and CCX are unchanged.
+After `qec/gate_pass.py` the circuit has 1,249 wires and 6,169,869 ticks, against 6,204,501; two sets give 6,174,029.

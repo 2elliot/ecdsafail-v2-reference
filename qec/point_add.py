@@ -298,6 +298,8 @@ HAND_OFF_MARK = True
 
 # Run the Bezout pass's block codec calls on the free wires freed longest ago.
 CODEC_ASIDE = True
+# The Euclid pass's back-to-back block encodes take their clean wires from this many sets in turn.
+ENCODE_SETS = 3
 
 
 def _aside(C, fn):
@@ -597,7 +599,10 @@ class DialogMultiplier:
                     mark(1)
             done = i + 1 if swept else i
             if done % TICKS == 0 and done // TICKS < self.blocks:
+                # Rotate the encoder's clean wires, so that a block's encode overlaps the next ones.
+                hold = self.C.alloc(tape_block.ANCILLAS * (done // TICKS % ENCODE_SETS))
                 clean.extend(self._encode(G, done // TICKS, swept))
+                self.C.free(hold)
         if both is not None:
             self.C.free([both])
         if swept and self.blocks:
