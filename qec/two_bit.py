@@ -179,7 +179,7 @@ LATE_MIN_COPIES = 6
 P_FAN = 1
 # Run the tick's add as 2elliot depth/v2's CDKM ripple instead of either add above: 579,096
 # fewer CCX on the whole circuit for 1,535,700 more ticks (measured after the post-pass).
-CDKM_ADD = True
+CDKM_ADD = False
 
 
 def weighted_bounds(width, blocks):
