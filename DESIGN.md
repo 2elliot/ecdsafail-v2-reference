@@ -646,3 +646,10 @@ It needs about len(U) temps; every narrowed step's ring of w - 2 wires has them,
 In isolation the step at w = 197 goes from 2,382 CCX and 599 + 609 standalone ticks to 2,110 and 541 + 516, and every measured width from 14 to 197 gains on both.
 `scripts/sweep_check.py` checks the tree for r = 1, 2, 3 on all inputs up to n = 11, and the tree step against the old block sizes on the step domain for w = 9..12; dropping the tree's last CCX fails it.
 After `qec/gate_pass.py` the circuit has 1,249 wires, 6,147,009 ticks and 7,080,363 CCX, against 6,169,869 and 7,199,803.
+
+## Wide ring for the full-width steps
+
+`_ring_size` gives a step the bit-level tree's `tree_temps(w + 1, 1)` ring wires when that is more than the usual `U6_RING` cap and the pass has that many clean tape wires; `WIDE_RING` turns it off.
+At w = 256 that is 247 wires, which the pass has for about the first hundred steps, so those steps run the bit-level tree instead of blocks of 3: 2,765 CCX against 3,099, and 629 + 629 standalone ticks against 672 + 678.
+Narrower steps keep their rings, so only one more definition appears; `_shared_difference` now takes the ring it is given, since the pass alone caps it.
+After `qec/gate_pass.py` the circuit has 1,249 wires, 6,128,027 ticks and 6,939,075 CCX, against 6,147,009 and 7,080,363.

@@ -1,7 +1,7 @@
 """Exact, complete, controlled fixed-addend point addition:
 |c>|R>|0> -> |c>|R + c*A>|0> for every R in E(F_q) encoded as little-endian
 affine (x, y) with infinity = (0, 0)."""
-from .arith import Mod, _Gates, _emit, _maj, add_const, adjacent_xor, cswap, load_const, lookahead_sweep
+from .arith import Mod, _Gates, _emit, _maj, add_const, adjacent_xor, cswap, load_const, lookahead_sweep, tree_temps
 from .builder import Circuit
 from .curve import Curve
 from .square import SquareFold
@@ -150,6 +150,15 @@ def shared_difference_u1(C, U, V, g0, g1, ring):
 
 
 U6_RING = 193
+# Give a step the bit-level tree's temps when that is more than U6_RING and the pass has them.
+WIDE_RING = True
+
+
+def _ring_size(w, avail):
+    """The clean tape wires a step at width w takes as its ring, from avail."""
+    k = min(max(U6_RING, (w - 1) // 2 - 1), avail)
+    full = tree_temps(w + 1, 1)
+    return full if WIDE_RING and k < full <= avail else k
 
 
 def ring_layout_u6(n):
@@ -421,8 +430,8 @@ class DialogMultiplier:
         if len(U) <= RIPPLE_MAX_W:
             shared_difference_ripple(self.C, U, V, g0, g1, list(ring_wires))
             return
-        if ring_layout_u6(len(ring_wires[:U6_RING])) is not None:
-            shared_difference_u6(self.C, U, V, g0, g1, list(ring_wires[:U6_RING]))
+        if ring_layout_u6(len(ring_wires)) is not None:
+            shared_difference_u6(self.C, U, V, g0, g1, list(ring_wires))
             return
         if len(ring_wires) >= 3:
             shared_difference_u1(self.C, U, V, g0, g1, list(ring_wires[:17]))
@@ -556,7 +565,8 @@ class DialogMultiplier:
             else:
                 # Alternate clean scratch so adjacent carry and strip sweeps can overlap.
                 hold = self.C.alloc(1) if i % 2 else []
-                self.C.apply(self._euclid_step(w, min(max(U6_RING, (w - 1) // 2 - 1), len(available))), [U[:w], V, E, cell, available[:min(max(U6_RING, (w - 1) // 2 - 1), len(available))]])
+                k = _ring_size(w, len(available))
+                self.C.apply(self._euclid_step(w, k), [U[:w], V, E, cell, available[:k]])
                 self.C.free(hold)
             G.extend(cell)
             next_width = self.widths[i + 1] if i + 1 < self.iters else self.pass_tail_width

@@ -6,7 +6,7 @@
    U[j], V[j] for j >= 1): U must end f_j = x_j ^ p_j f_(j-1) from f_0 = U[0], V unchanged, temps 0.
 2. The step _euclid_step(w, w - 2) with RIPPLE_MAX_W = 0 (the tree difference) for w = 9..wmax, on the
    step domain (cell 0, U odd, every U[1:], V, E): the tree's sweep sizes against the old (3, 4, 5, 6, 8),
-   equal on U, V, E, cell, ring and scratch all 0.
+   equal on U, V, E, cell, ring and scratch all 0; and the same step on a ring of 2w wires.
 With "broken", lookahead_tree drops its last fix CCX; the checks must fail.
 """
 import sys
@@ -60,15 +60,16 @@ for r in (1, 2, 3):
 OLD = (3, 4, 5, 6, 8)
 
 
-def step_run(w, sizes):
+def step_run(w, sizes, k=None):
     saved = arith.SWEEP_BLOCKS
     arith.SWEEP_BLOCKS = sizes
     point_add.RIPPLE_MAX_W = 0
     q = next(p for p in (251, 509, 1021, 2039, 4093, 8191, 16381, 32749) if p.bit_length() >= w)
     C = Circuit()
     m = point_add.DialogMultiplier(C, Mod(q))
-    U, V, E, cell, ring = C.alloc(w), C.alloc(w), C.alloc(1), C.alloc(2), C.alloc(w - 2)
-    C.apply(m._euclid_step(w, w - 2), [U, V, E, cell, ring])
+    k = w - 2 if k is None else k
+    U, V, E, cell, ring = C.alloc(w), C.alloc(w), C.alloc(1), C.alloc(2), C.alloc(k)
+    C.apply(m._euclid_step(w, k), [U, V, E, cell, ring])
     arith.SWEEP_BLOCKS = saved
     free = U[1:] + V + E
     N = len(free)
@@ -86,5 +87,9 @@ for w in range(9, WMAX + 1):
     good = new == old and new_clean and old_clean
     ok &= good
     print(f"step w={w:2d} lanes=2^{N} ccx new/old={new_ccx}/{old_ccx} equal_and_clean={good}", flush=True)
+    wide, wide_clean, wide_ccx, _ = step_run(w, arith.SWEEP_BLOCKS, 2 * w)
+    good = wide == old and wide_clean
+    ok &= good
+    print(f"step w={w:2d} ring={2 * w} (more than the tree needs) ccx={wide_ccx} equal_and_clean={good}", flush=True)
 print("sweep check:", "OK" if ok else "FAIL")
 sys.exit(0 if ok else 1)
