@@ -11,12 +11,25 @@ Q = lo + 2^n*hi, and Y - hi = D is at least 0. The rest folds 2^n to f:
 If V >= 2^n, dropping that bit subtracts q and f together and leaves V - 2^n <= f*f - 1 < q.
 Otherwise V - f < q, so subtracting f is enough. So no comparison with q is needed.
 """
-from .arith import _carries, _uncarry, add, add_const, add_lookahead, gt_into, sub
+from .arith import _carries, _uncarry, add, add_const, add_lookahead, fan_into, gt_into, prefix_xor, sub
 from .two_bit import Prefix
 
 # Add the square's rows as lookahead trees, on ROW_TEMPS clean wires beside the fold's own.
 ROW_TREE = True
 ROW_TEMPS = 80
+# Fan each row's Gray-code step out through at most this many copies on clean temps, and undo the walk
+# by a prefix network; 0 runs both as CX chains.
+ROW_FAN_COPIES = 63
+
+
+def _fan_copies(targets, cap):
+    """The number of copies, 2^j - 1 <= cap, that fans src into targets in the fewest CX layers:
+    j to make them and ceil(targets / 2^j) to fan out (unmaking them overlaps the add)."""
+    best, j = (targets, 0), 1
+    while (1 << j) - 1 <= cap:
+        best = min(best, (j + -(-targets // (1 << j)), (1 << j) - 1))
+        j += 1
+    return best[1]
 
 
 def signed_digits(v):
@@ -79,11 +92,19 @@ class SquareFold:
         for y, q in zip(Y, Q):
             C.cx(y, q)
         for i in range(n - 1):
-            for w in Y[i + 1:]:
-                C.cx(Y[i], w)
+            if ROW_FAN_COPIES:
+                # The tree takes temps from the front, so the copies sit at the back.
+                k = _fan_copies(n - 1 - i, min(ROW_FAN_COPIES, len(temps)))
+                fan_into(C, Y[i], Y[i + 1:], temps[len(temps) - k:])
+            else:
+                for w in Y[i + 1:]:
+                    C.cx(Y[i], w)
             add_lookahead(C, Y[i + 1:], Q[2 * i + 1:n + i], Q[n + i], temps, tree=ROW_TREE)
-        for i in range(1, n):
-            C.cx(Y[i - 1], Y[i])
+        if ROW_FAN_COPIES:
+            prefix_xor(C, Y)
+        else:
+            for i in range(1, n):
+                C.cx(Y[i - 1], Y[i])
         C.free(extra)
 
     def _multiple(self, C, a, T, cin=None):

@@ -150,6 +150,21 @@ def adjacent_xor(C, a):
         C.cx(a[n - 1 - s], a[n - 1 - t])
 
 
+def prefix_xor(C, a):
+    """a[i] ^= a[0] ^ ... ^ a[i - 1] for every i, from the old values, as a Brent-Kung prefix network
+    (Brent and Kung, 1982) in about 2 log2 len(a) CX layers, instead of len(a) - 1 CXs in series."""
+    n = len(a)
+    d = 1
+    while d < n:
+        for p in range(2 * d - 1, n, 2 * d):
+            C.cx(a[p - d], a[p])
+        d *= 2
+    while d > 1:
+        d //= 2
+        for p in range(3 * d - 1, n, 2 * d):
+            C.cx(a[p - d], a[p])
+
+
 class _TempQueue:
     """Clean temps handed out in turn; a freed temp goes to the back, so it is reused as late as
     possible. Counts the most taken at once."""

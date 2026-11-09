@@ -727,3 +727,12 @@ After `qec/gate_pass.py` the circuit has 1,250 wires, 5,794,237 ticks and 7,057,
 With `EQ_TREE`, `and_tree` builds each AND as a balanced tree on fresh wires instead, with the same CCX, and `eq_const_into` joins its control last, since each control is itself a tree's root and is ready last.
 `scripts/eq_tree_check.py` checks `eq_const_into` on every input for every value up to 9 bits, with and without a control, and `and_tree` up to 9 wires; dropping the tree's last CCX fails it.
 After `qec/gate_pass.py` the circuit has 1,250 wires, 5,774,637 ticks and 7,057,205 CCX, against 5,794,237.
+
+## Copies for the square's row fans
+
+Each of the square's rows starts with a Gray-code step that XORs Y[i] into every wire above it, n - 1 - i CXs from one wire, and the rows end with a chain of n - 1 CXs that undoes the walk: about 28,000 ticks a square, all in series.
+With `ROW_FAN_COPIES`, `fan_into` copies Y[i] onto at most that many clean row temps by doubling, XORs the copies into the targets in parallel and clears them, with the copy count `_fan_copies` picks for the fewest layers; the temps it uses sit at the back of the queue the row's tree takes from.
+`prefix_xor` undoes the walk as a Brent-Kung prefix network.
+Wires and CCX are unchanged.
+`scripts/square_check.py` checks `SquareFold.compute` on every n-bit Y for every odd q below 2^11 the fold applies to, and `prefix_xor` and `fan_into` on every input; dropping the prefix network's last CX fails it.
+After `qec/gate_pass.py` the circuit has 1,250 wires and 5,730,583 ticks, against 5,774,637.
