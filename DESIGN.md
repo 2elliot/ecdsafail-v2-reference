@@ -653,3 +653,11 @@ After `qec/gate_pass.py` the circuit has 1,249 wires, 6,147,009 ticks and 7,080,
 At w = 256 that is 247 wires, which the pass has for about the first hundred steps, so those steps run the bit-level tree instead of blocks of 3: 2,765 CCX against 3,099, and 629 + 629 standalone ticks against 672 + 678.
 Narrower steps keep their rings, so only one more definition appears; `_shared_difference` now takes the ring it is given, since the pass alone caps it.
 After `qec/gate_pass.py` the circuit has 1,249 wires, 6,128,027 ticks and 6,939,075 CCX, against 6,147,009 and 7,080,363.
+
+## Tree rows in the square
+
+With `ROW_TREE`, each of the square's rows runs `add_lookahead` with `tree=True`: the up-sweep's adjacent XORs are `adjacent_xor`'s network instead of a serial CX chain, and its carries are `lookahead_sweep`'s tree instead of the blocked chain.
+The rows take `ROW_TEMPS = 80` clean wires beside the fold's own 101; the square runs while the multiplier's wires are free, so the wire count stays 1,249 (120 would make it 1,250).
+The rows cost more CCX this way: 272,798 a square against 221,818, so 101,960 more for the circuit.
+`scripts/row_add_check.py` checks both forms on all inputs for w = 1..8 and temps 1, 2, w and 2w; running the tree form's adjacent XORs in reverse order fails it.
+After `qec/gate_pass.py` the circuit has 1,249 wires, 6,047,310 ticks and 7,041,035 CCX, against 6,128,027 and 6,939,075: about 0.79 ticks for each CCX spent.

@@ -256,13 +256,14 @@ def lookahead_sweep(C, U, V, temps):
     lookahead_chain(C, U, V, temps, lookahead_sizes(n - 1))
 
 
-def add_lookahead(C, a, b, cout, temps):
+def add_lookahead(C, a, b, cout, temps, tree=False):
     """b += a mod 2^w and cout ^= the carry out, as add, with both sweeps in lookahead form.
     The up-sweep leaves add's state after its last _maj (b_i = p_i, the carry wire c_0 ^ a_0,
     a_i = c_(i+1) ^ a_(i+1), a_(w-1) = c_w). The carries of a + ~s are those of a + b, so that
     state for (a, ~s) differs only on b, by b_i = ~(p_i ^ c_i ^ a_i): one CX from the wire below
     and an X a bit. The same sweep run backwards then leaves (a, ~s). Temps: clean wires, any
-    number, left clean."""
+    number, left clean. With tree, the up-sweep's adjacent XORs are adjacent_xor's network and its
+    carries are lookahead_sweep's, the same maps in log depth when the temps fit a tree."""
     w = len(a)
     assert len(b) == w and w >= 1 and temps
     (cin,) = C.alloc(1)
@@ -270,9 +271,13 @@ def add_lookahead(C, a, b, cout, temps):
     for i in range(w):
         up.cx(a[i], b[i])
     up.cx(a[0], cin)
-    for i in range(w - 1):
-        up.cx(a[i + 1], a[i])
-    lookahead_chain(up, [cin] + list(a), [None] + list(b), temps, lookahead_sizes(w))
+    if tree:
+        adjacent_xor(up, a)
+        lookahead_sweep(up, [cin] + list(a), [None] + list(b), temps)
+    else:
+        for i in range(w - 1):
+            up.cx(a[i + 1], a[i])
+        lookahead_chain(up, [cin] + list(a), [None] + list(b), temps, lookahead_sizes(w))
     _emit(C, up.ops)
     C.cx(a[-1], cout)
     C.cx(cin, b[0])

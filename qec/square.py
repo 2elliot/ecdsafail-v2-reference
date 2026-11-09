@@ -14,6 +14,10 @@ Otherwise V - f < q, so subtracting f is enough. So no comparison with q is need
 from .arith import _carries, _uncarry, add, add_const, add_lookahead, gt_into, sub
 from .two_bit import Prefix
 
+# Add the square's rows as lookahead trees, on ROW_TEMPS clean wires beside the fold's own.
+ROW_TREE = True
+ROW_TEMPS = 80
+
 
 def signed_digits(v):
     """Non-adjacent form of v, as (position, sign)."""
@@ -67,16 +71,20 @@ class SquareFold:
     def _rows(self, C, Y, Q, temps):
         """Q = Y*(2^n - Y) on clean wires. After row i, Q < 2^(n + i + 1), so each carry
         lands on a wire no earlier row reached. Y's wires walk through their Gray code.
-        The rows add in series, so each adds with add_lookahead, on clean temps."""
+        The rows add in series, so each adds with add_lookahead, on clean temps, as a tree
+        with ROW_TEMPS more clean wires when ROW_TREE."""
         n = self.n
+        extra = C.alloc(ROW_TEMPS) if ROW_TREE else []
+        temps = list(temps) + extra
         for y, q in zip(Y, Q):
             C.cx(y, q)
         for i in range(n - 1):
             for w in Y[i + 1:]:
                 C.cx(Y[i], w)
-            add_lookahead(C, Y[i + 1:], Q[2 * i + 1:n + i], Q[n + i], temps)
+            add_lookahead(C, Y[i + 1:], Q[2 * i + 1:n + i], Q[n + i], temps, tree=ROW_TREE)
         for i in range(1, n):
             C.cx(Y[i - 1], Y[i])
+        C.free(extra)
 
     def _multiple(self, C, a, T, cin=None):
         """T += f*a mod 2^len(T), plus 1 if cin holds 1."""
