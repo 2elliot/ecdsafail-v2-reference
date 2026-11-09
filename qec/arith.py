@@ -271,8 +271,9 @@ def lookahead_sweep(C, U, V, temps):
     lookahead_chain(C, U, V, temps, lookahead_sizes(n - 1))
 
 
-def add_lookahead(C, a, b, cout, temps, tree=False):
+def add_lookahead(C, a, b, cout, temps, tree=False, cin=None):
     """b += a mod 2^w and cout ^= the carry out (none if cout is None), as add, with both sweeps in lookahead form.
+    A wire holding 1 as cin adds 1, as in add; the sweeps restore it.
     The up-sweep leaves add's state after its last _maj (b_i = p_i, the carry wire c_0 ^ a_0,
     a_i = c_(i+1) ^ a_(i+1), a_(w-1) = c_w). The carries of a + ~s are those of a + b, so that
     state for (a, ~s) differs only on b, by b_i = ~(p_i ^ c_i ^ a_i): one CX from the wire below
@@ -281,7 +282,9 @@ def add_lookahead(C, a, b, cout, temps, tree=False):
     carries are lookahead_sweep's, the same maps in log depth when the temps fit a tree."""
     w = len(a)
     assert len(b) == w and w >= 1 and temps
-    (cin,) = C.alloc(1)
+    own = cin is None
+    if own:
+        (cin,) = C.alloc(1)
     up = _Gates()
     for i in range(w):
         up.cx(a[i], b[i])
@@ -304,7 +307,8 @@ def add_lookahead(C, a, b, cout, temps, tree=False):
     _emit(C, reversed(up.ops))
     for x in b:
         C.x(x)
-    C.free([cin])
+    if own:
+        C.free([cin])
 
 
 def sub(C, a, b, borrow=None, ctrl=None):

@@ -1,11 +1,11 @@
 """Exhaustive check of SquareFold.compute under the module's current flags.
 
-    python3.12 -I -B scripts/square_check.py <tree> <nmax> [broken] [MODULE.FLAG=value ...]
+    python3.12 -I -B scripts/square_check.py <tree> <nmax> [broken | brokenfold] [MODULE.FLAG=value ...]
 
 For every odd q < 2^nmax that SquareFold applies to (f = 2^n - q, f*f <= q) and every n-bit Y:
 J[:n] must end Y^2 mod q, Y must be restored, and every wire outside Y and J must end 0. Also
 prefix_xor and fan_into on every input up to nmax bits. With "broken", prefix_xor drops its last CX;
-the check must fail.
+with "brokenfold", the fold's first add drops its carry in. Either must fail.
 """
 import ast, importlib, sys
 from pathlib import Path
@@ -26,6 +26,13 @@ if args and args[0] == "broken":
             C.cx(*o)
     arith.prefix_xor = broken
     square.prefix_xor = broken
+if args and args[0] == "brokenfold":
+    args = args[1:]
+    orig_add = square._add
+
+    def broken_add(C, a, b, cin=None, temps=()):
+        orig_add(C, a, b, None, temps)
+    square._add = broken_add
 for kv in args:
     k, v = kv.split("=", 1); mod, flag = k.rsplit(".", 1)
     setattr(importlib.import_module("qec." + mod), flag, ast.literal_eval(v))

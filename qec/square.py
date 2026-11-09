@@ -11,7 +11,7 @@ Q = lo + 2^n*hi, and Y - hi = D is at least 0. The rest folds 2^n to f:
 If V >= 2^n, dropping that bit subtracts q and f together and leaves V - 2^n <= f*f - 1 < q.
 Otherwise V - f < q, so subtracting f is enough. So no comparison with q is needed.
 """
-from .arith import _carries, _uncarry, add, add_const, add_lookahead, fan_into, gt_into, prefix_xor, sub
+from .arith import _carries, _uncarry, add, add_const, add_lookahead, fan_into, gt_into, prefix_xor
 from .two_bit import Prefix
 
 # Add the square's rows as lookahead trees, on ROW_TEMPS clean wires beside the fold's own.
@@ -20,6 +20,17 @@ ROW_TEMPS = 120
 # Fan each row's Gray-code step out through at most this many copies on clean temps, and undo the walk
 # by a prefix network; 0 runs both as CX chains.
 ROW_FAN_COPIES = 63
+# Run the fold's adds as add_lookahead trees, on FOLD_TEMPS clean wires and the fold's clean junk.
+FOLD_TREE = True
+FOLD_TEMPS = 86
+
+
+def _add(C, a, b, cin=None, temps=()):
+    """b += a mod 2^len(b), plus 1 if cin holds 1: add_lookahead's tree on temps when FOLD_TREE."""
+    if FOLD_TREE:
+        add_lookahead(C, a, b, None, list(temps), tree=True, cin=cin)
+    else:
+        add(C, a, b, cin=cin)
 
 
 def _fan_copies(targets, cap):
@@ -107,8 +118,8 @@ class SquareFold:
                 C.cx(Y[i - 1], Y[i])
         C.free(extra)
 
-    def _multiple(self, C, a, T, cin=None):
-        """T += f*a mod 2^len(T), plus 1 if cin holds 1."""
+    def _multiple(self, C, a, T, cin=None, temps=()):
+        """T += f*a mod 2^len(T), plus 1 if cin holds 1. temps: clean wires for the adds' trees."""
         for s, sign in self.digits:
             target = T[s:]
             if not target:
@@ -116,9 +127,13 @@ class SquareFold:
             pad = C.alloc(max(0, len(target) - len(a)))
             b = a[:len(target)] + pad
             if sign > 0:
-                add(C, b, target, cin=cin)
+                _add(C, b, target, cin, temps)
             else:
-                sub(C, b, target)
+                for w in target:
+                    C.x(w)
+                _add(C, b, target, None, temps)
+                for w in target:
+                    C.x(w)
             C.free(pad)
             cin = None
 
@@ -130,22 +145,27 @@ class SquareFold:
         t, c, k = J[2 * n + b + m:]
         # E, T, t, c and k are clean until the rows are done
         self._rows(C, Y, lo + hi, J[2 * n:])
+        fold = C.alloc(FOLD_TEMPS) if FOLD_TREE else []
         # hi = Y - hi = ~(hi + ~Y), and lo = ~lo.
         for w in Y:
             C.x(w)
-        add(C, Y, hi)
+        _add(C, Y, hi, None, J[2 * n:] + fold)
         for w in Y:
             C.x(w)
         for w in hi + lo:
             C.x(w)
         (one,) = C.alloc(1)
         C.x(one)
-        self._multiple(C, hi, lo + E, one)
+        self._multiple(C, hi, lo + E, one, T + [t, c, k] + fold)
         C.x(one)
         C.free([one])
-        self._multiple(C, E, T)
+        self._multiple(C, E, T, None, [t, c, k] + fold)
         high = lo[m:]
-        add(C, T, lo[:m], cout=t)
+        if FOLD_TREE:
+            add_lookahead(C, T, lo[:m], t, [c, k] + fold, tree=True)
+        else:
+            add(C, T, lo[:m], cout=t)
+        C.free(fold)
         if high:
             carry = Prefix(C, high)
             C.ccx(t, carry.top, c)

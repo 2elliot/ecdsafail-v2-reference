@@ -742,3 +742,12 @@ After `qec/gate_pass.py` the circuit has 1,250 wires and 5,730,583 ticks, agains
 `ROW_TEMPS` goes from 80 to 120. The square runs while the multiplier's wires are free, 121 below the 1,250-wire peak that the Bezout tick now sets, so the extra temps cost no wire.
 With 221 temps the narrower rows run the bit-level tree instead of blocks of 2 or 3, which saves CCX as well as ticks.
 After `qec/gate_pass.py` the circuit has 1,250 wires, 5,725,277 ticks and 7,032,405 CCX, against 5,730,583 and 7,057,205.
+
+## Trees for the fold's adds
+
+After the rows, the square folds 2^n to f with a 256-bit add, ten adds of f's signed digits times hi and E (five of about 290 bits, five of about 65), and one 65-bit add, all CDKM ripples: about 35,000 ticks a square on the critical path.
+With `FOLD_TREE` each runs `add_lookahead`'s tree, on `FOLD_TEMPS = 86` clean wires plus whichever of the fold's junk wires are still clean at that point (E, T, t, c and k for the first add, T, t, c and k for hi's digits).
+`add_lookahead` now takes a carry-in wire, so the first digit still adds Z's + 1. The square's block peaks at the same 121 scratch wires as the rows, so the wire count stays 1,250; 88 temps would make it 1,251.
+The adds cost more CCX: 287,300 a square against 272,798 in isolation.
+`scripts/square_check.py` covers the fold's trees; dropping the first add's carry in fails it.
+After `qec/gate_pass.py` the circuit has 1,250 wires, 5,652,708 ticks and 7,061,409 CCX, against 5,725,277 and 7,032,405: about 2.5 ticks for each CCX spent.
