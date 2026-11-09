@@ -263,9 +263,7 @@ class SquareFold:
         high = lo[m:]
         add(C, T, lo[:m], cout=t)
         if high:
-            carry = Prefix(C, high)
-            C.ccx(t, carry.top, c)
-            carry.write(t)
+            add_const(C, high, 1, t, c)
         else:
             C.cx(t, c)
         # With c = 0, lo >= f. Take f off the low bits, and the borrow off the rest.
@@ -275,7 +273,7 @@ class SquareFold:
         high = lo[b:]
         for w in high:
             C.x(w)
-        Prefix(C, high).write(k)
+        add_const(C, high, 1, k)
         for w in high:
             C.x(w)
         C.x(c)
