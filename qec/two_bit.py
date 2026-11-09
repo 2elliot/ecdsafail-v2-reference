@@ -176,6 +176,7 @@ LA_NTEMPS, LA_NCOPIES = 6, 8
 # one small, since the write starts with the top block's ladder (DESIGN.md, "Ten P blocks").
 PARALLEL_PREFIX = True
 P_SIZES_221 = (3, 7, 14, 30, 31, 30, 29, 27, 25, 23)
+HIGH_CARRIERS = True
 # Put the final swap's sw and control copies on scratch the next tick reaches only after its add.
 LATE_FINAL_WIRES = True
 LATE_MIN_COPIES = 6
@@ -613,6 +614,10 @@ class PrefixR:
             else:
                 m = min(len(carriers) + 1, h - start, cap or h)
             x, u = bits[start:start + m], carriers[:m - 1]
+            if HIGH_CARRIERS and start >= m - 1:
+                # Any wire below start reads 1 when tops[-1] is, so the chain can sit on the bits just
+                # below the block, which frees the lowest bits once the first blocks are built.
+                u = bits[start - (m - 1):start]
             for w in u:
                 C.x(w)
             v = x[0]

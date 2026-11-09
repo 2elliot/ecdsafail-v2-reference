@@ -610,3 +610,13 @@ Block 0 of the compare grows from 38 to 40 bits, which returns most of the CCX t
 Dropping one deferred CX from P's write fails the first check; dropping the top block's dirty carry-in fix fails the second.
 The full circuit has 1,250 wires, 7,203,157 CCX and 6,174,044 ticks.
 After `qec/gate_pass.py` it has 7,202,101 CCX and 6,110,534 ticks: qubit-time 7,638,167,500, 0.75% below the idle-wires head at 2,298 more CCX.
+
+## P's chains on the bits below each block
+
+`PrefixR` built every block's chain on the lowest wires below it, so the lowest H bits carried every block and came free only after the whole build.
+With `HIGH_CARRIERS`, a block whose start is at least its length less one puts its chain on the bits just below it instead.
+Every wire below the block reads 1 when the block's lower top is 1, so the argument in `Prefix` holds for any such choice.
+The lowest bits then come free once the first blocks are built, the first chain borrows them, and in M's inverse P's unbuild starts before they come back.
+`scripts/prefix_check.py` passes on all 873 size lists for h = 2..12 and at 221 bits; putting one carrier above the block fails it.
+The full circuit has 1,250 wires, 7,203,157 CCX and 6,164,742 ticks, 9,302 fewer.
+After `qec/gate_pass.py` it has 7,202,101 CCX and 6,106,977 ticks: qubit-time 7,633,721,250, 0.06% lower.
