@@ -172,9 +172,12 @@ MAX_BLOCKS = 11
 LOOKAHEAD_ADD = True
 # The add's temps and J copies: the wires P's tenth block adds at the tick's peak are idle here.
 LA_NTEMPS, LA_NCOPIES = 8, 6
-# (size, count): that many wider blocks among F's blocks of 2, or None for blocks of 2 only. An r-bit
-# block costs 4r - 3 CCX, so each chain step saved costs 3 CCX for any r (DESIGN.md, "Blocks of 3").
-LA_F_WIDE = (3, 68)
+# (size, count): that many wider blocks among F's / B's blocks of 2, or None for blocks of 2 only. An
+# r-bit block costs 4r - 3 CCX, so each chain step saved costs 3 CCX for any r (DESIGN.md, "Blocks of
+# 3"). Split between F and B, the sweep that runs at 7 ticks a step and starves for temps differs by
+# direction.
+LA_F_WIDE = (3, 34)
+LA_B_WIDE = (3, 34)
 # The add's carry and t serve as temps in its sweeps; temps go out free-first under the tick model.
 LA_TOP_TEMPS = True
 LA_IDLE_TEMPS = True
@@ -418,9 +421,9 @@ class _LaTemps:
         self.free.append(w)
 
 
-def add_or_shift_la(C, J, a, word, n, k2f=None, k2b=None, ntemps=5, ncopies=6, fsizes=None):
-    """k2f / k2b: number of 2-blocks in F / B (None = as many as fit); fsizes, when given, F's block
-    sizes bottom up instead. Wires: cin, ntemps temps, carry and t for the top, ncopies copies of J:
+def add_or_shift_la(C, J, a, word, n, k2f=None, k2b=None, ntemps=5, ncopies=6, fsizes=None, bsizes=None):
+    """k2f / k2b: number of 2-blocks in F / B (None = as many as fit); fsizes / bsizes, when given,
+    F's / B's block sizes bottom up instead. Wires: cin, ntemps temps, carry and t for the top, ncopies copies of J:
     1 + ntemps + 2 + ncopies (14 by default)."""
     m = n - 1
     if k2f is None:
@@ -485,22 +488,29 @@ def add_or_shift_la(C, J, a, word, n, k2f=None, k2b=None, ntemps=5, ncopies=6, f
     C.x(word[n - 1])
     C.ccx(cm, J, carry)
 
-    bb = _la_blocks(_la_spread(m, k2b))
-    # Each block's inner unfix reads U[s] = f_s, which the next block down overwrites, so all
-    # of them go first; then the chain runs down one CCX a block.
+    # B runs F's blocks backwards: f V = f p on every lane, so the same steps undo the carries.
+    bb = _la_blocks(bsizes or _la_spread(m, k2b))
+    # Each block's inner unfixes read U[s] = f_s, which the next block down overwrites. The first
+    # needs no temp, so all of those go first; then the chain runs down one CCX a block.
     for s, r in bb:
-        if r == 2:
+        if r >= 2:
             C.ccx(U[s], V[s], U[s + 1])
     for s, r in reversed(bb):
         if r == 1:
             C.ccx(U[s], V[s], U[s + 1])
         else:
-            T = temps.take()
-            C.ccx(V[s], V[s + 1], T)
-            C.ccx(U[s], T, U[s + 2])
-            C.ccx(V[s], V[s + 1], T)
-            temps.give(T)
-            C.ccx(U[s + 1], V[s + 1], U[s + 2])
+            T = [V[s]]
+            for i in range(1, r):
+                T.append(temps.take())
+                C.ccx(T[i - 1], V[s + i], T[i])
+                if i + 1 < r:
+                    C.ccx(U[s], T[i], U[s + i + 1])
+            C.ccx(U[s], T[r - 1], U[s + r])
+            for i in reversed(range(1, r)):
+                C.ccx(T[i - 1], V[s + i], T[i])
+                temps.give(T[i])
+            for i in reversed(range(1, r)):
+                C.ccx(U[s + i], V[s + i], U[s + i + 1])
 
     for j in reversed(range(m)):
         C.cx(U[j + 1], U[j])
@@ -985,8 +995,9 @@ class TwoBitMod(Mod):
             return add_or_shift_cdkm(C, J, a, word, self.n)
         if LOOKAHEAD_ADD and self.n > 3:
             fsizes = _la_wide(self.n - 1, *LA_F_WIDE) if LA_F_WIDE else None
+            bsizes = _la_wide(self.n - 1, *LA_B_WIDE) if LA_B_WIDE else None
             return add_or_shift_la(C, J, a, word, self.n, ntemps=LA_NTEMPS, ncopies=LA_NCOPIES,
-                                   fsizes=fsizes)
+                                   fsizes=fsizes, bsizes=bsizes)
         n = self.n
         (cin, D, carry, t) = C.alloc(4)
         extra = C.alloc(3)

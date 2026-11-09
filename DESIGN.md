@@ -682,3 +682,14 @@ With 8 temps and 6 J copies (against 6 and 8) the add still fits the tick's peak
 `scripts/add_or_shift_check.py <tree> 10 wide` runs every composition of n - 1 into F blocks of 1 to 4 bits, 428 layouts, on all inputs; dropping the inner fixes above a block's first bit fails 27 of the 56 layouts at n <= 7.
 The full circuit has 1,250 wires, 7,122,997 CCX (78,132 more, T 49,860,979) and 5,716,356 ticks, 199,962 fewer.
 After `qec/gate_pass.py` it has 5,666,078 ticks against 5,867,922: qubit-time 7,082,597,500, 3.44% lower.
+
+## Blocks of 3 split between the sweeps
+
+B runs F's blocks backwards, which undoes the carries because f·V = f·p on every lane: V differs from p only where ¬J·¬f is 1.
+Each block's first inner unfix needs no temp and still goes ahead of the chain; a block of 3 unfixes its second inner bit from the product it builds for its chain step.
+F's steps cost 7 ticks in the tick and B's cost 11, and M's inverse swaps them, so the sweep that runs at 7 a step, and starves for temps, is F in one direction and B in the other.
+`LA_B_WIDE = (3, 34)` with `LA_F_WIDE = (3, 34)` puts half the blocks of 3 in each, at the same CCX as 68 in F.
+In a screen of the Bezout pass, 68 in B alone reaches its computed ticks in the tick's direction and starves in the inverse, and clustering the blocks at the top or bottom of either sweep costs 43,000 to 53,000 ticks.
+`scripts/add_or_shift_check.py <tree> 10 wideb` runs all 428 B layouts on all inputs; dropping the second inner unfix fails 27 of the 56 layouts at n <= 7.
+The full circuit has 1,250 wires, 7,122,997 CCX and 5,705,368 ticks, 10,988 fewer.
+After `qec/gate_pass.py` it has 5,656,726 ticks: qubit-time 7,070,907,500, 0.17% lower.

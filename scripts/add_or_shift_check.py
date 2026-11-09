@@ -5,7 +5,7 @@ scripts/add_or_shift_check.py to the bez-jack tree, where the add is a module fu
 
 la = two_bit.add_or_shift_la (PR8), cdkm = two_bit.add_or_shift_cdkm (port), tick = whatever
 TwoBitMod._add_or_shift dispatches to under the tree's flags, wide = add_or_shift_la with every
-composition of n - 1 into F blocks of 1 to 4 bits. For n = 4..nmax builds the add alone
+composition of n - 1 into F blocks of 1 to 4 bits, wideb = the same for B. For n = 4..nmax builds the add alone
 on J, R (n), word (n + 2) with fresh scratch, simulates all 2^(2n+3) assignments, and requires on
 every lane: J and R unchanged, every scratch wire 0, word = word + (R >> 1) mod 2^(n+2) when J = 0,
 and word[:n + 1] rotated left by one with word[n + 1] unchanged when J = 1. Expected words are
@@ -42,7 +42,7 @@ def compositions(m, top=4):
 runs = []
 for impl in impls:
     for n in range(4, int(sys.argv[2]) + 1):
-        if impl == "wide":
+        if impl in ("wide", "wideb"):
             runs += [(impl, n, sizes) for sizes in compositions(n - 1)]
         else:
             runs.append((impl, n, None))
@@ -57,6 +57,8 @@ for impl, n, sizes in runs:
         two_bit.add_or_shift_la(C, J, R, word, n)
     elif impl == "wide":
         two_bit.add_or_shift_la(C, J, R, word, n, fsizes=sizes)
+    elif impl == "wideb":
+        two_bit.add_or_shift_la(C, J, R, word, n, bsizes=sizes)
     elif impl == "cdkm":
         two_bit.add_or_shift_cdkm(C, J, R, word, n)
     else:
@@ -78,10 +80,11 @@ for impl, n, sizes in runs:
     good = (st[J] == j and [st[x] for x in R] == r and [st[x] for x in word] == want
             and all(st[x] == 0 for x in scratch))
     ok &= good
-    if impl != "wide" or not good:
+    if impl not in ("wide", "wideb") or not good:
         print(f"{impl:4s} n={n} lanes=2^{N} scratch={len(scratch)} ccx={C.ops[0::4].count(2)} "
               f"map_and_clean={good}{' F ' + str(sizes) if sizes else ''}", flush=True)
-if "wide" in impls:
-    print("wide layouts checked:", sum(1 for r in runs if r[0] == "wide"))
+for impl in ("wide", "wideb"):
+    if impl in impls:
+        print(impl, "layouts checked:", sum(1 for r in runs if r[0] == impl))
 print("add_or_shift exhaustive:", "OK" if ok else "FAIL")
 sys.exit(0 if ok else 1)
