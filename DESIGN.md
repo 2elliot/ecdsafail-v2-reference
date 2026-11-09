@@ -603,7 +603,7 @@ After `qec/gate_pass.py` it has 7,199,803 CCX and 6,161,800 ticks, against 6,270
 P's write starts with its top block's ladder, so on the critical path its length counts once in full, and every other block's tree and its reverse cost 2 CCX a bit.
 At 221 bits P now has ten blocks, against nine ending in 29.
 They were (3, 7, 14, 30, 31, 30, 29, 27, 25, 23) with a 40-bit compare block 0; after the next section's carriers the tick's ticks stop tracking the top block's size (several shapes give the same total), so (3, 7, 14, 30, 29, 29, 28, 27, 26, 26) costs 4,596 fewer CCX at fewer ticks, and block 0 goes back to 38 bits.
-A top block of 28 or more bits costs about 340,000 ticks more.
+A top block of 28 or more bits costs about 340,000 more raw ticks in a screen of the Bezout pass alone (both directions summed), not in the full circuit.
 The tenth top is live at the tick's peak, which costs one wire.
 The add runs before P is built, so it takes 6 temps and 8 J copies inside the same peak instead of 5 and 6.
 `scripts/prefix_check.py` checks `PrefixR` on all 2^(h+1) inputs for every size list it accepts at h = 2..12, and at 221 bits with these sizes on all ones and every lowest-zero position with 24 random fillings above, for t = 0 and 1.
@@ -661,3 +661,10 @@ The rows take `ROW_TEMPS = 80` clean wires beside the fold's own 101; the square
 The rows cost more CCX this way: 272,798 a square against 221,818, so 101,960 more for the circuit.
 `scripts/row_add_check.py` checks both forms on all inputs for w = 1..8 and temps 1, 2, w and 2w; running the tree form's adjacent XORs in reverse order fails it.
 After `qec/gate_pass.py` the circuit has 1,249 wires, 6,047,310 ticks and 7,041,035 CCX, against 6,128,027 and 6,939,075: about 0.79 ticks for each CCX spent.
+
+## Both sets of changes together
+
+The sections from "Idle wires for the tick's prefixes and borrowed carriers" to "P's chains on the bits below each block" were measured on one branch from the lookahead-add head, and the sections from "Codec calls off the tick chain" to "Tree rows in the square" on another, so each one's numbers are against its own branch.
+Together, the full circuit has 1,250 wires, 7,044,865 CCX (T 49,314,055) and 5,916,318 ticks.
+After `qec/gate_pass.py`, which cancels no CCX here, it has 5,867,922 ticks: qubit-time 7,334,902,500, against 7,831,983,147 for the lookahead-add head and 7,909,085,166 for PR8.
+The two sets touch different functions, and their tick savings add up to within 53 ticks.
