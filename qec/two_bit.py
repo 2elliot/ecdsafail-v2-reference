@@ -157,14 +157,14 @@ class Prefix:
 
 
 # Cuts for the tick's 255-bit compare by block count, tuned on the emitted tick definitions 260 and 261
-# (pass off, weighted 546:216) with the wires this function hands out. With 11 blocks: a 40-bit
+# (pass off, weighted 546:216) with the wires this function hands out. With 11 blocks: a 38-bit
 # single-ripple block 0, two short blocks, then blocks of about 24 bits.
 CUTS_255 = {
     7: (0, 55, 87, 120, 153, 186, 220, 255),
     8: (0, 58, 76, 105, 134, 164, 194, 224, 255),
     9: (0, 44, 58, 78, 107, 136, 166, 196, 226, 255),
     10: (0, 41, 54, 74, 99, 125, 151, 177, 203, 231, 255),
-    11: (0, 40, 48, 61, 84, 108, 132, 155, 180, 204, 231, 255),
+    11: (0, 38, 48, 61, 84, 108, 132, 155, 180, 204, 231, 255),
     12: (0, 44, 54, 65, 77, 90, 113, 134, 157, 182, 206, 232, 255),
 }
 MAX_BLOCKS = 11
@@ -175,7 +175,7 @@ LA_NTEMPS, LA_NCOPIES = 6, 8
 # The tick's P as PrefixR, whose write runs its blocks in parallel. At 221 bits: ten blocks, the top
 # one small, since the write starts with the top block's ladder (DESIGN.md, "Ten P blocks").
 PARALLEL_PREFIX = True
-P_SIZES_221 = (3, 7, 14, 30, 31, 30, 29, 27, 25, 23)
+P_SIZES_221 = (3, 7, 14, 30, 29, 29, 28, 27, 26, 26)
 HIGH_CARRIERS = True
 # Put the final swap's sw and control copies on scratch the next tick reaches only after its add.
 LATE_FINAL_WIRES = True

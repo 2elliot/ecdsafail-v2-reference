@@ -601,10 +601,11 @@ After `qec/gate_pass.py` it has 7,199,803 CCX and 6,161,800 ticks, against 6,270
 ## Ten P blocks
 
 P's write starts with its top block's ladder, so on the critical path its length counts once in full, and every other block's tree and its reverse cost 2 CCX a bit.
-At 221 bits P now has ten blocks, (3, 7, 14, 30, 31, 30, 29, 27, 25, 23), against nine ending in 29.
+At 221 bits P now has ten blocks, against nine ending in 29.
+They were (3, 7, 14, 30, 31, 30, 29, 27, 25, 23) with a 40-bit compare block 0; after the next section's carriers the tick's ticks stop tracking the top block's size (several shapes give the same total), so (3, 7, 14, 30, 29, 29, 28, 27, 26, 26) costs 4,596 fewer CCX at fewer ticks, and block 0 goes back to 38 bits.
+A top block of 28 or more bits costs about 340,000 ticks more.
 The tenth top is live at the tick's peak, which costs one wire.
 The add runs before P is built, so it takes 6 temps and 8 J copies inside the same peak instead of 5 and 6.
-Block 0 of the compare grows from 38 to 40 bits, which returns most of the CCX the extra tree costs.
 `scripts/prefix_check.py` checks `PrefixR` on all 2^(h+1) inputs for every size list it accepts at h = 2..12, and at 221 bits with these sizes on all ones and every lowest-zero position with 24 random fillings above, for t = 0 and 1.
 `scripts/compare_check.py` checks `compare_blocks` on all inputs and borrowed-wire values for every bound list with up to 4 blocks at widths 2..6, and at width 255 with these cuts on equal words and on every first-differing bit, both orders, with 16 random fillings below.
 Dropping one deferred CX from P's write fails the first check; dropping the top block's dirty carry-in fix fails the second.
@@ -620,3 +621,5 @@ The lowest bits then come free once the first blocks are built, the first chain 
 `scripts/prefix_check.py` passes on all 873 size lists for h = 2..12 and at 221 bits; putting one carrier above the block fails it.
 The full circuit has 1,250 wires, 7,203,157 CCX and 6,164,742 ticks, 9,302 fewer.
 After `qec/gate_pass.py` it has 7,202,101 CCX and 6,106,977 ticks: qubit-time 7,633,721,250, 0.06% lower.
+With P at (3, 7, 14, 30, 29, 29, 28, 27, 26, 26) and compare block 0 at 38 bits, the full circuit has 1,250 wires, 7,204,689 CCX and 6,148,277 ticks.
+After `qec/gate_pass.py` it has 7,203,633 CCX and 6,091,268 ticks: qubit-time 7,614,085,000, 0.26% lower, at 1,532 more CCX.
