@@ -623,3 +623,10 @@ The full circuit has 1,250 wires, 7,203,157 CCX and 6,164,742 ticks, 9,302 fewer
 After `qec/gate_pass.py` it has 7,202,101 CCX and 6,106,977 ticks: qubit-time 7,633,721,250, 0.06% lower.
 With P at (3, 7, 14, 30, 29, 29, 28, 27, 26, 26) and compare block 0 at 38 bits, the full circuit has 1,250 wires, 7,204,689 CCX and 6,148,277 ticks.
 After `qec/gate_pass.py` it has 7,203,633 CCX and 6,091,268 ticks: qubit-time 7,614,085,000, 0.26% lower, at 1,532 more CCX.
+
+## Codec calls off the tick chain
+
+`_aside` runs each of the Bezout pass's block codec calls on the free wires freed longest ago, and leaves the wires it frees under the rest of the free stack.
+Before, a decode or encode between two ticks took the scratch the tick before it had just freed, and the tick after it took the codec's wires, so each codec call sat on the tick chain: about 360 ticks for each of 108 calls a pass.
+The allocator hands out only clean wires in any order, so the change permutes which clean wire each fresh slot gets and nothing else; wires and CCX are unchanged.
+After `qec/gate_pass.py` the circuit has 1,249 wires and 6,204,501 ticks, against 6,270,603.

@@ -296,6 +296,26 @@ def shared_difference_ripple(C, U, V, g0, g1, ring):
 # Hand each Bezout tick's B1 mark to the next tick when nothing runs between them.
 HAND_OFF_MARK = True
 
+# Run the Bezout pass's block codec calls on the free wires freed longest ago.
+CODEC_ASIDE = True
+
+
+def _aside(C, fn):
+    """Run fn on the free wires freed longest ago, and leave the wires it frees under the rest.
+    A codec call between two ticks then takes no wire the tick before it just freed, which it
+    would wait on, and the tick after it takes the codec's wires last."""
+    if not CODEC_ASIDE:
+        return fn()
+    rest = C.free_stack
+    C.free_stack = rest[::-1]
+    out = fn()
+    st = C.free_stack
+    m = 0
+    while m < min(len(st), len(rest)) and st[m] == rest[-1 - m]:
+        m += 1
+    C.free_stack = st[m:] + rest[len(rest) - m:]
+    return out
+
 
 class DialogMultiplier:
     """M(x, y) = (x, x*y mod q) for canonical 1 <= x < q; see model.py."""
@@ -635,8 +655,8 @@ class DialogMultiplier:
         # one tick before its first tick and coded one tick after its last. Across each edge
         # two blocks are decoded for two ticks.
         if self.blocks * TICKS == T:
-            self._decode(G, self.blocks - 1,
-                         C.alloc(len(self._block_free(self.blocks - 1, swept))), swept)
+            _aside(C, lambda: self._decode(G, self.blocks - 1,
+                                           C.alloc(len(self._block_free(self.blocks - 1, swept))), swept))
             if self.blocks == 1:
                 block0_code.hold(C, self._block_wires(G, 0, swept))
                 C.free([G[1]])
@@ -666,8 +686,8 @@ class DialogMultiplier:
         for i in reversed(range(T)):
             nxt_block = i // TICKS - 1
             if i % TICKS == 0 and 0 <= nxt_block < self.blocks:
-                self._decode(G, nxt_block,
-                             C.alloc(len(self._block_free(nxt_block, swept))), swept)
+                _aside(C, lambda: self._decode(G, nxt_block,
+                                               C.alloc(len(self._block_free(nxt_block, swept))), swept))
                 if nxt_block == 0:
                     block0_code.hold(C, self._block_wires(G, 0, swept))
                     C.free([G[1]])
@@ -706,7 +726,7 @@ class DialogMultiplier:
                 mark_at = (len(C.prims), len(C.calls or ()))
             prev_block = (i + 1) // TICKS
             if (i + 1) % TICKS == 0 and i + 1 < T and prev_block < self.blocks:
-                C.free(self._encode(G, prev_block, swept))
+                _aside(C, lambda: C.free(self._encode(G, prev_block, swept)))
             if tail and i == T - tail_code.CELLS - 1:
                 W = G[lo:lo + tail_code.LIVE]
                 tail_code.apply(C, W)
@@ -714,7 +734,7 @@ class DialogMultiplier:
                 C.free([W[tail_code.FREE[0]]])
                 G[lo + tail_code.FREE[0]] = None
         if self.blocks:
-            C.free(self._encode(G, 0, swept))
+            _aside(C, lambda: C.free(self._encode(G, 0, swept)))
         if tail:
             assert tail_encoded, "tail inverse requires its forward apply"
             G[lo + tail_code.FREE[0]] = C.alloc(1)[0]
