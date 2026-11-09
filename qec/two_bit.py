@@ -157,21 +157,25 @@ class Prefix:
 
 
 # Cuts for the tick's 255-bit compare by block count, tuned on the emitted tick definitions 260 and 261
-# (pass off, weighted 546:216) with the wires this function hands out. With 11 blocks: a 38-bit
+# (pass off, weighted 546:216) with the wires this function hands out. With 11 blocks: a 40-bit
 # single-ripple block 0, two short blocks, then blocks of about 24 bits.
 CUTS_255 = {
     7: (0, 55, 87, 120, 153, 186, 220, 255),
     8: (0, 58, 76, 105, 134, 164, 194, 224, 255),
     9: (0, 44, 58, 78, 107, 136, 166, 196, 226, 255),
     10: (0, 41, 54, 74, 99, 125, 151, 177, 203, 231, 255),
-    11: (0, 38, 48, 61, 84, 108, 132, 155, 180, 204, 231, 255),
+    11: (0, 40, 48, 61, 84, 108, 132, 155, 180, 204, 231, 255),
     12: (0, 44, 54, 65, 77, 90, 113, 134, 157, 182, 206, 232, 255),
 }
 MAX_BLOCKS = 11
 # The tick's add as a blocked-lookahead chain (add_or_shift_la) instead of the ripple.
 LOOKAHEAD_ADD = True
-# The tick's P as PrefixR, whose write runs its blocks in parallel.
+# The add's temps and J copies: the wires P's tenth block adds at the tick's peak are idle here.
+LA_NTEMPS, LA_NCOPIES = 6, 8
+# The tick's P as PrefixR, whose write runs its blocks in parallel. At 221 bits: ten blocks, the top
+# one small, since the write starts with the top block's ladder (DESIGN.md, "Ten P blocks").
 PARALLEL_PREFIX = True
+P_SIZES_221 = (3, 7, 14, 30, 31, 30, 29, 27, 25, 23)
 # Put the final swap's sw and control copies on scratch the next tick reaches only after its add.
 LATE_FINAL_WIRES = True
 LATE_MIN_COPIES = 6
@@ -948,7 +952,7 @@ class TwoBitMod(Mod):
         if CDKM_ADD and self.n > 3:
             return add_or_shift_cdkm(C, J, a, word, self.n)
         if LOOKAHEAD_ADD and self.n > 3:
-            return add_or_shift_la(C, J, a, word, self.n)
+            return add_or_shift_la(C, J, a, word, self.n, ntemps=LA_NTEMPS, ncopies=LA_NCOPIES)
         n = self.n
         (cin, D, carry, t) = C.alloc(4)
         extra = C.alloc(3)
@@ -1068,7 +1072,7 @@ class TwoBitMod(Mod):
         if idle:
             C.alloc = idle.alloc
         if PARALLEL_PREFIX and len(H) > 1:
-            P = PrefixR(C, H, sizes=[3, 7, 14, 30, 37, 35, 33, 31, 29] if len(H) == 221 else sizes_for(len(H)))
+            P = PrefixR(C, H, sizes=list(P_SIZES_221) if len(H) == 221 else sizes_for(len(H)))
         else:
             P = Prefix(C, H, cap=37)
         M = Prefix(C, L[ra:rb])

@@ -597,3 +597,16 @@ A fresh wire is taken only when no touched clean wire is free, as the stack woul
 `scripts/check.py --toy-bits 4 6 7 8 9 10 --toy-per-size 6` passes on all 36 toy circuits, 6 of which the flag changes; handing out a live wire fails 6 of them.
 The full circuit has 1,249 wires, 7,200,859 CCX and 6,221,117 ticks, 109,569 fewer than before, and the same CCX.
 After `qec/gate_pass.py` it has 7,199,803 CCX and 6,161,800 ticks, against 6,270,603: qubit-time 7,696,088,200, 1.74% lower.
+
+## Ten P blocks
+
+P's write starts with its top block's ladder, so on the critical path its length counts once in full, and every other block's tree and its reverse cost 2 CCX a bit.
+At 221 bits P now has ten blocks, (3, 7, 14, 30, 31, 30, 29, 27, 25, 23), against nine ending in 29.
+The tenth top is live at the tick's peak, which costs one wire.
+The add runs before P is built, so it takes 6 temps and 8 J copies inside the same peak instead of 5 and 6.
+Block 0 of the compare grows from 38 to 40 bits, which returns most of the CCX the extra tree costs.
+`scripts/prefix_check.py` checks `PrefixR` on all 2^(h+1) inputs for every size list it accepts at h = 2..12, and at 221 bits with these sizes on all ones and every lowest-zero position with 24 random fillings above, for t = 0 and 1.
+`scripts/compare_check.py` checks `compare_blocks` on all inputs and borrowed-wire values for every bound list with up to 4 blocks at widths 2..6, and at width 255 with these cuts on equal words and on every first-differing bit, both orders, with 16 random fillings below.
+Dropping one deferred CX from P's write fails the first check; dropping the top block's dirty carry-in fix fails the second.
+The full circuit has 1,250 wires, 7,203,157 CCX and 6,174,044 ticks.
+After `qec/gate_pass.py` it has 7,202,101 CCX and 6,110,534 ticks: qubit-time 7,638,167,500, 0.75% below the idle-wires head at 2,298 more CCX.
