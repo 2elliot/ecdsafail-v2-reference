@@ -186,7 +186,7 @@ LA_IDLE_TEMPS = True
 # The tick's P as PrefixR, whose write runs its blocks in parallel. At 221 bits: ten blocks, the top
 # one small, since the write starts with the top block's ladder (DESIGN.md, "Ten P blocks").
 PARALLEL_PREFIX = True
-P_SIZES_221 = (3, 7, 14, 30, 29, 29, 28, 27, 26, 26)
+P_SIZES_221 = (3, 7, 14, 28, 28, 28, 28, 28, 28, 27)
 HIGH_CARRIERS = True
 # Put the final swap's sw and control copies on scratch the next tick reaches only after its add.
 LATE_FINAL_WIRES = True

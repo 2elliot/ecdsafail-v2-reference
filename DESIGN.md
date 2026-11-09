@@ -701,3 +701,10 @@ With `RESTORE_IDLE` the restore takes the touched clean wire that comes free fir
 The toy circuits never release M's top, so the check is M itself at secp256k1 (`block_check.run` on 64 random x and 0, 1, 2, q - 1, q - 2, forward and backward): putting the restore on a live wire fails all 69 lanes, and the tree fails only x = 0, as e18f122 does.
 After `qec/gate_pass.py` the circuit has 1,250 wires, 7,122,997 CCX and 5,649,382 ticks, 7,344 fewer: qubit-time 7,061,727,500.
 In a screen, giving each value in the second chain a wire of its own would save up to 107,000 raw ticks, but each such wire is one more circuit wire; choosing among wires already touched, by the tick model in one or both directions, did not find it.
+
+## P's blocks after the faster add
+
+With the add's blocks of 3, P's ten blocks retune to (3, 7, 14, 28, 28, 28, 28, 28, 28, 27), against (3, 7, 14, 30, 29, 29, 28, 27, 26, 26): the fourth block shrinks to 28 and the rest even out.
+A block is hosted on the bits of the block below only when that block has at least its size less one, so a fourth block of 26 or 27 under blocks of 29 loses hosting and costs about 330,000 ticks in a screen of the Bezout pass.
+`scripts/prefix_check.py` passes at h = 2..9 and at 221 bits with these sizes; dropping one deferred CX from the write fails 5 lanes at 221 bits.
+After `qec/gate_pass.py` the circuit has 1,250 wires, 7,121,465 CCX (1,532 fewer) and 5,628,639 ticks, 20,743 fewer: qubit-time 7,035,798,750.
