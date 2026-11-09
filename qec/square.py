@@ -11,7 +11,8 @@ Q = lo + 2^n*hi, and Y - hi = D is at least 0. The rest folds 2^n to f:
 If V >= 2^n, dropping that bit subtracts q and f together and leaves V - 2^n <= f*f - 1 < q.
 Otherwise V - f < q, so subtracting f is enough. So no comparison with q is needed.
 """
-from .arith import _carries, _uncarry, add, add_const, add_lookahead, fan_into, gt_into, prefix_xor
+from .arith import (_carries, _uncarry, add, add_const, add_lookahead, cadd_lookahead, fan_into, gt_into,
+                    gt_lookahead, prefix_xor)
 from .two_bit import Prefix
 
 # Add the square's rows as lookahead trees, on ROW_TEMPS clean wires beside the fold's own.
@@ -20,6 +21,11 @@ ROW_TEMPS = 120
 # Fan each row's Gray-code step out through at most this many copies on clean temps, and undo the walk
 # by a prefix network; 0 runs both as CX chains.
 ROW_FAN_COPIES = 63
+# Run modadd's controlled add and comparison as lookahead trees, on MODADD_TEMPS clean wires and
+# MODADD_COPIES copies of the control.
+MODADD_TREE = True
+MODADD_TEMPS = 95
+MODADD_COPIES = 15
 # Run the fold's adds as add_lookahead trees, on FOLD_TEMPS clean wires and the fold's clean junk.
 FOLD_TREE = True
 FOLD_TEMPS = 86
@@ -72,10 +78,17 @@ class SquareFold:
 
     def modadd(self, C, a, b, ctrl):
         """Mod.modadd with _reduce's carries above f's window held by a Prefix, so it runs
-        beside the wires compute leaves live. The same flag, the same write, the same CCX."""
+        beside the wires compute leaves live. The same flag and the same write; with MODADD_TREE the
+        add and the comparison run as lookahead trees."""
         f, w = self.f, self.b
         top, t = C.alloc(2)
-        add(C, a, b, top, ctrl)
+        if MODADD_TREE:
+            temps, copies = C.alloc(MODADD_TEMPS), C.alloc(MODADD_COPIES)
+            cadd_lookahead(C, a, b, top, ctrl, temps, copies)
+            C.free(copies)
+            C.free(temps)
+        else:
+            add(C, a, b, top, ctrl)
         cs = _carries(C, b[:w + 1], f)
         carry = Prefix(C, b[w:])
         # s's top bit and the carry into it are never both 1, so their XOR is the flag.
@@ -89,7 +102,12 @@ class SquareFold:
                 C.ccx(top, cs[i], b[i])
             if f >> i & 1:
                 C.cx(top, b[i])
-        gt_into(C, a, b, top, ctrl)
+        if MODADD_TREE:
+            temps = C.alloc(MODADD_TEMPS)
+            gt_lookahead(C, a, b, top, ctrl, temps)
+            C.free(temps)
+        else:
+            gt_into(C, a, b, top, ctrl)
         C.free([top, t])
 
     def _rows(self, C, Y, Q, temps):

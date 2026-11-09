@@ -767,3 +767,12 @@ With `TICK0_TREE` it takes `TICK0_SCRATCH = 450` wires of the unwritten tape ins
 In isolation the step goes from 10,981 to 693 ticks and from 1,018 to 2,836 CCX.
 `scripts/tick0_check.py` checks the tree form against the chain form for every odd q from 9 to 1023 on every V, with 1, 3 and 31 copies, and that the secp256k1 block uses no wire outside its registers, without which the pass would skip it; rotating one pair too few fails it.
 After `qec/gate_pass.py` the circuit has 1,250 wires, 5,606,298 ticks and 7,032,417 CCX, against 5,646,628 and 7,025,145.
+
+## Trees for the square's modadd
+
+`SquareFold.modadd` adds the square into X under the generic flag with a controlled 256-bit CDKM ripple and clears its flag with a 256-bit `gt_into` ripple: about 16,000 ticks on the critical path.
+With `MODADD_TREE`, `cadd_lookahead` runs `add_lookahead`'s tree up-sweep and its reverse, and puts only the middle (the sum's CXs and both X layers) under the control, through `MODADD_COPIES` copies of it; with the control at 0 the up-sweep meets its own reverse and leaves both registers as they were.
+`gt_lookahead` reads the comparison from the carry out of the same up-sweep on (a, ~b).
+Both take `MODADD_TEMPS = 95` clean wires, which with the flag, its scratch bit and the copies stays within the 121 the square leaves free.
+`scripts/square_check.py` now also checks `SquareFold.modadd` on every canonical a, b and control for every q below 2^8 the fold applies to, and both helpers on every input up to 6 bits; leaving the second X layer uncontrolled fails it.
+After `qec/gate_pass.py` the circuit has 1,250 wires, 5,596,014 ticks and 7,035,319 CCX, against 5,606,298 and 7,032,417.

@@ -311,6 +311,61 @@ def add_lookahead(C, a, b, cout, temps, tree=False, cin=None):
         C.free([cin])
 
 
+def _up_sweep(a, b, cin, temps):
+    """add_lookahead's tree up-sweep on (a, b) as recorded gates: b_i = p_i, cin = c_0 ^ a_0,
+    a_i = c_(i+1) ^ a_(i+1), a_(w-1) = c_w."""
+    up = _Gates()
+    for i in range(len(a)):
+        up.cx(a[i], b[i])
+    up.cx(a[0], cin)
+    adjacent_xor(up, a)
+    lookahead_sweep(up, [cin] + list(a), [None] + list(b), temps)
+    return up
+
+
+def cadd_lookahead(C, a, b, cout, ctrl, temps, copies):
+    """b += ctrl*a mod 2^w and cout ^= ctrl*carry out: add_lookahead's tree with its middle (the
+    sum's CXs and both X layers) under ctrl, through ctrl's copies on clean wires. With ctrl = 0 the
+    up-sweep meets its own reverse and leaves (a, b)."""
+    w = len(a)
+    assert len(b) == w and w >= 1 and temps and ctrl not in (*a, *b, cout)
+    (cin,) = C.alloc(1)
+    up = _up_sweep(a, b, cin, temps)
+    _emit(C, up.ops)
+    fan = _Gates()
+    _doubling(fan, ctrl, copies)
+    _emit(C, fan.ops)
+    src = [ctrl] + list(copies)
+    if cout is not None:
+        C.ccx(src[-1], a[-1], cout)
+    C.ccx(src[0], cin, b[0])
+    for i in range(1, w):
+        C.ccx(src[i % len(src)], a[i - 1], b[i])
+    for i, x in enumerate(b):
+        C.cx(src[i % len(src)], x)
+    _emit(C, reversed(up.ops))
+    for i, x in enumerate(b):
+        C.cx(src[i % len(src)], x)
+    _emit(C, reversed(fan.ops))
+    C.free([cin])
+
+
+def gt_lookahead(C, a, b, t, ctrl, temps):
+    """gt_into's map, t ^= ctrl*[a > b] with a and b restored, reading the carry out of a + ~b from
+    add_lookahead's tree up-sweep."""
+    assert len(a) == len(b) >= 1 and temps and ctrl not in (*a, *b, t)
+    for x in b:
+        C.x(x)
+    (cin,) = C.alloc(1)
+    up = _up_sweep(a, b, cin, temps)
+    _emit(C, up.ops)
+    _cx(C, ctrl, a[-1], t)
+    _emit(C, reversed(up.ops))
+    C.free([cin])
+    for x in b:
+        C.x(x)
+
+
 def sub(C, a, b, borrow=None, ctrl=None):
     """b -= ctrl*a mod 2^w. borrow ^= ctrl*[a > b]."""
     for w in b:
