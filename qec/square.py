@@ -16,7 +16,7 @@ from .two_bit import Prefix
 
 # Add the square's rows as lookahead trees, on ROW_TEMPS clean wires beside the fold's own.
 ROW_TREE = True
-ROW_TEMPS = 80
+ROW_TEMPS = 120
 # Fan each row's Gray-code step out through at most this many copies on clean temps, and undo the walk
 # by a prefix network; 0 runs both as CX chains.
 ROW_FAN_COPIES = 63

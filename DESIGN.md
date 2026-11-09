@@ -736,3 +736,9 @@ With `ROW_FAN_COPIES`, `fan_into` copies Y[i] onto at most that many clean row t
 Wires and CCX are unchanged.
 `scripts/square_check.py` checks `SquareFold.compute` on every n-bit Y for every odd q below 2^11 the fold applies to, and `prefix_xor` and `fan_into` on every input; dropping the prefix network's last CX fails it.
 After `qec/gate_pass.py` the circuit has 1,250 wires and 5,730,583 ticks, against 5,774,637.
+
+## More row temps
+
+`ROW_TEMPS` goes from 80 to 120. The square runs while the multiplier's wires are free, 121 below the 1,250-wire peak that the Bezout tick now sets, so the extra temps cost no wire.
+With 221 temps the narrower rows run the bit-level tree instead of blocks of 2 or 3, which saves CCX as well as ticks.
+After `qec/gate_pass.py` the circuit has 1,250 wires, 5,725,277 ticks and 7,032,405 CCX, against 5,730,583 and 7,057,205.
