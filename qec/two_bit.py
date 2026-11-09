@@ -180,6 +180,53 @@ P_FAN = 1
 # Run the tick's add as 2elliot depth/v2's CDKM ripple instead of either add above: 579,096
 # fewer CCX on the whole circuit for 1,535,700 more ticks (measured after the post-pass).
 CDKM_ADD = False
+# Hand P's and M's tops, and the H wires the first chain borrows, out in the order this tick's ops
+# so far free them, so neither waits on a wire the add holds to its end.
+IDLE_WIRES = True
+
+
+class _Idle:
+    """When each wire this tick has touched comes free, under the board's tick model with the
+    tick alone (every wire free at its start)."""
+
+    def __init__(self, C, start):
+        self.C, self.pos, self.r = C, start, {}
+
+    def ready(self):
+        r, ops = self.r, self.C.prims
+        for pos in range(self.pos, len(ops), 4):
+            k, a, b, c = ops[pos:pos + 4]
+            if k == 0:
+                r[a] = r.get(a, 0) + 1
+            elif k == 2:
+                s2 = max(r.get(b, 0), r.get(c, 0) + 1) + 1
+                s4 = max(r.get(a, 0), s2 + 1) + 1
+                r[c], r[a], r[b] = s4 + 6, s4 + 7, s4 + 7
+            else:
+                t = max(r.get(a, 0), r.get(b, 0)) + (1 if k == 1 else 3)
+                r[a] = r[b] = t
+        self.pos = len(ops)
+        return r
+
+    def first(self, wires):
+        """Index of the wire in wires that comes free first, the later one on a tie."""
+        r = self.ready()
+        return min(range(len(wires)), key=lambda i: (r.get(wires[i], 0), -i))
+
+    def alloc(self, k=1):
+        """Clean wires this tick has touched, earliest free first; a fresh wire only when none is free,
+        as the stack would, so the tick touches no more wires than before."""
+        C, out = self.C, []
+        for _ in range(k):
+            r = self.ready()
+            touched = [w for w in C.free_stack if w in r]
+            if not touched:
+                out += type(C).alloc(C, 1)
+                continue
+            w = touched[self.first(touched)]
+            C.free_stack.remove(w)
+            out.append(w)
+        return out
 
 
 def weighted_bounds(width, blocks):
@@ -1017,11 +1064,16 @@ class TwoBitMod(Mod):
             cswap(C, one, [k1], [nxt])
             C.x(one)
         ra, rb = self.run
+        idle = _Idle(C, tick_start) if IDLE_WIRES else None
+        if idle:
+            C.alloc = idle.alloc
         if PARALLEL_PREFIX and len(H) > 1:
             P = PrefixR(C, H, sizes=[3, 7, 14, 30, 37, 35, 33, 31, 29] if len(H) == 221 else sizes_for(len(H)))
         else:
             P = Prefix(C, H, cap=37)
         M = Prefix(C, L[ra:rb])
+        if idle:
+            del C.alloc
         # Only M's skip reads M before its write, so the top below its last is cleared until then.
         M.release()
 
@@ -1035,7 +1087,8 @@ class TwoBitMod(Mod):
         def take():
             if not spare:
                 return alloc()
-            c = spare.pop()
+            # Any H wire reads 1 when P's top is 1, so which one is borrowed is free.
+            c = spare.pop(idle.first(spare) if idle else -1)
             C.x(c)
             return c
 

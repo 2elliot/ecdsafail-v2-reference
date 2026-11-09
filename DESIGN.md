@@ -587,3 +587,13 @@ It costs 3(n − 1) + 5 + n CCX a call, and docs/mux-proof.md S9, S10 and S19 gi
 It spends fewer CCX and more ticks than the blocked-lookahead add, which stays behind `LOOKAHEAD_ADD`.
 The full circuit has 1,249 wires, 6,620,707 CCX, T 46,344,949 and 7,866,220 ticks.
 After `qec/gate_pass.py` it has 7,806,303 ticks, against 6,272,299 for this tree's previous head after the same pass: 580,120 fewer CCX for 1,534,004 more ticks.
+
+## Idle wires for the tick's prefixes and borrowed carriers
+
+The builder hands out the most recently freed clean wire, so P's tops came from the add's J copies, which the add holds until its last CX, and the first chain borrowed the H wires P's last block reads last.
+With `IDLE_WIRES`, P and M allocate, among the clean wires the tick has touched, the one the tick's ops so far free first under the board's tick model, and `take` borrows the H wire that comes free first.
+Which clean wire a top gets is free, and so is which H wire the first chain borrows: every H wire reads 1 when P's top is 1, and the chains reverse their own XORs on P = 0.
+A fresh wire is taken only when no touched clean wire is free, as the stack would, so the tick touches no more wires.
+`scripts/check.py --toy-bits 4 6 7 8 9 10 --toy-per-size 6` passes on all 36 toy circuits, 6 of which the flag changes; handing out a live wire fails 6 of them.
+The full circuit has 1,249 wires, 7,200,859 CCX and 6,221,117 ticks, 109,569 fewer than before, and the same CCX.
+After `qec/gate_pass.py` it has 7,199,803 CCX and 6,161,800 ticks, against 6,270,603: qubit-time 7,696,088,200, 1.74% lower.
