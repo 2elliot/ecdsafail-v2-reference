@@ -751,3 +751,11 @@ With `FOLD_TREE` each runs `add_lookahead`'s tree, on `FOLD_TEMPS = 86` clean wi
 The adds cost more CCX: 287,300 a square against 272,798 in isolation.
 `scripts/square_check.py` covers the fold's trees; dropping the first add's carry in fails it.
 After `qec/gate_pass.py` the circuit has 1,250 wires, 5,652,708 ticks and 7,061,409 CCX, against 5,725,277 and 7,032,405: about 2.5 ticks for each CCX spent.
+
+## Borrowed ring wires for the wide Euclid steps
+
+From w = 255 down to about 207 the Euclid pass has 197 clean tape wires a step, and the last 25 steps at w = 256 have 197 to 245, so those steps ran blocks of 3 on a 193-wire ring while the bit-level tree needs 198 to 247.
+The pass runs below the Bezout tick's peak, so with `RING_BORROW = 18` a step whose tree needs at most 18 wires more than the tape has allocates them for itself and frees them after; 20 would make the circuit 1,251 wires.
+About 24 steps take the bit-level tree this way, which saves CCX as well as ticks.
+`scripts/ring_borrow_check.py` runs the multiplier on every x below q for q = 1021, 4093 and 16381, forward and inverse, with the borrow on (and with `U6_RING = 0` so that most steps borrow); flipping the borrowed wires to 1 fails it.
+After `qec/gate_pass.py` the circuit has 1,250 wires, 5,646,628 ticks and 7,025,145 CCX, against 5,652,708 and 7,061,409.

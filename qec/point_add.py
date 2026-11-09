@@ -152,6 +152,9 @@ def shared_difference_u1(C, U, V, g0, g1, ring):
 U6_RING = 193
 # Give a step the bit-level tree's temps when that is more than U6_RING and the pass has them.
 WIDE_RING = True
+# Clean wires a step may take beyond the pass's tape for the bit-level tree's ring; the pass runs
+# below the circuit's peak, so up to that margin they cost no wire.
+RING_BORROW = 18
 
 
 def _ring_size(w, avail):
@@ -566,7 +569,12 @@ class DialogMultiplier:
                 # Alternate clean scratch so adjacent carry and strip sweeps can overlap.
                 hold = self.C.alloc(1) if i % 2 else []
                 k = _ring_size(w, len(available))
-                self.C.apply(self._euclid_step(w, k), [U[:w], V, E, cell, available[:k]])
+                full = tree_temps(w + 1, 1)
+                borrow = (self.C.alloc(full - len(available))
+                          if WIDE_RING and k < full <= len(available) + RING_BORROW else [])
+                ring = available + borrow if borrow else available[:k]
+                self.C.apply(self._euclid_step(w, len(ring)), [U[:w], V, E, cell, ring])
+                self.C.free(borrow)
                 self.C.free(hold)
             G.extend(cell)
             next_width = self.widths[i + 1] if i + 1 < self.iters else self.pass_tail_width
