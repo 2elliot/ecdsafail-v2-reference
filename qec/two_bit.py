@@ -106,11 +106,13 @@ class Prefix:
             self.C.free([p])
             self.released = len(self.blocks) - 2
 
+    alloc_restore = None
+
     def restore(self):
         if self.released is None:
             return
         a, p, x, u, v = self.blocks[self.released]
-        (q,) = self.C.alloc(1)
+        (q,) = [self.alloc_restore()] if self.alloc_restore else self.C.alloc(1)
         self.C.ccx(a, v, q)
         self.blocks[self.released] = a, q, x, u, v
         last = self.blocks[-1]
@@ -197,6 +199,8 @@ CDKM_ADD = False
 # Hand P's and M's tops, and the H wires the first chain borrows, out in the order this tick's ops
 # so far free them, so neither waits on a wire the add holds to its end.
 IDLE_WIRES = True
+# M's restored top too, instead of the carrier the second chain has just dropped.
+RESTORE_IDLE = True
 
 
 class _Idle:
@@ -1193,6 +1197,9 @@ class TwoBitMod(Mod):
             C.cx(chain[w], e)
         drop(e)
         P.write(chain[w])
+        if idle and RESTORE_IDLE:
+            # M's restore would take the wire chain[b]'s drop has just freed; take the one free first.
+            M.alloc_restore = lambda: idle.alloc(1)[0]
         self._chain_down(C, L, selectors, masks, M, perch, chain, drop, True, alloc)
         C.ccx(k0, k1, one)
         C.free([one])

@@ -693,3 +693,11 @@ In a screen of the Bezout pass, 68 in B alone reaches its computed ticks in the 
 `scripts/add_or_shift_check.py <tree> 10 wideb` runs all 428 B layouts on all inputs; dropping the second inner unfix fails 27 of the 56 layouts at n <= 7.
 The full circuit has 1,250 wires, 7,122,997 CCX and 5,705,368 ticks, 10,988 fewer.
 After `qec/gate_pass.py` it has 5,656,726 ticks: qubit-time 7,070,907,500, 0.17% lower.
+
+## M's restored top on an idle wire
+
+The second chain drops chain[b] just before `M.restore()` allocates the top it rebuilds, so the stack handed the restore that carrier, and the restore waited for the carrier's uncompute.
+With `RESTORE_IDLE` the restore takes the touched clean wire that comes free first under the tick model, as P's and M's tops do; the allocator still hands out only clean wires.
+The toy circuits never release M's top, so the check is M itself at secp256k1 (`block_check.run` on 64 random x and 0, 1, 2, q - 1, q - 2, forward and backward): putting the restore on a live wire fails all 69 lanes, and the tree fails only x = 0, as e18f122 does.
+After `qec/gate_pass.py` the circuit has 1,250 wires, 7,122,997 CCX and 5,649,382 ticks, 7,344 fewer: qubit-time 7,061,727,500.
+In a screen, giving each value in the second chain a wire of its own would save up to 107,000 raw ticks, but each such wire is one more circuit wire; choosing among wires already touched, by the tick model in one or both directions, did not find it.
