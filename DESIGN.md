@@ -708,3 +708,5 @@ With the add's blocks of 3, P's ten blocks retune to (3, 7, 14, 28, 28, 28, 28, 
 A block is hosted on the bits of the block below only when that block has at least its size less one, so a fourth block of 26 or 27 under blocks of 29 loses hosting and costs about 330,000 ticks in a screen of the Bezout pass.
 `scripts/prefix_check.py` passes at h = 2..9 and at 221 bits with these sizes; dropping one deferred CX from the write fails 5 lanes at 221 bits.
 After `qec/gate_pass.py` the circuit has 1,250 wires, 7,121,465 CCX (1,532 fewer) and 5,628,639 ticks, 20,743 fewer: qubit-time 7,035,798,750.
+The CCX that P's retune saves pay for a 35th block of 3 in B (`LA_B_WIDE = (3, 35)`, 2,298 CCX): B then has 111 steps and F 112.
+After `qec/gate_pass.py` the circuit has 1,250 wires, 7,123,763 CCX (78,898 more than e18f122, T 49,866,341) and 5,621,253 ticks, 7,386 fewer: qubit-time 7,026,566,250, 4.20% below e18f122's 7,334,902,500.

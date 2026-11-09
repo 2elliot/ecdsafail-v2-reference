@@ -179,7 +179,7 @@ LA_NTEMPS, LA_NCOPIES = 8, 6
 # 3"). Split between F and B, the sweep that runs at 7 ticks a step and starves for temps differs by
 # direction.
 LA_F_WIDE = (3, 34)
-LA_B_WIDE = (3, 34)
+LA_B_WIDE = (3, 35)
 # The add's carry and t serve as temps in its sweeps; temps go out free-first under the tick model.
 LA_TOP_TEMPS = True
 LA_IDLE_TEMPS = True
