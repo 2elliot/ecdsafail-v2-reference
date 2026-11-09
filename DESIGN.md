@@ -782,3 +782,10 @@ After `qec/gate_pass.py` the circuit has 1,250 wires, 5,596,014 ticks and 7,035,
 The sections from "Trees for the top-level constant adds" to "Trees for the square's modadd" were measured in order on one branch from `depth/v4` (e18f122), each against the section before it.
 Together, after `qec/gate_pass.py`, the circuit has 1,250 wires, 5,596,014 ticks and 7,035,319 CCX (T 49,247,233): qubit-time 6,995,017,500, 4.63% below `depth/v4` at 7,334,902,500, with 9,546 fewer CCX.
 Two attempts were measured and dropped: lookahead chains for rows of 32 bits or fewer (2,426 more ticks in the circuit, though fewer in isolation), and B1 marks made per cell on their own wires in the Euclid sweep (11,552 more ticks, because consecutive marks share a g wire).
+
+## Round 2 together
+
+The sections from "Blocks of 3 in the add's forward sweep" to "P's blocks after the faster add" were measured on one branch from the combined head above, and the sections from "Trees for the top-level constant adds" to "Round 2's arm D together" on another, so each one's numbers are against its own branch.
+Together, the full circuit has 1,250 wires, 7,114,217 CCX (T 49,799,519) and 5,387,028 ticks.
+After `qec/gate_pass.py` it has 5,349,345 ticks: qubit-time 6,686,681,250, against 7,334,902,500 for the combined head above and 7,909,085,166 for PR8.
+The two branches touch different functions, and their tick savings add up exactly.
