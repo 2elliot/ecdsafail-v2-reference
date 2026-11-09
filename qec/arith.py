@@ -596,9 +596,10 @@ def gt_const_tree(C, value, b, t, ctrl=None):
     C.free(G)
 
 
-def _add_selected_tree(C, b, selectors, masks):
+def _add_selected_tree(C, b, selectors, masks, max_temps=None):
     """_add_selected_const's map, b += the mask its one set selector picks mod 2^len(b), with the
-    addend copied onto clean wires by doubling fans and added by add_lookahead's tree."""
+    addend copied onto clean wires by doubling fans and added by add_lookahead's tree, on at most
+    max_temps temps (lookahead_sweep then takes the block size that fits)."""
     n = len(b)
     masks = [mask % (1 << n) for mask in masks]
     start = min(((mask & -mask).bit_length() - 1 for mask in masks if mask), default=n)
@@ -620,7 +621,8 @@ def _add_selected_tree(C, b, selectors, masks):
                 g.cx(s, wires[0])
             _doubling(g, wires[0], wires[1:])
     _emit(C, g.ops)
-    temps = C.alloc(max(1, tree_temps(len(low) + 1, 1)))
+    want = max(1, tree_temps(len(low) + 1, 1))
+    temps = C.alloc(want if max_temps is None else min(want, max_temps))
     add_lookahead(C, A, low, None, temps, tree=True)
     C.free(temps)
     _emit(C, reversed(g.ops))

@@ -759,3 +759,11 @@ The pass runs below the Bezout tick's peak, so with `RING_BORROW = 18` a step wh
 About 24 steps take the bit-level tree this way, which saves CCX as well as ticks.
 `scripts/ring_borrow_check.py` runs the multiplier on every x below q for q = 1021, 4093 and 16381, forward and inverse, with the borrow on (and with `U6_RING = 0` so that most steps borrow); flipping the borrowed wires to 1 fails it.
 After `qec/gate_pass.py` the circuit has 1,250 wires, 5,646,628 ticks and 7,025,145 CCX, against 5,652,708 and 7,061,409.
+
+## Trees for the first Euclid step
+
+`_euclid_tick0` runs the first Euclid step on U = q: 255 CCXs that all read g0, a 256-bit constant add under g0 as a carry chain, 256 CXs from g0, and a rotation of V as 254 cswaps in series; about 11,000 ticks each of the four times it runs.
+With `TICK0_TREE` it takes `TICK0_SCRATCH = 450` wires of the unwritten tape instead of 254 (the pass has 455 at that step): the CCXs read `TICK0_COPIES` copies of g0, the add is `_add_selected_tree` with its temps capped to fit, the CXs go through `fan_into`, and the rotation is `_par_rotate`, as in the later steps.
+In isolation the step goes from 10,981 to 693 ticks and from 1,018 to 2,836 CCX.
+`scripts/tick0_check.py` checks the tree form against the chain form for every odd q from 9 to 1023 on every V, with 1, 3 and 31 copies, and that the secp256k1 block uses no wire outside its registers, without which the pass would skip it; rotating one pair too few fails it.
+After `qec/gate_pass.py` the circuit has 1,250 wires, 5,606,298 ticks and 7,032,417 CCX, against 5,646,628 and 7,025,145.

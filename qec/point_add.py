@@ -1,7 +1,8 @@
 """Exact, complete, controlled fixed-addend point addition:
 |c>|R>|0> -> |c>|R + c*A>|0> for every R in E(F_q) encoded as little-endian
 affine (x, y) with infinity = (0, 0)."""
-from .arith import Mod, _Gates, _emit, _maj, add_const, adjacent_xor, cswap, load_const, lookahead_sweep, tree_temps
+from .arith import (Mod, _Gates, _add_selected_tree, _doubling, _emit, _maj, add_const, adjacent_xor, cswap,
+                    fan_into, load_const, lookahead_sweep, tree_temps)
 from .builder import Circuit
 from .curve import Curve
 from .square import SquareFold
@@ -152,6 +153,11 @@ def shared_difference_u1(C, U, V, g0, g1, ring):
 U6_RING = 193
 # Give a step the bit-level tree's temps when that is more than U6_RING and the pass has them.
 WIDE_RING = True
+# Run the first Euclid step's control fans, constant add and rotation in log depth, on TICK0_SCRATCH
+# wires of unwritten tape.
+TICK0_TREE = True
+TICK0_SCRATCH = 450
+TICK0_COPIES = 31
 # Clean wires a step may take beyond the pass's tape for the bit-level tree's ring; the pass runs
 # below the circuit's peak, so up to that margin they cost no wire.
 RING_BORROW = 18
@@ -520,21 +526,32 @@ class DialogMultiplier:
         if self._euclid_tick0_block is None:
             C, q, n = self.C, self.mod.q, self.mod.n
             f1 = (1 << n) - q + 1
-            k = n - 1 - ((f1 & -f1).bit_length() - 1)
+            k = self._tick0_scratch()
 
             def step(U, V, E, cell, scr):
                 C.free(scr)
                 g0, b = cell
                 C.cx(V[0], g0)
+                cps = C.alloc(TICK0_COPIES) if TICK0_TREE else []
+                fan = _Gates()
+                _doubling(fan, g0, cps)
+                _emit(C, fan.ops)
+                src = [g0] + cps
                 for i in range(1, n):
                     if q >> i & 1:
                         C.x(V[i])
-                    C.ccx(g0, V[i], U[i])
+                    C.ccx(src[i % len(src)], V[i], U[i])
                     if q >> i & 1:
                         C.x(V[i])
-                add_const(C, V, f1, ctrl=g0)
-                for wire in V:
-                    C.cx(g0, wire)
+                _emit(C, reversed(fan.ops))
+                if TICK0_TREE:
+                    _add_selected_tree(C, V, [g0], [f1], max_temps=TICK0_SCRATCH - n - TICK0_COPIES - 1)
+                    fan_into(C, g0, V, cps)
+                else:
+                    add_const(C, V, f1, ctrl=g0)
+                    for wire in V:
+                        C.cx(g0, wire)
+                C.free(cps)
                 C.cx(g0, E[0])
                 V[:] = V[1:] + V[:1]
                 C.x(g0)
@@ -542,11 +559,23 @@ class DialogMultiplier:
                 C.ccx(g0, V[0], b)
                 C.x(V[0])
                 C.x(g0)
-                for i in range(n - 2):
-                    cswap(C, b, [V[i]], [V[i + 1]])
+                if TICK0_TREE:
+                    cp = C.alloc((n - 1) // 2 - 1)
+                    _par_rotate(C, b, V[:n - 1], cp)
+                    C.free(cp)
+                else:
+                    for i in range(n - 2):
+                        cswap(C, b, [V[i]], [V[i + 1]])
 
             self._euclid_tick0_block = C.record_shape(step, [n, n, 1, 2, k])
         return self._euclid_tick0_block
+
+    def _tick0_scratch(self):
+        """The unwritten tape the first step takes: its constant add's carries, or with TICK0_TREE
+        the trees' wires."""
+        n = self.mod.n
+        f1 = (1 << n) - self.mod.q + 1
+        return TICK0_SCRATCH if TICK0_TREE else n - 1 - ((f1 & -f1).bit_length() - 1)
 
     def _euclid_pass(self, U: list[int], pool: list[int]) -> None:
         # The pool starts as V plus clean external tape. It ends as the zero wires U did not
@@ -556,8 +585,7 @@ class DialogMultiplier:
         V, available, G = pool[:n], pool[n:], []
         lend = U[n - self.u_lent:]
         E = self.C.alloc(1)
-        f1 = (1 << n) - self.mod.q + 1
-        k = n - 1 - ((f1 & -f1).bit_length() - 1)
+        k = self._tick0_scratch()
         for i in range(self.iters):
             w = self.widths[i]
             assert len(V) == w and len(available) >= 2
