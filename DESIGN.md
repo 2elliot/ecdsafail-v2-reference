@@ -789,3 +789,9 @@ The sections from "Blocks of 3 in the add's forward sweep" to "P's blocks after 
 Together, the full circuit has 1,250 wires, 7,114,217 CCX (T 49,799,519) and 5,387,028 ticks.
 After `qec/gate_pass.py` it has 5,349,345 ticks: qubit-time 6,686,681,250, against 7,334,902,500 for the combined head above and 7,909,085,166 for PR8.
 The two branches touch different functions, and their tick savings add up exactly.
+
+## The CDKM add on round 2's head
+
+With `CDKM_ADD = True` on the head above, the add's blocks of 3 and their temps go unused, and the full circuit has 1,250 wires, 6,454,691 CCX (T 45,182,837) and 7,269,635 ticks.
+After `qec/gate_pass.py` it has 7,233,031 ticks: qubit-time 9,041,288,750.
+That is lower on both costs than the CDKM add on the round-1 head (9,414,686,250 and T 45,260,383), so it replaces that frontier point.

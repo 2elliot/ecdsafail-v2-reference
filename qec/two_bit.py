@@ -196,7 +196,7 @@ LATE_MIN_COPIES = 6
 P_FAN = 1
 # Run the tick's add as 2elliot depth/v2's CDKM ripple instead of either add above: 579,096
 # fewer CCX on the whole circuit for 1,535,700 more ticks (measured after the post-pass).
-CDKM_ADD = False
+CDKM_ADD = True
 # Hand P's and M's tops, and the H wires the first chain borrows, out in the order this tick's ops
 # so far free them, so neither waits on a wire the add holds to its end.
 IDLE_WIRES = True
