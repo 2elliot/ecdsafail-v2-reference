@@ -569,3 +569,21 @@ On the step domain U is odd, g0 equals the low bit of V, and g1 and the ring sta
 The middle selection and reversed sweep produce the original unwind map and restore the ring before reuse.
 Smaller rings retain the existing unwind implementations; the square keeps its lookahead chain.
 The full circuit has 1,246 wires, 10,475,194 ticks, 6,336,351 CCX, T 44,354,457 and 17,125,135 operations.
+
+## Narrow-width ripple in the Euclid difference
+
+At widths up to 12 the shared difference runs as one in-place majority chain instead of a ring variant, as in 2elliot depth/v2 (9d34aef).
+Each MAJ's two CXs run ahead of every CCX, so the carry reaches each CCX as its first control.
+The selection moves into (c, v) before the carry arrives, by maps that keep c·¬v, which is all that the restore and the hand-down read.
+At w = 12 with the ring of 10 that the pass hands it, the step costs 61 CCX against 133.
+`scripts/euclid_step_equiv.py` compares it with the chain fallback on every input for w = 2..10, and with this tree's previous step on the step domain for w = 2..12.
+
+## CDKM ripple for the tick's add
+
+With `CDKM_ADD`, the tick's add is `add_or_shift_cdkm`, also from 2elliot depth/v2.
+It is CDKM's ripple on every lane, with its sum writes gated on ¬J and moved off the carry chain; on J the shift is two reversals whose swaps follow the down pass.
+It costs 3(n − 1) + 5 + n CCX a call, and docs/mux-proof.md S9, S10 and S19 give the argument.
+`scripts/add_or_shift_check.py` checks it, and the lookahead add, on all 2^(2n+3) inputs for n = 4..10.
+It spends fewer CCX and more ticks than the blocked-lookahead add, which stays behind `LOOKAHEAD_ADD`.
+The full circuit has 1,249 wires, 6,620,707 CCX, T 46,344,949 and 7,866,220 ticks.
+After `qec/gate_pass.py` it has 7,806,303 ticks, against 6,272,299 for this tree's previous head after the same pass: 580,120 fewer CCX for 1,534,004 more ticks.

@@ -230,6 +230,69 @@ def shared_difference_u6(C, U, V, g0, g1, ring):
     C.free([cin])
 
 
+# Widths at which the step uses the in-place ripple below instead of a ring variant: there it has
+# fewer ticks and fewer CCX than u1 and u6 (measured in isolation, w = 2..12).
+RIPPLE_MAX_W = 12
+
+
+def shared_difference_ripple(C, U, V, g0, g1, ring):
+    """The step's shared difference as one in-place majority chain, from 2elliot depth/v2 (9d34aef);
+    the same map as the chain fallback on every input.
+
+    Up: each MAJ's two CXs run ahead of every CCX (they commute with the CCXs between), so each
+    CCX's first control is the previous CCX's target. Down: the selection moves into (c, v) before
+    the carry arrives, by maps that keep c.~v, which is all the restore and the carry read:
+    v ^= g0.~c, c ^= v while the up chain runs, then v ^= h1.~c with h1 = g1 ^ g0.carry_out.
+    After the restore the tail is linear: u ^= v, v ^= u ^ g0 ^ h1, u ^= g0.h1. k and m copy g0
+    and h1 so that the two selections alternate controls, then hold g0.h1 and g0 ^ h1.
+    cin, k and m are the first clean ring wires, or fresh wires when the ring is shorter; all three
+    end at zero."""
+    w = len(U)
+    lent = list(ring[:3])
+    fresh = C.alloc(3 - len(lent))
+    cin, k, m = lent + fresh
+    carries = [cin] + U[:-1]
+    for wire in V:
+        C.x(wire)
+    C.cx(g0, k)
+    C.cx(U[0], V[0])
+    C.cx(U[0], cin)
+    for i in range(1, w):
+        C.cx(U[i], V[i])
+        C.cx(U[i], carries[i])
+    C.cx(V[0], U[0])
+    for i in range(1, w):
+        C.ccx(carries[i], V[i], U[i])
+        C.x(carries[i])
+        C.ccx(k if (w - 1 - i) % 2 == 0 else g0, carries[i], V[i])
+        C.cx(V[i], carries[i])
+    C.ccx(g0, U[-1], g1)
+    C.cx(g1, m)
+    for i in reversed(range(1, w)):
+        C.ccx(m if (w - 1 - i) % 2 == 0 else g1, carries[i], V[i])
+        C.x(carries[i])
+        C.ccx(carries[i], V[i], U[i])
+    C.cx(g0, k)
+    C.ccx(g0, g1, k)
+    C.cx(g0, m)
+    for i in reversed(range(1, w)):
+        C.cx(U[i], carries[i])
+        C.cx(V[i], U[i])
+        C.cx(U[i], V[i])
+        C.cx(m, V[i])
+        C.cx(k, U[i])
+    C.cx(V[0], U[0])
+    C.cx(g0, V[0])
+    C.cx(U[0], cin)
+    C.cx(U[0], V[0])
+    C.cx(g1, m)
+    C.cx(g0, m)
+    C.ccx(g0, g1, k)
+    C.free(fresh)
+    for wire in V:
+        C.x(wire)
+
+
 # Hand each Bezout tick's B1 mark to the next tick when nothing runs between them.
 HAND_OFF_MARK = True
 
@@ -333,6 +396,9 @@ class DialogMultiplier:
                      [self._block_wires(G, j, swept)], inverse=True)
 
     def _shared_difference(self, U, V, g0, g1, ring_wires=()):
+        if len(U) <= RIPPLE_MAX_W:
+            shared_difference_ripple(self.C, U, V, g0, g1, list(ring_wires))
+            return
         if ring_layout_u6(len(ring_wires[:U6_RING])) is not None:
             shared_difference_u6(self.C, U, V, g0, g1, list(ring_wires[:U6_RING]))
             return

@@ -177,6 +177,9 @@ LATE_FINAL_WIRES = True
 LATE_MIN_COPIES = 6
 # Copies of p for un-copying it from the word after the add (1 = none).
 P_FAN = 1
+# Run the tick's add as 2elliot depth/v2's CDKM ripple instead of either add above: 579,096
+# fewer CCX on the whole circuit for 1,535,700 more ticks (measured after the post-pass).
+CDKM_ADD = True
 
 
 def weighted_bounds(width, blocks):
@@ -443,6 +446,65 @@ def add_or_shift_la(C, J, a, word, n, k2f=None, k2b=None, ntemps=5, ncopies=6):
     C.free(tw)
     C.free([cin])
     C.free([carry, t])      # top of the stack: idle first, so the tick's next alloc gets them
+
+
+def add_or_shift_cdkm(C, J, a, word, n, add_copies=4, shift_copies=4):
+    """2elliot depth/v2 (9d34aef) TwoBitMod._add_or_shift: on J, word = 2*word; off J,
+    word += a >> 1 through word's top two bits. A CDKM ripple whose sum writes are gated on not J
+    and moved off its carry chain, then the shift as two reversals whose swaps follow the down pass."""
+    m = n - 1
+    ops, tgt = a[1:], word[:m]
+    (cin, carry, t) = C.alloc(3)
+    carries = [cin] + ops[:-1]
+    js = C.alloc(shift_copies)
+    for w in js:
+        C.cx(J, w)
+    C.x(J)
+    adds = [J] + C.alloc(add_copies - 1)
+    fan = [(adds[j - (1 << (j.bit_length() - 1))], adds[j]) for j in range(1, add_copies)]
+    for src, dst in fan:
+        C.cx(src, dst)
+    for i in range(m):
+        C.cx(ops[i], tgt[i])
+    C.cx(ops[0], cin)
+    for i in range(m):
+        if i + 1 < m:
+            C.cx(ops[i + 1], ops[i])
+        C.ccx(carries[i], tgt[i], ops[i])
+        C.x(carries[i])
+        C.ccx(adds[i % add_copies], carries[i], tgt[i])
+        C.x(carries[i])
+    top = adds[m % add_copies]
+    C.ccx(top, ops[-1], carry)
+    C.ccx(carry, word[n - 1], t)
+    C.ccx(t, word[n], word[n + 1])
+    C.cx(t, word[n])
+    C.cx(carry, word[n - 1])
+    C.x(word[n - 1])
+    C.ccx(carry, word[n - 1], t)
+    C.x(word[n - 1])
+    C.ccx(top, ops[-1], carry)
+    for src, dst in reversed(fan):
+        C.cx(src, dst)
+    swaps = 0
+    for i in reversed(range(m)):
+        C.ccx(carries[i], tgt[i], ops[i])
+        if i + 1 < m:
+            C.cx(ops[i + 1], ops[i])
+        C.cx(J, tgt[i])
+        C.cx(ops[i], tgt[i])
+        if i < n - i:
+            cswap(C, js[swaps % shift_copies], [word[i]], [word[n - i]])
+            swaps += 1
+        if i + 1 < n - i:
+            cswap(C, js[swaps % shift_copies], [word[i + 1]], [word[n - i]])
+            swaps += 1
+    C.cx(ops[0], cin)
+    for w in js[1:]:
+        C.cx(js[0], w)
+    C.x(J)
+    C.cx(J, js[0])
+    C.free([carry, t] + adds[1:] + js + [cin])
 
 
 # Block-parallel prefix write for the tick's P (design swarm, work/swarm/prefix/design_r.py).
@@ -836,6 +898,8 @@ class TwoBitMod(Mod):
 
     def _add_or_shift(self, C, J, a, word):
         """Off J add a >> 1; on J rotate word's low n+1 bits left."""
+        if CDKM_ADD and self.n > 3:
+            return add_or_shift_cdkm(C, J, a, word, self.n)
         if LOOKAHEAD_ADD and self.n > 3:
             return add_or_shift_la(C, J, a, word, self.n)
         n = self.n

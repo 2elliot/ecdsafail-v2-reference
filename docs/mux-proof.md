@@ -121,27 +121,32 @@ Every tick adds or shifts: off J it adds R >> 1 to the word, and on J it shifts 
 On a held lane the word is complemented by `cx(p, x)` over all n + 2 wires before and after, and ~(~x + a) = x − a mod 2ⁿ⁺², which is S5's W.
 A B1 adds like a plain add, with l0 left at 0 by g0 = 0.
 
-**S9. The rolling XOR.**
-Let a_i be `ops[i]`, c_i the carry into bit i of `tgt`, and x_i = a_i ⊕ c_i, so an add makes word[i] ⊕ x_i for i ≤ n − 2.
-After the up pass D = x_0 ⊕ … ⊕ x_(n−2), and it is built by CX only.
-Going down, pair i takes word[i] and word[i + 1], and both receive one value: D on the add lanes, and word[i] ⊕ word[i + 1] on J.
-One CCX does both, as `cx(v, u); cx(D, v); cx(u, D); ccx(J, D, v); cx(u, D); cx(v, u)`.
-On J that pair is the ladder's swap, and pairs run top down as the ladder does.
-Off J, word[i] receives D_i from pair i and D_(i−1) from pair i − 1, whose sum is x_i, and word[0] receives only D_0 = x_0.
-Then `cx(c, D)` removes x_i, so D is 0 after pair 0 on every lane.
-Each bit costs 1 CCX up, 1 to restore a_i and 1 for the pair, against 4 today.
+This section describes `add_or_shift_cdkm`, the add the tick runs when `CDKM_ADD` is set (2elliot frontier/v1).
 
-**S10. The top of the word.**
-The pairs are i = 0 to n − 2, so there are n − 1 of them, and the gross saving is 255, not 256.
-Above them, four things happen in this order, on `J`, `carry` and `t`:
+**S9. The add, with its sum writes off the carry chain.**
+Let a_i be `ops[i]`, t_i be `tgt[i]` = word[i], c_i the carry into bit i (c_0 = 0), x_i = a_i ⊕ c_i, and u = ¬J.
+The add is CDKM's ripple, and it runs on every lane. Only the sum writes depend on u.
 
-1. `carry` = ¬J · c_(n−1).
-2. t = carry · word[n − 1], then word[n + 1] ⊕= t · word[n], then word[n] ⊕= t, then word[n − 1] ⊕= carry, then t is cleared from the new word[n − 1] under an X. That is the ripple through the two top bits, 2 CCX over today's half adder.
-3. `carry` is cleared, then word[n − 1] ⊕= ¬J · D. Pair n − 2 gives word[n − 1] the value D_(n−2), and no pair above cancels it, so this correction is needed once. 1 CCX.
-4. `cswap(J, word[n − 1], word[n])`, J's top pair, 1 CCX. It stays a shift because the top wires hold a carry on add lanes.
+- **Up.** MAJ_i leaves t_i ⊕ a_i on `tgt[i]`, x_i on `carries[i]` and c_(i+1) on `ops[i]`. MAJ_(i+1)'s `cx(a, c)` XORs into `ops[i]`, the target of MAJ_i's CCX, and MAJ_i reads neither a_(i+1) nor `ops[i]` as a control. So it commutes with that CCX and is issued first. The map is CDKM's.
+- **Pre-write.** After MAJ_i, `tgt[i]` ⊕= u · ¬x_i, by X, CCX, X on `carries[i]`.
+- **Down.** The restore CCX on bit i XORs x_i · `tgt[i]` into `ops[i]`. That is x_i · (t_i ⊕ a_i ⊕ u · ¬x_i) = x_i · (t_i ⊕ a_i), CDKM's value, because x_i · ¬x_i = 0. So `ops[i]` and `carries[i]` come back exactly as in CDKM, on every lane. The restore `cx(ops[i + 1], ops[i])` of `carries[i + 1]` XORs into the next CCX's target, so it is issued after that CCX.
+- **Sum.** `tgt[i]` then takes u from a ¬J wire and a_i from the restored `ops[i]`. It ends as t_i ⊕ u · ¬x_i ⊕ u = t_i ⊕ u · x_i. Off J that is the sum bit, and on J it is t_i.
 
-Folding the correction into the top pair only moves the junk to `spill`.
-On J, c_(n−1) is ignored, D is unused until pair n − 2, and the top pair runs first, as the ladder's does.
+So off J, word[:n − 1] gains R >> 1 with carry c_(n−1) out, and on J it is unchanged.
+Each bit costs 1 CCX up, 1 pre-write and 1 restore, as before.
+The carry chain holds only MAJ's CCX going up and the restore's CCX going down. Going up, the chain enters each CCX as a control. Going down, it must wait for the CCX above to release a control. The measured costs are 7 ticks per bit up and 11 per bit down.
+
+**S10. The top and the shift.**
+The top is as before. `carry` = ¬J · c_(n−1). Then t = carry · word[n − 1], word[n + 1] ⊕= t · word[n], word[n] ⊕= t and word[n − 1] ⊕= carry. Then t is cleared from the new word[n − 1] under an X, and `carry` is cleared.
+On J, the shift rotates word[:n + 1] left by one, as the old ladder did. word[n + 1] is untouched, and on the domain word[n] = 0 there.
+That rotation is the reversal of word[0..n], with pairs (i, n − i), followed by the reversal of word[1..n], with pairs (i + 1, n − i). Each pair is a `cswap` under a copy of J.
+Pair (i + 1, n − i) of the second reversal reads only the first reversal's pairs (i + 1, n − i − 1) and (i, n − i), and both are issued before it.
+The down pass never touches word[i] after bit i. The top wires are final before it starts. So both pairs at bit i are issued right after that bit, and the swaps follow the down pass with no ladder.
+The shift's swaps cost n CCX.
+It spends 3(n − 1) + 5 + n CCX, which is 1,026 at n = 256. Over the whole circuit that is 579,096 fewer CCX than the blocked-lookahead add (`add_or_shift_la`), which stays in the tree behind `LOOKAHEAD_ADD`.
+
+The add's ¬J copies serve the pre-writes and are cleared once the up pass ends. From then on J itself, flipped, carries ¬J.
+The held lane's second complement keeps the tick's mirror-pair order. Those CXs share the control p and commute, so any order gives the same map.
 
 ## The lanes
 
@@ -210,7 +215,7 @@ The cell needs 26 clean wires, the same as the earlier low-chain cell, at the to
 `high` costs one more there, and clearing c₁ once c₂ exists pays it back at +2 CCX, by the same carry rebuilt on the way down.
 c₁₂ still sits on `one`, because a perch can now read through other selectors, here k2.
 The two held bits need no clean wire: S4 keeps them on wires the tick already owns.
-D is live only during the add, which is far below the peak.
+The add's 10 scratch wires (`cin`, `carry`, `t`, 3 ¬J copies and 4 J copies) are live only during the add. The circuit keeps 1,249 wires with this add, the same as with the lookahead add.
 
 **S20. Limits of this proof.**
 It proves maps, and the wires by the arguments above and by test, not by a formal method.
