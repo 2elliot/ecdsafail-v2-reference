@@ -238,13 +238,18 @@ def _lookahead_tree(C, U, V, q, r):
             q.give(T.pop(j))
 
 
+# Block sizes lookahead_sweep tries, in order. Blocks of 1 make the tree a plain Brent-Kung prefix
+# over the bits, with each p on its V wire: fewer CCX and fewer ticks than blocks of 3, for about
+# len(U) temps instead of 2 len(U) / 3.
+SWEEP_BLOCKS = (1, 2, 3, 4, 5, 6, 8)
+
+
 def lookahead_sweep(C, U, V, temps):
     """lookahead_chain's map (f_j = x_j ^ p_j f_(j-1) in place on U from U[0]): lookahead_tree with
-    the smallest block size from 3 up whose tree_temps fits len(temps), else lookahead_chain with
-    lookahead_sizes. Blocks of 3 keep one temp a block through the tree and need about 2 len(U) / 3
-    temps; larger blocks need fewer and are slower."""
+    the first block size in SWEEP_BLOCKS whose tree_temps fits len(temps), else lookahead_chain with
+    lookahead_sizes. Larger blocks need fewer temps and are slower."""
     n = len(U)
-    for r in (3, 4, 5, 6, 8):
+    for r in SWEEP_BLOCKS:
         if tree_temps(n, r) <= len(temps):
             lookahead_tree(C, U, V, temps, r)
             return

@@ -637,3 +637,12 @@ The Euclid pass's down-sweep encodes its blocks back to back, and every encode t
 Block j's encode now holds `ANCILLAS * (j % ENCODE_SETS)` free wires around itself, so with `ENCODE_SETS = 3` three consecutive encodes use three different pairs.
 The held wires are clean and freed unchanged, and the extra wires sit below the Bezout pass's high-water mark, so wires and CCX are unchanged.
 After `qec/gate_pass.py` the circuit has 1,249 wires and 6,169,869 ticks, against 6,204,501; two sets give 6,174,029.
+
+## Bit-level tree in the Euclid difference
+
+`lookahead_sweep` now tries blocks of 1 and 2 before 3, through `SWEEP_BLOCKS`.
+Blocks of 1 make `lookahead_tree` a plain Brent–Kung prefix over the bits, with each p read from its V wire, so the block-local prefixes, products and fixes disappear.
+It needs about len(U) temps; every narrowed step's ring of w - 2 wires has them, and the 193-wire ring at w = 256 does not, so those steps keep blocks of 3.
+In isolation the step at w = 197 goes from 2,382 CCX and 599 + 609 standalone ticks to 2,110 and 541 + 516, and every measured width from 14 to 197 gains on both.
+`scripts/sweep_check.py` checks the tree for r = 1, 2, 3 on all inputs up to n = 11, and the tree step against the old block sizes on the step domain for w = 9..12; dropping the tree's last CCX fails it.
+After `qec/gate_pass.py` the circuit has 1,249 wires, 6,147,009 ticks and 7,080,363 CCX, against 6,169,869 and 7,199,803.
