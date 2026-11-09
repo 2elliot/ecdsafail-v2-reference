@@ -171,7 +171,13 @@ MAX_BLOCKS = 11
 # The tick's add as a blocked-lookahead chain (add_or_shift_la) instead of the ripple.
 LOOKAHEAD_ADD = True
 # The add's temps and J copies: the wires P's tenth block adds at the tick's peak are idle here.
-LA_NTEMPS, LA_NCOPIES = 6, 8
+LA_NTEMPS, LA_NCOPIES = 8, 6
+# (size, count): that many wider blocks among F's blocks of 2, or None for blocks of 2 only. An r-bit
+# block costs 4r - 3 CCX, so each chain step saved costs 3 CCX for any r (DESIGN.md, "Blocks of 3").
+LA_F_WIDE = (3, 68)
+# The add's carry and t serve as temps in its sweeps; temps go out free-first under the tick model.
+LA_TOP_TEMPS = True
+LA_IDLE_TEMPS = True
 # The tick's P as PrefixR, whose write runs its blocks in parallel. At 221 bits: ten blocks, the top
 # one small, since the write starts with the top block's ladder (DESIGN.md, "Ten P blocks").
 PARALLEL_PREFIX = True
@@ -376,6 +382,16 @@ def _la_spread(m, k, ends=1):
     return out
 
 
+def _la_wide(m, big, k, ends=1):
+    """Chain block sizes, bottom up: k blocks of `big` spread evenly among blocks of 2, keeping `ends`
+    ripple steps at each end; a bit left over is one more ripple step in the middle."""
+    inner = m - 2 * ends
+    k = max(0, min(k, inner // big))
+    n2, odd = divmod(inner - big * k, 2)
+    mid = [big if (i + 1) * k // (k + n2) > i * k // (k + n2) else 2 for i in range(k + n2)]
+    return [1] * ends + mid[:len(mid) // 2] + [1] * odd + mid[len(mid) // 2:] + [1] * ends
+
+
 def _la_blocks(sizes):
     out, s = [], 0
     for r in sizes:
@@ -385,22 +401,27 @@ def _la_blocks(sizes):
 
 
 class _LaTemps:
-    """Clean temps in turn; a returned temp goes to the back."""
+    """Clean temps in turn; a returned temp goes to the back. With idle, the temp that comes free
+    first under the tick model, the earliest returned on a tie."""
 
-    def __init__(self, wires):
-        self.free = list(wires)
+    def __init__(self, wires, idle=None):
+        self.free, self.idle = list(wires), idle
 
     def take(self):
         assert self.free, "out of temps"
+        if self.idle:
+            r = self.idle.ready()
+            return self.free.pop(min(range(len(self.free)), key=lambda i: (r.get(self.free[i], 0), i)))
         return self.free.pop(0)
 
     def give(self, w):
         self.free.append(w)
 
 
-def add_or_shift_la(C, J, a, word, n, k2f=None, k2b=None, ntemps=5, ncopies=6):
-    """k2f / k2b: number of 2-blocks in F / B (None = as many as fit). Wires: cin, ntemps temps,
-    carry and t for the top, ncopies copies of J: 1 + ntemps + 2 + ncopies (14 by default)."""
+def add_or_shift_la(C, J, a, word, n, k2f=None, k2b=None, ntemps=5, ncopies=6, fsizes=None):
+    """k2f / k2b: number of 2-blocks in F / B (None = as many as fit); fsizes, when given, F's block
+    sizes bottom up instead. Wires: cin, ntemps temps, carry and t for the top, ncopies copies of J:
+    1 + ntemps + 2 + ncopies (14 by default)."""
     m = n - 1
     if k2f is None:
         k2f = m
@@ -413,6 +434,7 @@ def add_or_shift_la(C, J, a, word, n, k2f=None, k2b=None, ntemps=5, ncopies=6):
     U = [cin] + a[1:]
     V = word[:m]
 
+    idle = _Idle(C, len(C.prims)) if LA_IDLE_TEMPS else None
     # J holds ~J from here to the end; the copies hold ~J during F and J after it.
     C.x(J)
     tree = _la_fan(C, J, K)
@@ -427,18 +449,23 @@ def add_or_shift_la(C, J, a, word, n, k2f=None, k2b=None, ntemps=5, ncopies=6):
         C.cx(U[j + 1], V[j])
         C.cx(U[j + 1], U[j])
 
-    temps = _LaTemps(tw)
-    for s, r in _la_blocks(_la_spread(m, k2f)):
+    # carry and t are clean until the top, and every temp is returned clean, so they can serve as temps.
+    temps = _LaTemps([carry, t] + tw if LA_TOP_TEMPS else tw, idle)
+    for s, r in _la_blocks(fsizes or _la_spread(m, k2f)):
         if r == 1:
             C.ccx(U[s], V[s], U[s + 1])
         else:
-            C.ccx(U[s + 1], V[s + 1], U[s + 2])        # local: U[s+2] = x ^ p x
-            T = temps.take()
-            C.ccx(V[s], V[s + 1], T)                    # T = p_s p_(s+1)
-            C.ccx(U[s], T, U[s + 2])                    # the chain step
-            C.ccx(V[s], V[s + 1], T)
-            temps.give(T)
-            C.ccx(U[s], V[s], U[s + 1])                 # fix the inner bit
+            for i in range(1, r):                       # local: U[s+i+1] = its carry when f_s = 0
+                C.ccx(U[s + i], V[s + i], U[s + i + 1])
+            T = [V[s]]                                  # T[i] = p_s ... p_(s+i)
+            for i in range(1, r):
+                T.append(temps.take())
+                C.ccx(T[i - 1], V[s + i], T[i])
+            C.ccx(U[s], T[r - 1], U[s + r])             # the chain step
+            for i in reversed(range(1, r)):
+                C.ccx(T[i - 1], V[s + i], T[i])
+                temps.give(T[i])
+                C.ccx(U[s], T[i - 1], U[s + i])         # fix the inner bits, top down
         for j in range(s, s + r):
             g = copy()
             C.cx(g, V[j])
@@ -957,7 +984,9 @@ class TwoBitMod(Mod):
         if CDKM_ADD and self.n > 3:
             return add_or_shift_cdkm(C, J, a, word, self.n)
         if LOOKAHEAD_ADD and self.n > 3:
-            return add_or_shift_la(C, J, a, word, self.n, ntemps=LA_NTEMPS, ncopies=LA_NCOPIES)
+            fsizes = _la_wide(self.n - 1, *LA_F_WIDE) if LA_F_WIDE else None
+            return add_or_shift_la(C, J, a, word, self.n, ntemps=LA_NTEMPS, ncopies=LA_NCOPIES,
+                                   fsizes=fsizes)
         n = self.n
         (cin, D, carry, t) = C.alloc(4)
         extra = C.alloc(3)

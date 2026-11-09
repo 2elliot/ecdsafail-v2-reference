@@ -4,7 +4,8 @@ scripts/add_or_shift_check.py to the bez-jack tree, where the add is a module fu
     python3.12 -I -B scripts/add_or_shift_check.py <tree> <nmax> [la|cdkm|tick ...]
 
 la = two_bit.add_or_shift_la (PR8), cdkm = two_bit.add_or_shift_cdkm (port), tick = whatever
-TwoBitMod._add_or_shift dispatches to under the tree's flags. For n = 4..nmax builds the add alone
+TwoBitMod._add_or_shift dispatches to under the tree's flags, wide = add_or_shift_la with every
+composition of n - 1 into F blocks of 1 to 4 bits. For n = 4..nmax builds the add alone
 on J, R (n), word (n + 2) with fresh scratch, simulates all 2^(2n+3) assignments, and requires on
 every lane: J and R unchanged, every scratch wire 0, word = word + (R >> 1) mod 2^(n+2) when J = 0,
 and word[:n + 1] rotated left by one with word[n + 1] unchanged when J = 1. Expected words are
@@ -29,37 +30,58 @@ def lane_mask(i, N):
     return reps * block
 
 
-ok = True
+def compositions(m, top=4):
+    if m == 0:
+        yield []
+        return
+    for r in range(1, min(top, m) + 1):
+        for rest in compositions(m - r, top):
+            yield [r] + rest
+
+
+runs = []
 for impl in impls:
     for n in range(4, int(sys.argv[2]) + 1):
-        C = Circuit()
-        (J,) = C.alloc(1)
-        R, word = C.alloc(n), C.alloc(n + 2)
-        ins = [J] + R + word
-        if impl == "la":
-            two_bit.add_or_shift_la(C, J, R, word, n)
-        elif impl == "cdkm":
-            two_bit.add_or_shift_cdkm(C, J, R, word, n)
+        if impl == "wide":
+            runs += [(impl, n, sizes) for sizes in compositions(n - 1)]
         else:
-            two_bit.TwoBitMod(PRIMES[n])._add_or_shift(C, J, R, word)
-        N = len(ins)
-        full = (1 << (1 << N)) - 1
-        init = {w: lane_mask(i, N) for i, w in enumerate(ins)}
-        st = sim.run(C.ops, C.num_wires, init, 1 << N)
-        j, r, w = init[J], [init[x] for x in R], [init[x] for x in ins[n + 1:]]
-        addend = r[1:] + [0, 0, 0]
-        total, c = [], 0
-        for x, y in zip(w, addend):
-            total.append(x ^ y ^ c)
-            c = (x & y) | (c & (x ^ y))
-        rot = [w[n]] + w[:n] + [w[n + 1]]
-        want = [(j & u) | (~j & full & v) for u, v in zip(rot, total)]
-        outs = set(ins)
-        scratch = [x for x in range(C.num_wires) if x not in outs]
-        good = (st[J] == j and [st[x] for x in R] == r and [st[x] for x in word] == want
-                and all(st[x] == 0 for x in scratch))
-        ok &= good
-        print(f"{impl:4s} n={n} lanes=2^{N} scratch={len(scratch)} ccx={C.ops[0::4].count(2)} map_and_clean={good}",
-              flush=True)
+            runs.append((impl, n, None))
+
+ok = True
+for impl, n, sizes in runs:
+    C = Circuit()
+    (J,) = C.alloc(1)
+    R, word = C.alloc(n), C.alloc(n + 2)
+    ins = [J] + R + word
+    if impl == "la":
+        two_bit.add_or_shift_la(C, J, R, word, n)
+    elif impl == "wide":
+        two_bit.add_or_shift_la(C, J, R, word, n, fsizes=sizes)
+    elif impl == "cdkm":
+        two_bit.add_or_shift_cdkm(C, J, R, word, n)
+    else:
+        two_bit.TwoBitMod(PRIMES[n])._add_or_shift(C, J, R, word)
+    N = len(ins)
+    full = (1 << (1 << N)) - 1
+    init = {w: lane_mask(i, N) for i, w in enumerate(ins)}
+    st = sim.run(C.ops, C.num_wires, init, 1 << N)
+    j, r, w = init[J], [init[x] for x in R], [init[x] for x in ins[n + 1:]]
+    addend = r[1:] + [0, 0, 0]
+    total, c = [], 0
+    for x, y in zip(w, addend):
+        total.append(x ^ y ^ c)
+        c = (x & y) | (c & (x ^ y))
+    rot = [w[n]] + w[:n] + [w[n + 1]]
+    want = [(j & u) | (~j & full & v) for u, v in zip(rot, total)]
+    outs = set(ins)
+    scratch = [x for x in range(C.num_wires) if x not in outs]
+    good = (st[J] == j and [st[x] for x in R] == r and [st[x] for x in word] == want
+            and all(st[x] == 0 for x in scratch))
+    ok &= good
+    if impl != "wide" or not good:
+        print(f"{impl:4s} n={n} lanes=2^{N} scratch={len(scratch)} ccx={C.ops[0::4].count(2)} "
+              f"map_and_clean={good}{' F ' + str(sizes) if sizes else ''}", flush=True)
+if "wide" in impls:
+    print("wide layouts checked:", sum(1 for r in runs if r[0] == "wide"))
 print("add_or_shift exhaustive:", "OK" if ok else "FAIL")
 sys.exit(0 if ok else 1)

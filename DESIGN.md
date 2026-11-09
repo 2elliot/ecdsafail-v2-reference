@@ -668,3 +668,17 @@ The sections from "Idle wires for the tick's prefixes and borrowed carriers" to 
 Together, the full circuit has 1,250 wires, 7,044,865 CCX (T 49,314,055) and 5,916,318 ticks.
 After `qec/gate_pass.py`, which cancels no CCX here, it has 5,867,922 ticks: qubit-time 7,334,902,500, against 7,831,983,147 for the lookahead-add head and 7,909,085,166 for PR8.
 The two sets touch different functions, and their tick savings add up to within 53 ticks.
+
+## Blocks of 3 in the add's forward sweep
+
+The add's forward sweep F advances its carry one block per CCX, and the backward sweep B undoes it one block per CCX, so each block is one step on the critical path: 7 ticks where a step's target is the next step's first control, 11 where a step's control is the next step's target.
+In the tick, F's steps cost 7 and B's 11; in M's inverse they swap, so a step saved in either sweep saves 18 ticks over the pass.
+An F block of r bits runs the local carries up the block, the products p_s ... p_(s+i) on r - 1 temps, the chain step, and then fixes the inner bits top down from those products: 4r - 3 CCX.
+Each chain step saved therefore costs 3 CCX a call for any r, against 18 ticks.
+With `LA_F_WIDE = (3, 68)`, F has 68 blocks of 3 among 24 blocks of 2 and three ripple steps (93 steps, against 127).
+A block of 3 holds two temps for about 90 ticks around its step, against one for about 30, so F alone ran short of temps.
+The add's `carry` and `t` are clean until its top and every temp is returned clean, so `LA_TOP_TEMPS` lends them to the sweeps, and `LA_IDLE_TEMPS` hands out the temp that comes free first under the tick model instead of the oldest returned.
+With 8 temps and 6 J copies (against 6 and 8) the add still fits the tick's peak.
+`scripts/add_or_shift_check.py <tree> 10 wide` runs every composition of n - 1 into F blocks of 1 to 4 bits, 428 layouts, on all inputs; dropping the inner fixes above a block's first bit fails 27 of the 56 layouts at n <= 7.
+The full circuit has 1,250 wires, 7,122,997 CCX (78,132 more, T 49,860,979) and 5,716,356 ticks, 199,962 fewer.
+After `qec/gate_pass.py` it has 5,666,078 ticks against 5,867,922: qubit-time 7,082,597,500, 3.44% lower.
