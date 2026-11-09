@@ -272,8 +272,8 @@ def lookahead_sweep(C, U, V, temps):
 
 
 def add_lookahead(C, a, b, cout, temps, tree=False, cin=None):
-    """b += a mod 2^w and cout ^= the carry out (none if cout is None), as add, with both sweeps in lookahead form.
-    A wire holding 1 as cin adds 1, as in add; the sweeps restore it.
+    """b += a mod 2^w and cout ^= the carry out (none if cout is None), as add, with both sweeps in
+    lookahead form. A wire holding 1 as cin adds 1, as in add; the sweeps restore it.
     The up-sweep leaves add's state after its last _maj (b_i = p_i, the carry wire c_0 ^ a_0,
     a_i = c_(i+1) ^ a_(i+1), a_(w-1) = c_w). The carries of a + ~s are those of a + b, so that
     state for (a, ~s) differs only on b, by b_i = ~(p_i ^ c_i ^ a_i): one CX from the wire below

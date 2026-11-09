@@ -776,3 +776,9 @@ With `MODADD_TREE`, `cadd_lookahead` runs `add_lookahead`'s tree up-sweep and it
 Both take `MODADD_TEMPS = 95` clean wires, which with the flag, its scratch bit and the copies stays within the 121 the square leaves free.
 `scripts/square_check.py` now also checks `SquareFold.modadd` on every canonical a, b and control for every q below 2^8 the fold applies to, and both helpers on every input up to 6 bits; leaving the second X layer uncontrolled fails it.
 After `qec/gate_pass.py` the circuit has 1,250 wires, 5,596,014 ticks and 7,035,319 CCX, against 5,606,298 and 7,032,417.
+
+## Round 2's arm D together
+
+The sections from "Trees for the top-level constant adds" to "Trees for the square's modadd" were measured in order on one branch from `depth/v4` (e18f122), each against the section before it.
+Together, after `qec/gate_pass.py`, the circuit has 1,250 wires, 5,596,014 ticks and 7,035,319 CCX (T 49,247,233): qubit-time 6,995,017,500, 4.63% below `depth/v4` at 7,334,902,500, with 9,546 fewer CCX.
+Two attempts were measured and dropped: lookahead chains for rows of 32 bits or fewer (2,426 more ticks in the circuit, though fewer in isolation), and B1 marks made per cell on their own wires in the Euclid sweep (11,552 more ticks, because consecutive marks share a g wire).
