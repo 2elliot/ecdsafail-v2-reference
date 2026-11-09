@@ -5,11 +5,11 @@ scripts/add_or_shift_check.py to the bez-jack tree, where the add is a module fu
 
 la = two_bit.add_or_shift_la (PR8), cdkm = two_bit.add_or_shift_cdkm (port), tick = whatever
 TwoBitMod._add_or_shift dispatches to under the tree's flags, wide = add_or_shift_la with every
-composition of n - 1 into F blocks of 1 to 4 bits, wideb = the same for B. For n = 4..nmax builds the add alone
-on J, R (n), word (n + 2) with fresh scratch, simulates all 2^(2n+3) assignments, and requires on
-every lane: J and R unchanged, every scratch wire 0, word = word + (R >> 1) mod 2^(n+2) when J = 0,
-and word[:n + 1] rotated left by one with word[n + 1] unchanged when J = 1. Expected words are
-computed bit-sliced with no generator code.
+composition of n - 1 into F blocks of 1 to 4 bits, wideb = the same for B. For n = 4..nmax builds
+the add alone on J, R (n), word (n + 2) with fresh scratch, simulates all 2^(2n+3) assignments, and
+requires on every lane: J and R unchanged, every scratch wire 0, word = word + (R >> 1) mod 2^(n+2)
+when J = 0, and word[:n + 1] rotated left by one with word[n + 1] unchanged when J = 1. Expected
+words are computed bit-sliced with no generator code.
 """
 import sys
 from pathlib import Path

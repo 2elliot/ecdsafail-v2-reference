@@ -176,15 +176,16 @@ LOOKAHEAD_ADD = True
 LA_NTEMPS, LA_NCOPIES = 8, 6
 # (size, count): that many wider blocks among F's / B's blocks of 2, or None for blocks of 2 only. An
 # r-bit block costs 4r - 3 CCX, so each chain step saved costs 3 CCX for any r (DESIGN.md, "Blocks of
-# 3"). Split between F and B, the sweep that runs at 7 ticks a step and starves for temps differs by
-# direction.
+# 3 in the add's forward sweep"). Split between F and B, the sweep that runs at 7 ticks a step and
+# starves for temps differs by direction ("Blocks of 3 split between the sweeps").
 LA_F_WIDE = (3, 34)
 LA_B_WIDE = (3, 35)
 # The add's carry and t serve as temps in its sweeps; temps go out free-first under the tick model.
 LA_TOP_TEMPS = True
 LA_IDLE_TEMPS = True
 # The tick's P as PrefixR, whose write runs its blocks in parallel. At 221 bits: ten blocks, the top
-# one small, since the write starts with the top block's ladder (DESIGN.md, "Ten P blocks").
+# one small, since the write starts with the top block's ladder (DESIGN.md, "Ten P blocks" and "P's
+# blocks after the faster add").
 PARALLEL_PREFIX = True
 P_SIZES_221 = (3, 7, 14, 28, 28, 28, 28, 28, 28, 27)
 HIGH_CARRIERS = True
@@ -418,17 +419,19 @@ class _LaTemps:
         assert self.free, "out of temps"
         if self.idle:
             r = self.idle.ready()
-            return self.free.pop(min(range(len(self.free)), key=lambda i: (r.get(self.free[i], 0), i)))
+            i = min(range(len(self.free)), key=lambda i: (r.get(self.free[i], 0), i))
+            return self.free.pop(i)
         return self.free.pop(0)
 
     def give(self, w):
         self.free.append(w)
 
 
-def add_or_shift_la(C, J, a, word, n, k2f=None, k2b=None, ntemps=5, ncopies=6, fsizes=None, bsizes=None):
+def add_or_shift_la(C, J, a, word, n, k2f=None, k2b=None, ntemps=5, ncopies=6, fsizes=None,
+                    bsizes=None):
     """k2f / k2b: number of 2-blocks in F / B (None = as many as fit); fsizes / bsizes, when given,
-    F's / B's block sizes bottom up instead. Wires: cin, ntemps temps, carry and t for the top, ncopies copies of J:
-    1 + ntemps + 2 + ncopies (14 by default)."""
+    F's / B's block sizes bottom up instead. Wires: cin, ntemps temps, carry and t for the top,
+    ncopies copies of J: 1 + ntemps + 2 + ncopies (14 by default)."""
     m = n - 1
     if k2f is None:
         k2f = m
