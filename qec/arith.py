@@ -257,7 +257,7 @@ def lookahead_sweep(C, U, V, temps):
 
 
 def add_lookahead(C, a, b, cout, temps, tree=False):
-    """b += a mod 2^w and cout ^= the carry out, as add, with both sweeps in lookahead form.
+    """b += a mod 2^w and cout ^= the carry out (none if cout is None), as add, with both sweeps in lookahead form.
     The up-sweep leaves add's state after its last _maj (b_i = p_i, the carry wire c_0 ^ a_0,
     a_i = c_(i+1) ^ a_(i+1), a_(w-1) = c_w). The carries of a + ~s are those of a + b, so that
     state for (a, ~s) differs only on b, by b_i = ~(p_i ^ c_i ^ a_i): one CX from the wire below
@@ -279,7 +279,8 @@ def add_lookahead(C, a, b, cout, temps, tree=False):
             up.cx(a[i + 1], a[i])
         lookahead_chain(up, [cin] + list(a), [None] + list(b), temps, lookahead_sizes(w))
     _emit(C, up.ops)
-    C.cx(a[-1], cout)
+    if cout is not None:
+        C.cx(a[-1], cout)
     C.cx(cin, b[0])
     for i in range(1, w):
         C.cx(a[i - 1], b[i])
@@ -493,6 +494,126 @@ def _add_selected_const(C, b, selectors, masks):
             C.cx(chain[i], low[i])
 
 
+def _doubling(C, src, copies):
+    """CX src into each clean copy, each copy a source once it holds src: about log2 depth."""
+    have, todo = [src], list(copies)
+    while todo:
+        new = []
+        for s in have:
+            if not todo:
+                break
+            d = todo.pop(0)
+            C.cx(s, d)
+            new.append(d)
+        have += new
+
+
+def fan_into(C, src, targets, copies):
+    """targets[i] ^= src for every i, through src's copies on clean wires, which end clean: about
+    2 log2 len(copies) + len(targets) / (len(copies) + 1) CX layers instead of len(targets)."""
+    g = _Gates()
+    _doubling(g, src, copies)
+    _emit(C, g.ops)
+    srcs = [src] + list(copies)
+    for i, t in enumerate(targets):
+        C.cx(srcs[i % len(srcs)], t)
+    _emit(C, reversed(g.ops))
+
+
+def _carry_tree(g, G, P, q):
+    """G[-1] ^= the carry out of c_(j+1) = G[j] ^ P[j] c_j from c_0 = 0, where G[j] and P[j] are never
+    both 1, by a balanced tree of segment joins G_R ^= P_R G_L, P_R := P_L P_R, about log2 len(G) CCX
+    layers. The G wires keep their segments' generates; products go on temps from the queue q. P[0] is
+    not read."""
+    segs = [(G[0], None)] + list(zip(G[1:], P[1:]))
+    while len(segs) > 1:
+        nxt = []
+        for k in range(0, len(segs) - 1, 2):
+            (gl, pl), (gr, pr) = segs[k], segs[k + 1]
+            g.ccx(gl, pr, gr)
+            if pl is None:
+                nxt.append((gr, None))
+            else:
+                t = q.take()
+                g.ccx(pl, pr, t)
+                nxt.append((gr, t))
+        if len(segs) % 2:
+            nxt.append(segs[-1])
+        segs = nxt
+
+
+def gt_const_tree(C, value, b, t, ctrl=None):
+    """gt_const_into's map, t ^= ctrl*[value > b] with b restored, with the carry out of ~b + value
+    joined by _carry_tree instead of a chain. Leaf i: g = ~b_i and p = b_i where value's bit i is 1,
+    g = 0 and p = ~b_i where it is 0. Bits below value's lowest 1 carry nothing."""
+    assert ctrl is None or ctrl not in (*b, t)
+    assert t not in b
+    assert value < 1 << len(b)
+    if value == 0:
+        return
+    s = (value & -value).bit_length() - 1
+    idx = range(s, len(b))
+    ones = [i for i in idx if value >> i & 1]
+    flips = [b[i] for i in idx if not value >> i & 1]
+    G = C.alloc(len(idx))
+    where = dict(zip(idx, G))
+    temps = C.alloc(len(idx))
+    for x in flips:
+        C.x(x)
+    for i in ones:
+        C.cx(b[i], where[i])
+        C.x(where[i])
+    g = _Gates()
+    _carry_tree(g, G, [b[i] for i in idx], _TempQueue(temps))
+    _emit(C, g.ops)
+    _cx(C, ctrl, G[-1], t)
+    _emit(C, reversed(g.ops))
+    for i in ones:
+        C.x(where[i])
+        C.cx(b[i], where[i])
+    for x in flips:
+        C.x(x)
+    C.free(temps)
+    C.free(G)
+
+
+def _add_selected_tree(C, b, selectors, masks):
+    """_add_selected_const's map, b += the mask its one set selector picks mod 2^len(b), with the
+    addend copied onto clean wires by doubling fans and added by add_lookahead's tree."""
+    n = len(b)
+    masks = [mask % (1 << n) for mask in masks]
+    start = min(((mask & -mask).bit_length() - 1 for mask in masks if mask), default=n)
+    low = b[start:]
+    if not low:
+        return
+    A = C.alloc(len(low))
+    classes = {}
+    for i, w in enumerate(A):
+        key = tuple(s for s, mask in zip(selectors, masks) if mask >> (start + i) & 1)
+        if key:
+            classes.setdefault(key, []).append(w)
+    g = _Gates()
+    for key, wires in classes.items():
+        if len(key) == 1:
+            _doubling(g, key[0], wires)
+        else:
+            for s in key:
+                g.cx(s, wires[0])
+            _doubling(g, wires[0], wires[1:])
+    _emit(C, g.ops)
+    temps = C.alloc(max(1, tree_temps(len(low) + 1, 1)))
+    add_lookahead(C, A, low, None, temps, tree=True)
+    C.free(temps)
+    _emit(C, reversed(g.ops))
+    C.free(A)
+
+
+# Run the top-level constant adds' carry chains as log-depth trees on clean wires.
+CONST_TREE = True
+# Copies of the control for creflect's complement of b.
+REFLECT_COPIES = 31
+
+
 class Mod:
     """Arithmetic modulo an odd q < 2^n on canonical values in [0, q)."""
 
@@ -601,28 +722,35 @@ class Mod:
         value %= self.q
         if value == 0:
             return
+        gt, add_sel = (gt_const_tree, _add_selected_tree) if CONST_TREE else (gt_const_into, _add_selected_const)
         (k,) = C.alloc(1)
-        gt_const_into(C, self.q - value, b, k, ctrl)
+        gt(C, self.q - value, b, k, ctrl)
         C.cx(ctrl, k)
         C.cx(k, ctrl)
-        _add_selected_const(C, b, [ctrl, k], [value, value + (1 << self.n) - self.q])
+        add_sel(C, b, [ctrl, k], [value, value + (1 << self.n) - self.q])
         C.cx(k, ctrl)
-        gt_const_into(C, value, b, k, ctrl)
+        gt(C, value, b, k, ctrl)
         C.free([k])
 
     def creflect(self, C, ctrl, a, b):
         """b = (a - b) mod q when ctrl, valid on all canonical b."""
         a %= self.q
+        gt, add_sel = (gt_const_tree, _add_selected_tree) if CONST_TREE else (gt_const_into, _add_selected_const)
         (k,) = C.alloc(1)
-        gt_const_into(C, a + 1, b, k, ctrl)
+        gt(C, a + 1, b, k, ctrl)
         C.cx(ctrl, k)
-        for wire in b:
-            C.cx(ctrl, wire)
+        if CONST_TREE:
+            copies = C.alloc(REFLECT_COPIES)
+            fan_into(C, ctrl, b, copies)
+            C.free(copies)
+        else:
+            for wire in b:
+                C.cx(ctrl, wire)
         C.cx(k, ctrl)
-        _add_selected_const(C, b, [ctrl, k], [a + 1, (a + 1 + self.q) % (1 << self.n)])
+        add_sel(C, b, [ctrl, k], [a + 1, (a + 1 + self.q) % (1 << self.n)])
         C.cx(k, ctrl)
         C.cx(ctrl, k)
-        gt_const_into(C, a + 1, b, k, ctrl)
+        gt(C, a + 1, b, k, ctrl)
         C.free([k])
 
     def cneg(self, C, ctrl, b):

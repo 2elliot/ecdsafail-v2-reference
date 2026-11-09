@@ -710,3 +710,13 @@ A block is hosted on the bits of the block below only when that block has at lea
 After `qec/gate_pass.py` the circuit has 1,250 wires, 7,121,465 CCX (1,532 fewer) and 5,628,639 ticks, 20,743 fewer: qubit-time 7,035,798,750.
 The CCX that P's retune saves pay for a 35th block of 3 in B (`LA_B_WIDE = (3, 35)`, 2,298 CCX): B then has 111 steps and F 112.
 After `qec/gate_pass.py` the circuit has 1,250 wires, 7,123,763 CCX (78,898 more than e18f122, T 49,866,341) and 5,621,253 ticks, 7,386 fewer: qubit-time 7,026,566,250, 4.20% below e18f122's 7,334,902,500.
+
+## Trees for the top-level constant adds
+
+`Mod.cmodadd_const` and `Mod.creflect` run three 256-bit carry chains each: a comparison, the selected-constant add, and the comparison that clears the flag.
+The kernel runs five of them on the critical path, about 80,000 ticks in all.
+With `CONST_TREE`, `gt_const_tree` joins the carry out of ~b + value by a balanced tree of segment joins (`_carry_tree`) on fresh wires, and `_add_selected_tree` copies the selected constant onto clean wires by doubling fans and adds it with `add_lookahead`'s tree; creflect's complement of b fans the control out through `REFLECT_COPIES` copies.
+Each call takes about 513 scratch wires, and the top level has more than 730 free, so the wire count stays 1,250.
+In isolation one call goes from about 18,000 ticks and 1,530 CCX to about 1,110 ticks and 4,000 CCX.
+`scripts/const_tree_check.py` checks `gt_const_tree` on every input and constant up to 8 bits, and both kernel calls on every odd q below 256, every constant and every canonical b; dropping the tree's last join fails it.
+After `qec/gate_pass.py` the circuit has 1,250 wires, 5,794,237 ticks and 7,057,205 CCX, against 5,867,922 and 7,044,865: about 6 ticks for each CCX spent.
