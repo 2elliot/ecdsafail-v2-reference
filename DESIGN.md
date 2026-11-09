@@ -720,3 +720,10 @@ Each call takes about 513 scratch wires, and the top level has more than 730 fre
 In isolation one call goes from about 18,000 ticks and 1,530 CCX to about 1,110 ticks and 4,000 CCX.
 `scripts/const_tree_check.py` checks `gt_const_tree` on every input and constant up to 8 bits, and both kernel calls on every odd q below 256, every constant and every canonical b; dropping the tree's last join fails it.
 After `qec/gate_pass.py` the circuit has 1,250 wires, 5,794,237 ticks and 7,057,205 CCX, against 5,867,922 and 7,044,865: about 6 ticks for each CCX spent.
+
+## Trees for the exception flags
+
+`_eq_flags` ANDs X's bits into the four exception flags by chains of CCX, one bit after another, at the start and at the end of the circuit: about 21,000 ticks on the critical path.
+With `EQ_TREE`, `and_tree` builds each AND as a balanced tree on fresh wires instead, with the same CCX, and `eq_const_into` joins its control last, since each control is itself a tree's root and is ready last.
+`scripts/eq_tree_check.py` checks `eq_const_into` on every input for every value up to 9 bits, with and without a control, and `and_tree` up to 9 wires; dropping the tree's last CCX fails it.
+After `qec/gate_pass.py` the circuit has 1,250 wires, 5,774,637 ticks and 7,057,205 CCX, against 5,794,237.

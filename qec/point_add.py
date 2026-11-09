@@ -791,11 +791,53 @@ class DialogMultiplier:
         self.C.apply(self.block, [Xr, Yr], inverse)
 
 
+# AND the flags' bits by balanced trees instead of chains: the same CCX, log depth.
+EQ_TREE = True
+
+
+def and_tree(C, wires):
+    """The AND of wires (at least one) on fresh wires by a balanced tree. Returns the root, which is
+    wires[0] itself for one wire, and the CCXs (a, b, t) in emission order, for clear_and."""
+    level, history = list(wires), []
+    while len(level) > 1:
+        nxt = []
+        for k in range(0, len(level) - 1, 2):
+            (t,) = C.alloc(1)
+            C.ccx(level[k], level[k + 1], t)
+            history.append((level[k], level[k + 1], t))
+            nxt.append(t)
+        if len(level) % 2:
+            nxt.append(level[-1])
+        level = nxt
+    return level[0], history
+
+
+def clear_and(C, history):
+    for a, b, t in reversed(history):
+        C.ccx(a, b, t)
+    C.free([t for _, _, t in history])
+
+
 def eq_const_into(C, ctrl, bits, value, target):
     """XOR equality into target, optionally controlled by ctrl."""
     flips = [w for i, w in enumerate(bits) if not value >> i & 1]
     for w in flips:
         C.x(w)
+    if EQ_TREE and (ctrl is not None or len(bits) > 1):
+        # ctrl joins last: callers pass a ctrl that is itself a tree's root, ready late.
+        if ctrl is not None:
+            root, history = and_tree(C, bits)
+            C.ccx(ctrl, root, target)
+            clear_and(C, history)
+        else:
+            h = len(bits) // 2
+            (lo, hl), (hi, hh) = and_tree(C, bits[:h]), and_tree(C, bits[h:])
+            C.ccx(lo, hi, target)
+            clear_and(C, hh)
+            clear_and(C, hl)
+        for w in flips:
+            C.x(w)
+        return
     chain = []
     acc = ctrl if ctrl is not None else bits[0]
     factors = bits[:-1] if ctrl is not None else bits[1:-1]
@@ -924,6 +966,13 @@ class ControlledPointAdd:
         differing = [i for i in range(n) if (pair_x ^ single_x) >> i & 1]
 
         def chain(acc, wires):
+            if EQ_TREE and wires:
+                root, history = and_tree(C, wires)
+                if acc is None:
+                    return root, history
+                (target,) = C.alloc(1)
+                C.ccx(acc, root, target)
+                return target, history + [(acc, root, target)]
             history = []
             for wire in wires:
                 if acc is None:
