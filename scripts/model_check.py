@@ -15,7 +15,7 @@ from qec import flatten, sim
 from qec.arith import Mod, load_const
 from qec.builder import Circuit
 from qec.emit import write_circuit
-from qec.model import tick_bound, tick_mul, tick_pass, tick_sweep, tick_tape, tick_widths
+from qec.model import tick_bound, tick_joint, tick_mul, tick_pass, tick_sweep, tick_tape, tick_widths
 from qec.point_add import DialogMultiplier
 
 
@@ -72,14 +72,20 @@ def b1_swept(cells):
 def _junk_value(m, q, x):
     """The pass's junk register: E as the last tick found it, then per tick its chain's lowest carries
     c_2 .. c_(carry+1) of U + NOT(V') on its width, V' being V ^ E at bit 0 with a no-subtract
-    tick's second strip already done on V[1:], then add AND E, the offset a subtract retires."""
+    tick's second strip already done on V[1:]; then the flag wire the tick makes, and the wire its
+    flag update leaves; then add AND E, the offset a subtract retires. The flag before a tick is
+    [U >= 2^kappa]. A wire that carries it holds the flag of the tick that last wrote it."""
     states = tick_pass(q, x, m.iters)[0]
     cells = tick_tape(q, x, m.iters)[2]
+    plan = m._tick_plan()
+    flags = [None if key is None or key[5] is None else int(states[t][0] >> key[5] != 0)
+             for t, key in enumerate(plan)]
     bits = [states[m.iters - 1][2]]
-    for key, (U, V, E), (add, bit) in zip(m._tick_plan(), states, cells):
+    holder = None
+    for t, (key, (U, V, E), (add, bit)) in enumerate(zip(plan, states, cells)):
         if key is None or key[3]:
             continue
-        w, top_clear, narrow, _, carry = key
+        w, top_clear, narrow, _, carry, kappa, high, fmode, init = key
         if carry:
             vv = V ^ E
             if not add and bit and w >= 2:
@@ -93,8 +99,33 @@ def _junk_value(m, q, x):
                 a, b = U >> i & 1, nb >> i & 1
                 c = a & b | a & c | b & c
                 bits.append(c)
+        if init:
+            holder = len(bits)
+            bits.append(flags[t])
+        if fmode == "same":
+            bits[holder] = flags[t + 1]
+            bits.append(add & flags[t])
+        elif fmode == "drop":
+            holder = len(bits)
+            bits.append(flags[t + 1])
         bits.append(add & E)
     return sum(b << k for k, b in enumerate(bits))
+
+
+def joint_domain_ok(q):
+    """Before tick t, u * v * max(u, v) <= 2 * q^2 * (q - 1) / 4^t for every x, so U and V are
+    never both at or above 2^K_t, and a subtract leaves U below it."""
+    T = tick_bound(q)
+    K, bound = tick_joint(q, T), 2 * q * q * (q - 1)
+    for x in range(1, q):
+        states, cells = tick_pass(q, x, T)
+        for t, (U, V, E) in enumerate(states[:T]):
+            v = V + E
+            if U * v * max(U, v) > bound >> 2 * t or (U >> K[t] and (V ^ E) >> K[t]):
+                return False
+            if cells[t][0] and states[t + 1][0] >> K[t]:
+                return False
+    return True
 
 
 def _pass_bad(q, xs, iters):
@@ -207,13 +238,15 @@ for q in [3, 5, 7, 11, 13, 31, 43, 61, 127, 251, 509, 1021, 4093]:
     forward_bad = gate_mul(q, ys)
     inverse_bad = gate_mul(q, ys, inverse=True)
     pass_offset, pass_tape = offset_checks(q, range(1, q))
+    joint_ok = joint_domain_ok(q)
     rows.append({"q": q, "worst_iterations": worst, "bound": B,
                  "width_schedule_ok": width_ok, "multiplier_ok": mul_ok,
                  "pass_end_ok": pass_end, "remap_control_ok": remap_control,
                  "pass_short_rejected": short_rejected, "pass_gates_ok": pass_gates,
                  "multiplier_gates_ok": forward_bad == inverse_bad == 0,
                  "forward_bad": forward_bad, "inverse_bad": inverse_bad,
-                 "pass_offset_ok": pass_offset, "pass_tape_ok": pass_tape, "pass_zero_outside_domain": pass_zero_outside})
+                 "pass_offset_ok": pass_offset, "pass_tape_ok": pass_tape, "pass_zero_outside_domain": pass_zero_outside,
+                 "joint_domain_ok": joint_ok, "high_ticks": sum(1 for key in DialogMultiplier(Circuit(), Mod(q))._tick_plan() if key and key[6])})
     print(json.dumps(rows[-1]))
 q = 2**256 - 2**32 - 977
 rng = random.Random(1)
@@ -229,6 +262,6 @@ print(json.dumps({"q": "secp256k1", "bound": tick_bound(q), "random_pairs": 2000
                   "width_edge_ok": width_edge_ok, "width_edge_lanes": len(edge_pairs)}))
 keys = ("width_schedule_ok", "multiplier_ok", "pass_end_ok", "remap_control_ok",
         "pass_short_rejected", "pass_gates_ok", "multiplier_gates_ok",
-        "pass_offset_ok", "pass_tape_ok", "pass_zero_outside_domain")
+        "pass_offset_ok", "pass_tape_ok", "pass_zero_outside_domain", "joint_domain_ok")
 sys.exit(0 if ok and pass_end and offset_ok and width_edge_ok and all(r["worst_iterations"] <= r["bound"]
          and all(r[k] for k in keys) for r in rows) else 1)

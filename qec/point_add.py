@@ -6,7 +6,7 @@ from .builder import Circuit
 from .curve import Curve
 from .square import SquareFold
 from .two_bit import TwoBitMod
-from .model import tick_bound, tick_widths
+from .model import tick_bound, tick_joint, tick_widths
 from . import block0_code, tail_code, tape_block
 from .tape_block import FREE, TICKS
 
@@ -20,8 +20,12 @@ class DialogMultiplier:
     RAW_TAPE = True
     # Chain carries the forward pass leaves as junk for the inverse pass. Each is held through the
     # Bezout pass and saves one CCX in each Euclid pass, so this is the one knob that trades wires
-    # for CCX; 2,399 puts the climb stack at 4,096 wires at n = 256.
-    CARRY_JUNK = 2399
+    # for CCX; 2,023 puts the climb stack at 4,096 wires at n = 256.
+    CARRY_JUNK = 2023
+    # A tick whose registers reach this many bits above its joint threshold runs those bits as one
+    # high word, 3 CCX a bit, on a flag that says which register holds it. 6 is 148 CCX cheaper at
+    # n = 256; 2 keeps the high word in every toy prime of 8 bits or more.
+    HIGH_MIN = 2
 
     def __init__(self, C, mod):
         self.C, self.mod = C, mod
@@ -134,13 +138,14 @@ class DialogMultiplier:
                      [self._block_wires(G, j, swept)], inverse=True)
 
 
-    def _shared_difference(self, U, V, g0, g1, top=None, junk=None):
+    def _shared_difference(self, U, V, g0, g1, top=None, junk=None, high=0, held=None, scratch=None):
         """Compare and form the even difference using one majority chain. With top set, bit w - 1
         is done by _top_bit on the domain that mode names. With junk, bits 1 .. len(junk) make
-        their carries c_2 .. on those wires and leave them for the inverse pass, at 3 CCX a bit."""
+        their carries c_2 .. on those wires and leave them for the inverse pass, at 3 CCX a bit.
+        With high, the top `high` bits are done by _high_word."""
         C = self.C
         (cin,) = C.alloc(1)
-        chain = len(U) if top is None else len(U) - 1
+        chain = len(U) - high if high else len(U) if top is None else len(U) - 1
         m = len(junk) if junk else 0
         assert m <= max(chain - 1, 0)
         carries = [cin, U[0]] + list(junk or []) + U[m + 1:]
@@ -159,7 +164,9 @@ class DialogMultiplier:
                 C.cx(carries[i], V[i])
                 C.ccx(U[i], V[i], carries[i + 1])
                 C.cx(carries[i], carries[i + 1])
-        if top is None:
+        if high:
+            self._high_word(U[chain:], V[chain:], carries[chain], g0, g1, held, scratch)
+        elif top is None:
             C.ccx(g0, carries[chain], g1)
         else:
             self._top_bit(C, top, g0, U[-1], V[-1], carries[chain], g1)
@@ -194,6 +201,68 @@ class DialogMultiplier:
             C.x(wire)
         for wire in V[1:]:
             C.cx(g1, wire)
+
+    def _high_word(self, U, V, cw, g0, g1, held, scratch):
+        """The chain's bits above the tick's joint threshold, where U or V is zero. held is
+        (z, zg): z is 1 when U is the nonzero one and may be either when both are zero, zg = g0*z.
+        On entry V holds NOT v and cw the carry c into these bits; g1 is 0. The word X = U ^ V is
+        the one that is there. A subtract leaves U = 0 and V = X - e, e = g0*(c ^ z) the borrow
+        of the larger minus the smaller, and swaps exactly when z or the borrow leaves the top:
+        with z the carries are NOT of the borrows and g1 = g0; without, they are the borrows and
+        the top one is g1. scratch holds e and the borrows, and goes back clean."""
+        C = self.C
+        z, zg = held
+        E = scratch[:len(U) + 1]
+        for u, v in zip(U, V):
+            C.cx(u, v)
+            C.x(v)
+        for u, v in zip(U, V):
+            C.ccx(zg, v, u)
+        C.cx(z, cw)
+        C.ccx(g0, cw, E[0])
+        C.cx(z, cw)
+        for i, v in enumerate(V):
+            C.x(v)
+            C.ccx(E[i], v, E[i + 1])
+            C.x(v)
+        C.cx(zg, g1)
+        C.cx(E[-1], g1)
+        for i, v in reversed(list(enumerate(V))):
+            C.x(v)
+            C.ccx(E[i], v, E[i + 1])
+            C.x(v)
+            C.cx(E[i], v)
+        C.cx(z, cw)
+        C.ccx(g0, cw, E[0])
+        C.cx(z, cw)
+        for u, v in zip(U, V):
+            # Off g0 U is as found, and V takes v back. The caller's last X and CX from g1 then
+            # leave X ^ borrow ^ top borrow, g1 ^ zg being the top borrow.
+            C.cx(u, v)
+            C.x(v)
+            C.cx(zg, v)
+
+    def _or_into(self, bits, target, scratch):
+        """target ^= OR of bits, through scratch wires that go back clean."""
+        C = self.C
+
+        def gate(a, b, t):
+            C.x(a)
+            C.x(b)
+            C.ccx(a, b, t)
+            C.x(a)
+            C.x(b)
+            C.x(t)
+
+        if len(bits) == 1:
+            C.cx(bits[0], target)
+            return
+        dst = list(scratch[:len(bits) - 2]) + [target]
+        steps = [(bits[0] if j == 0 else dst[j - 1], bits[j + 1], dst[j]) for j in range(len(bits) - 1)]
+        for a, b, t in steps:
+            gate(a, b, t)
+        for a, b, t in reversed(steps[:-1]):
+            gate(a, b, t)
 
     @staticmethod
     def _top_bit(C, mode, g0, A, B, Cw, H):
@@ -248,26 +317,36 @@ class DialogMultiplier:
             raise ValueError(mode)
 
     @staticmethod
-    def _carry_junk(w, top_clear, narrow):
+    def _carry_junk(w, top_clear, narrow, kappa=None):
         """The most carry wires a step at width w can leave: c_2 .. c_chain."""
+        if kappa is not None:
+            return max(kappa - 1, 0)
         top = w >= 2 and (top_clear or narrow)
         return max(w - (1 if top else 0) - 1, 0)
 
     def _euclid_step(self, w: int, top_clear: bool = False, narrow: bool = False, last: bool = False,
-                     carry: int = 0):
+                     carry: int = 0, kappa=None, high: bool = False, fmode=None, init: bool = False):
         """top_clear: the tick before ran at the same width, so V is below 2^(w - 1) on entry
         and the second strip's last swap, of two zero bits, never fires.
         narrow: the next width is w - 1, so by E7 this step leaves U below 2^(w - 1).
         last: the pass's last tick, whose input reaches (U, V, E) = (1, 0, 0) by E3.
-        carry: the chain's lowest carries, this many, stay on junk wires ahead of the old offset's."""
+        carry: the chain's lowest carries, this many, stay on junk wires ahead of the old offset's.
+        kappa: the tick's flag threshold, at or above its joint threshold: U and V are never both
+            2^kappa or more, and a subtract leaves U below it. The flag is [U >= 2^kappa].
+        high: bits kappa and up run as one high word.
+        fmode: how the flag goes on to the next tick. same: the next threshold is kappa, the flag
+            wire takes flag AND NOT g0 and g0*flag stays as junk. drop: the next threshold is
+            kappa - 1, a fresh wire takes that OR U'[kappa - 1] and the old flag stays as junk.
+            final: no tick after this reads it.
+        init: the flag is made here, from U."""
         if last:
             top_clear = narrow = False
             carry = 0
-        key = (w, top_clear, narrow, last, carry)
+        key = (w, top_clear, narrow, last, carry, kappa, high, fmode, init)
         if key not in self._euclid_steps:
             C = self.C
 
-            def step(U, V, E, cell, junk):
+            def step(U, V, E, cell, junk, flag, slot, scratch):
                 g0, b = cell
                 offset = E[0]
                 if last:
@@ -304,14 +383,45 @@ class DialogMultiplier:
                 # g1 lands on the junk wire, then goes to b, where the swept tape wants a subtract's
                 # own swap; the old offset moves onto the junk wire and E takes g1.
                 (g1,) = junk[-1:]
-                self._shared_difference(U[:w], V[:w], g0, g1, top, junk[:-1])
+                zg = None
+                if init:
+                    self._or_into(U[kappa:w], flag[0], scratch)
+                if fmode:
+                    zg = slot[0] if fmode == "same" else scratch[-1]
+                    C.ccx(g0, flag[0], zg)
+                if high:
+                    self._shared_difference(U[:w], V[:w], g0, g1, None, junk[:-1], w - kappa,
+                                            (flag[0], zg), scratch)
+                else:
+                    self._shared_difference(U[:w], V[:w], g0, g1, top, junk[:-1])
                 C.cx(g1, b)
                 cswap(C, g0, [offset], [g1])
+                if fmode == "same":
+                    C.cx(zg, flag[0])
+                elif fmode == "drop":
+                    new, bit = slot[0], U[kappa - 1]
+                    C.cx(flag[0], zg)
+                    C.cx(bit, new)
+                    C.x(bit)
+                    C.ccx(zg, bit, new)
+                    C.x(bit)
+                    C.cx(flag[0], zg)
+                    C.ccx(g0, flag[0], zg)
+                    flag[0], slot[0] = new, flag[0]
+                elif fmode == "final":
+                    C.ccx(g0, flag[0], zg)
                 V[:] = V[1:] + V[:1]
 
-            size = 0 if last else 1 + carry
-            self._euclid_steps[key] = C.record_shape(step, [w, w, 1, 2, size])
+            sizes = [w, w, 1, 2, 0 if last else 1 + carry, 1 if fmode else 0,
+                     1 if fmode in ("same", "drop") else 0, self._step_scratch(key)]
+            self._euclid_steps[key] = C.record_shape(step, sizes)
         return self._euclid_steps[key]
+
+    @staticmethod
+    def _step_scratch(key):
+        """Clean wires a step borrows: the high word's borrows, and g0*flag unless it stays."""
+        w, kappa, high, fmode = key[0], key[5], key[6], key[7]
+        return (w - kappa + 1 if high else 0) + (1 if fmode in ("drop", "final") else 0)
 
     def _euclid_tick0(self):
         """First Euclid step on U = q, E = 0. U is clean once q's bits flip, so it holds the add's
@@ -384,11 +494,25 @@ class DialogMultiplier:
         tick0 = self._euclid_tick0()
         return tick0.wires <= set(tick0.flat_in) and set(tick0.flat_out) == set(tick0.flat_in)
 
+    def _clean_counts(self):
+        """Per tick, the clean tape and vacated wires left once the tick has its cell."""
+        n, T, W = self.mod.n, self.iters, self.widths
+        clean, out = self.tape_external, []
+        for i in range(T):
+            clean -= 2
+            out.append(clean)
+            nxt = W[i + 1] if i + 1 < T else self.pass_tail_width
+            clean += W[i] - nxt + sum(1 for j in range(nxt, W[i]) if j >= n - self.u_lent)
+        return out
+
     def _tick_plan(self):
-        """Per tick, None for tick 0 on U = q, else its step's (w, top_clear, narrow, last, carry).
-        The latest ticks keep their chain carries as junk while carry_junk wires last, the
-        earliest of them perhaps only its lowest ones."""
+        """Per tick, None for tick 0 on U = q, else its step's key (w, top_clear, narrow, last,
+        carry, kappa, high, fmode, init). The latest ticks keep their chain carries as junk while
+        carry_junk wires last, the earliest of them perhaps only its lowest ones. A tick with
+        HIGH_MIN or more bits above its joint threshold, and the clean wires to borrow, runs them
+        as a high word; the flag is made at the first such tick and kept up to the last."""
         T, W = self.iters, self.widths
+        joint, clean = tick_joint(self.mod.q, T), self._clean_counts()
         plan = []
         for i in range(T):
             w = W[i]
@@ -400,20 +524,35 @@ class DialogMultiplier:
             # E7: the next tick's U fits its width. E3: the last tick ends at (1, 0, 0).
             last = i == T - 1
             narrow = not last and W[i + 1] == w - 1
-            plan.append([w, top_clear, narrow, last, 0])
+            kappa = min(w, joint[i])
+            high = not last and kappa >= 1 and w - kappa >= self.HIGH_MIN and w - kappa + 2 <= clean[i]
+            plan.append([w, top_clear, narrow, last, 0, kappa, high, None, False])
+        flagged = [i for i, key in enumerate(plan) if key and key[6]]
+        if flagged:
+            first, final = flagged[0], flagged[-1]
+            plan[first][8] = True
+            for i in range(first, final + 1):
+                step = plan[i][5] - plan[i + 1][5] if i < final else None
+                assert step in (None, 0, 1) and clean[i] >= 1
+                plan[i][7] = "final" if i == final else "drop" if step else "same"
+        for i, key in enumerate(plan):
+            if key and not key[7]:
+                key[5] = None
         budget = self.carry_junk
         for key in reversed(plan):
             if key is None or key[3]:
                 continue
-            key[4] = min(budget, self._carry_junk(*key[:3]))
+            key[4] = min(budget, self._carry_junk(key[0], key[1], key[2], key[5] if key[6] else None))
             budget -= key[4]
             if not budget:
                 break
         return [None if key is None else tuple(key) for key in plan]
 
     def _junk_sizes(self):
-        """Junk wires each tick leaves for the inverse pass."""
-        return [0 if key is None or key[3] else 1 + key[4] for key in self._tick_plan()]
+        """Junk wires each tick leaves for the inverse pass: its carries, the flag it makes, the
+        wire its flag update leaves, and the retired offset."""
+        return [0 if key is None or key[3] else 1 + key[4] + (key[7] in ("same", "drop")) + key[8]
+                for key in self._tick_plan()]
 
     @property
     def junk_width(self):
@@ -429,7 +568,7 @@ class DialogMultiplier:
         V, available, G = pool[:n], pool[n:], []
         lend = U[n - self.u_lent:]
         E = junk[:1]
-        plan, sizes, used = self._tick_plan(), self._junk_sizes(), 1
+        plan, sizes, used, flag = self._tick_plan(), self._junk_sizes(), 1, []
         assert len(junk) == 1 + sum(sizes)
         for i in range(self.iters):
             w = self.widths[i]
@@ -438,9 +577,20 @@ class DialogMultiplier:
             if plan[i] is None:
                 self.C.apply(self._euclid_tick0(), [U, V, E, cell])
             else:
+                key = plan[i]
                 tick_junk = junk[used:used + sizes[i]]
                 used += sizes[i]
-                self.C.apply(self._euclid_step(*plan[i]), [U[:w], V, E, cell, tick_junk])
+                # The tick's junk: its carries, the flag it makes, its flag update's wire, g1's.
+                extra = tick_junk[key[4]:-1]
+                if key[8]:
+                    flag = [extra.pop(0)]
+                held = flag if key[7] else []
+                scratch = (available + junk[used:])[:self._step_scratch(key)]
+                assert len(scratch) == self._step_scratch(key)
+                self.C.apply(self._euclid_step(*key),
+                             [U[:w], V, E, cell, tick_junk[:key[4]] + tick_junk[-1:], held, extra, scratch])
+                if key[7]:
+                    flag = held
             G.extend(cell)
             next_width = self.widths[i + 1] if i + 1 < self.iters else self.pass_tail_width
             assert w - 1 <= next_width <= w
