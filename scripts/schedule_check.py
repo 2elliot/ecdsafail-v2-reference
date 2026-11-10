@@ -14,10 +14,11 @@ word, physical V fits w + 1 bits, and the last tick's top bit and extra wire are
 assumes.
 
 The lag blocks must be runs of c lazy ticks, none the lazy run's first or last, with fronts F, F - 1, ..
-and the last one marked; F must keep the holes clear of the cells a lazy tick reads, F - 2 e >= cut_e + 2,
+and the last one marked; F must keep the holes clear of the cells a lazy tick reads, F - 2 e >= cut_e + 2
+(cut_e + 1 at the block's last tick, whose holes are closed before the next tick reads),
 and above a U whose flag came on inside the block, F - (c - 1) - e >= kappa_(e-1) for e >= 1, and leave
 a cell at or above the front after the block. On the recurrence, with k the strips counted so far
-(two AND NOT flag): F - e - k >= cut + 2 at every tick; under the flag U is below 2^(F - e - k) when
+(two AND NOT flag): F - e - k >= cut + 2 at every tick but the last, cut + 1 there; under the flag U is below 2^(F - e - k) when
 k > 0 and V is below 2^kappa.
 
     python3 -I -B scripts/schedule_check.py     # toy primes, every x; secp256k1, sampled x
@@ -49,7 +50,7 @@ def plan_of(q, lag=None):
     """The plan, or with lag = c the plan that has a lag block of c ticks wherever one fits."""
     saved = DialogMultiplier.LAG_BLOCK, DialogMultiplier.LAG_MIN_SAVING
     if lag:
-        DialogMultiplier.LAG_BLOCK, DialogMultiplier.LAG_MIN_SAVING = lag, None
+        DialogMultiplier.LAG_BLOCK, DialogMultiplier.LAG_MIN_SAVING = (lag,), None
     try:
         return DialogMultiplier(Circuit(), Mod(q))._tick_plan()
     finally:
@@ -198,7 +199,7 @@ def lag_fields_ok(q, plan):
         if not all(lazy[0] < s < lazy[-1] and plan[s][9] and plan[s][5] == joint_threshold(q, s) for s in ticks):
             return False
         K = [joint_threshold(q, s) for s in ticks]
-        if any(front - 2 * e < K[e] + WINDOW + 2 for e in range(c)):
+        if any(front - 2 * e < K[e] + WINDOW + 2 - (e == c - 1) for e in range(c)):
             return False
         if any(front - (c - 1) - e < K[e - 1] for e in range(1, c)):
             return False
@@ -223,7 +224,7 @@ def lag_states_ok(q, plan, xs):
             if left:
                 kappa = key[5]
                 z = u >> kappa != 0
-                if front - k < kappa + WINDOW + 2 or (z and k and u >> (front - k)):
+                if front - k < kappa + WINDOW + 2 - (left == 1) or (z and k and u >> (front - k)):
                     return False
                 if z and (v - e) >> kappa:
                     return False
