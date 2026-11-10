@@ -54,6 +54,8 @@ class Circuit:
         self.calls = [] if hierarchical else None
         self.num_wires = 0
         self.free_stack = []
+        self._depth = 0
+        self._head = None
 
     # allocation
 
@@ -98,24 +100,58 @@ class Circuit:
 
     # blocks
 
-    def record(self, fn, regs):
-        """Run fn(*regs) without emitting it. Returns a Block and leaves the
-        circuit, the allocator, and regs exactly as they were."""
-        flat_in = flatten(regs)
-        start = len(self.prims)
-        first_call = len(self.calls) if self.calls is not None else 0
-        saved_stack, saved_hw = list(self.free_stack), self.num_wires
-        fn(*regs)
-        flat_out = flatten(regs)
+    def _take(self, start, first_call):
+        """Remove and return the ops and calls emitted since (start, first_call)."""
         ops = self.prims[start:]
         del self.prims[start:]
         calls = ()
         if self.calls is not None:
             calls = [call._replace(pos=call.pos - start // 4) for call in self.calls[first_call:]]
             del self.calls[first_call:]
+        return ops, calls
+
+    def _record(self, fn, regs):
+        flat_in = flatten(regs)
+        mark = len(self.prims), len(self.calls) if self.calls is not None else 0
+        saved_stack, saved_hw = list(self.free_stack), self.num_wires
+        outer, self._head = self._head, (mark, None)
+        self._depth += 1
+        fn(*regs)
+        self._depth -= 1
+        flat_out = flatten(regs)
+        (_, head), self._head = self._head, outer
+        tail = self._take(*mark)
         self.free_stack, self.num_wires = saved_stack, saved_hw
         unflatten_into(regs, flat_in)
-        return Block(ops, flat_in, flat_out, calls)
+        return flat_in, flat_out, head, tail
+
+    def record(self, fn, regs):
+        """Run fn(*regs) without emitting it. Returns a Block and leaves the
+        circuit, the allocator, and regs exactly as they were."""
+        flat_in, flat_out, head, tail = self._record(fn, regs)
+        assert head is None, "cut() needs record_cut"
+        return Block(tail[0], flat_in, flat_out, tail[1])
+
+    def cut(self):
+        """Inside record_cut's fn, outside any nested record: end the first block here."""
+        mark, head = self._head
+        assert self._depth == 1 and head is None
+        self._head = mark, self._take(*mark)
+
+    def record_cut(self, fn, regs):
+        """record for an fn that calls cut() once: returns the blocks before and after the cut, or
+        None when fn never cut. The first maps regs plus clean wires, one per other wire it
+        touches, onto themselves, so every wire live at the cut is in its layout, in flat_in's
+        order; the second takes that layout and ends on regs plus clean layout wires."""
+        flat_in, flat_out, head, tail = self._record(fn, regs)
+        if head is None:
+            return None
+        seen = Block(head[0], [], [], head[1]).wires
+        live = flat_in + sorted(seen - set(flat_in))
+        idle = [w for w in live if w not in set(flat_out)]
+        pad = len(live) - len(flat_out)
+        assert 0 <= pad <= len(idle)
+        return Block(head[0], live, live, head[1]), Block(tail[0], live, flat_out + idle[:pad], tail[1])
 
     def apply(self, block, regs, inverse=False, inline=False):
         """Replay block onto regs. inline emits its ops here even in hierarchical mode, so a block

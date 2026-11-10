@@ -2,12 +2,13 @@
 |c>|R>|0> -> |c>|R + c*A>|0> for every R in E(F_q) encoded as little-endian
 affine (x, y) with infinity = (0, 0)."""
 from .arith import Mod, _maj, cswap, load_const
-from .builder import Circuit
+from .builder import Circuit, flatten
 from .curve import Curve
 from .square import SquareFold
+from .zero_prefix import ZeroPrefix
 from .two_bit import TwoBitMod
 from .model import tick_bound, tick_joint, tick_widths
-from . import block0_code, tail_code, tape_block
+from . import block0_code, tail_code, tape_block, two_bit
 from .tape_block import FREE, TICKS
 
 
@@ -40,6 +41,8 @@ class DialogMultiplier:
         self._bezout_ticks = {}
         self.narrow = TwoBitMod(q)
         self.block = None
+        self._halves = None
+        self._cutting = False
         self.carry_junk = self.CARRY_JUNK
 
     @property
@@ -753,9 +756,12 @@ class DialogMultiplier:
                     if not first:
                         self.narrow._mark_b1(C, prev, flag[0])
                 after = first and not last and i == T - 2
-                C.apply(self._bezout_tick(first, last, pebble, after),
-                        [prev, G[2 * i:2 * i + 2], nxt, Yr, S, flag,
-                         [G[2 * T - 2]] if after else []])
+                if last and self._cutting:
+                    self._cell0_cut(prev, G[:2], Yr, S, flag, pebble)
+                else:
+                    C.apply(self._bezout_tick(first, last, pebble, after),
+                            [prev, G[2 * i:2 * i + 2], nxt, Yr, S, flag,
+                             [G[2 * T - 2]] if after else []])
             prev_block = (i + 1) // TICKS
             if (i + 1) % TICKS == 0 and i + 1 < T and prev_block < self.blocks:
                 C.free(self._encode(G, prev_block, swept))
@@ -819,10 +825,122 @@ class DialogMultiplier:
         C.free(Yr + pool[n:] + junk)
         Yr[:] = S
 
-    def apply(self, Xr, Yr, inverse=False):
-        if self.block is None:
-            self.block = self.C.record(self._body, [Xr, Yr])
-        self.C.apply(self.block, [Xr, Yr], inverse)
+    def _cell0_cut(self, prev, g, R, S, flag, pebble):
+        """Cell 0's tick, run in the body itself and cut at its zero test. That test is the tick's
+        one gt_into call, t ^= z*[S >> 1 > 0] against R's clean wires on the pass's final S; here
+        it emits nothing, and split()'s caller emits its own in the cut. two_bit.py stays as it is."""
+        C = self.C
+
+        def zero_test(C, a, b, t, ctrl=None):
+            assert a == S[:-1] and self._test is None
+            self._test = [S[-1:] + a, list(b), [t], [ctrl]]
+            C.cut()
+
+        saved, two_bit.gt_into = two_bit.gt_into, zero_test
+        try:
+            out = self.narrow.tick(C, prev or None, g, None, R, S, pebble=pebble, held=flag, cell0=True)
+        finally:
+            two_bit.gt_into = saved
+        assert out is None
+        flag[:] = []
+
+    def split(self, Xr, Yr):
+        """Whether the body splits into two blocks around cell 0's zero test, so that apply can
+        take a test. It does not on a pass with no cell 0 tick."""
+        if self._halves is None:
+            self._cutting, self._test = True, None
+            self._halves = self.C.record_cut(self._body, [Xr, Yr]) or ()
+            self._cutting = False
+            if self._halves:
+                # Layout wires the second block never touches and ends on: clean at the cut and
+                # idle after it.
+                before, after = self._halves
+                idle = set(after.flat_out[len(Xr) + len(Yr):]) - after.wires
+                self._spare = [w for w in before.flat_in if w in idle][:4]
+                if len(self._spare) < 4:
+                    self._halves = ()
+        return bool(self._halves)
+
+    def apply(self, Xr, Yr, inverse=False, test=None, flag=None):
+        """test(S, R, t, z, k, scratch), allowed once split() holds, is emitted between the two
+        blocks in place of cell 0's zero test. It must do t ^= z*[s >= 2] for the pass's final S
+        value s, which sits on S with bit 0 inverted, and leave S, the n - 1 clean wires R and the
+        three clean scratch wires as found. k is the test's own flag wire. It rides a layout place
+        the second block never touches, so it costs no wire: a forward pass hands it to the test
+        clean and returns it; an inverse pass takes it as flag, and the test must clear it."""
+        C = self.C
+        if test is None:
+            if self.block is None:
+                self.block = C.record(self._body, [Xr, Yr])
+            C.apply(self.block, [Xr, Yr], inverse)
+            return None
+        before, after = self._halves
+        width = len(Xr) + len(Yr)
+        if inverse:
+            pad = after.flat_out[width:]
+            rest, i = C.alloc(len(pad) - 1), pad.index(self._spare[0])
+            regs = [Xr, Yr, rest[:i] + [flag] + rest[i:]]
+        else:
+            regs = [Xr, Yr, C.alloc(len(before.flat_in) - width)]
+        C.apply(after if inverse else before, regs, inverse)
+        at = dict(zip(before.flat_in, flatten(regs)))
+        S, R, (t,), (z,), (k, *scratch) = ([at[w] for w in ws] for ws in self._test + [self._spare])
+        assert inverse is False or k == flag
+        test(S, R, t, z, k, scratch)
+        C.apply(before if inverse else after, regs, inverse)
+        if not inverse:
+            regs[2].remove(k)
+        C.free(regs[2])
+        return None if inverse else k
+
+
+def zero_test_less(C, S, R, t, z, k, scratch, value, generic):
+    """DialogMultiplier.apply's test with a compare: t ^= z*[s >= 2] and k ^= g*[s < value], for
+    1 <= value < 2^n. generic(w) XORs the flag g into w.
+
+    A CX fan writes s = r ^ y*value, y on the wire of value's top bit and r on the rest. On y = 1,
+    s ^ value = r; on y = 0 it is r ^ value, whose top bit r lacks. So r's zero-prefix chain, on
+    R's wires, gives both the zero test and the compare."""
+    n = len(S)
+    C.x(S[0])
+    top = value.bit_length() - 1
+    y = S[top]
+    fan = [S[j] for j in range(n) if j != top and value >> j & 1]
+    for w in fan:
+        C.cx(y, w)
+    prefix = ZeroPrefix(C, S, [j for j in reversed(range(n)) if j != top], R)
+    prefix.build()
+    u, w, g = scratch
+    # s < 2 when r is zero above bit 0 and, unless value is 1, y = 0.
+    small = prefix.above(0)
+    C.cx(z, t)
+    prefix.xor(small, u)
+    if top == 0:
+        C.ccx(z, u, t)
+    else:
+        C.x(y)
+        C.ccx(y, u, w)
+        C.ccx(z, w, t)
+        C.ccx(y, u, w)
+        C.x(y)
+    prefix.xor(small, u)
+    on, off = prefix.less(value, 0), prefix.less(value, value)
+
+    def less():
+        prefix.xor(off, w)
+        prefix.xor(on ^ off, u)
+        C.ccx(y, u, w)
+        prefix.xor(on ^ off, u)
+
+    less()
+    generic(g)
+    C.ccx(g, w, k)
+    generic(g)
+    less()
+    prefix.clear()
+    for w in reversed(fan):
+        C.cx(y, w)
+    C.x(S[0])
 
 
 def encode(P, n):
@@ -907,12 +1025,27 @@ class ControlledPointAdd:
                 C.cx(gen, f0)
                 C.cx(gen, c)
 
+        # Cell 0's zero test in M reads the final Y of each pass, top down. Emitted here with a
+        # compare, it clears the wrap flag of the first Y -= b and makes the last one's.
+        split = self.M.split(Xr, Yr)
+
+        def generic(w):
+            # gen, as recode's inverse makes it.
+            C.cx(f1, f0)
+            C.x(c)
+            C.ccx(c, f0, w)
+            C.x(c)
+            C.cx(f1, f0)
+
+        def test(value):
+            return (lambda *wires: zero_test_less(C, *wires, value, generic)) if split else None
+
         mod.cmodadd_const(C, gen, q - a, Xr, k=below)
-        mod.cmodadd_const(C, gen, q - b, Yr)
+        wrap = mod.cmodadd_const(C, gen, q - b, Yr, keep=split)
         C.ccx(f0, f1, Xr[0])
         recode()
         C.free([gen])
-        self.M.apply(Xr, Yr, inverse=True)
+        self.M.apply(Xr, Yr, inverse=True, test=test(q - b), flag=wrap)
         (gen,) = C.alloc(1)
         recode(inverse=True)
         if self._absorb is None:
@@ -920,12 +1053,12 @@ class ControlledPointAdd:
         self._mulsub(gen, Yr, Xr)
         recode()
         C.free([gen])
-        self.M.apply(Xr, Yr)
+        wrap = self.M.apply(Xr, Yr, test=test(b))
         (gen,) = C.alloc(1)
         recode(inverse=True)
         C.ccx(f0, f1, Xr[0])
         below = mod.creflect(C, gen, a, Xr, keep=True)
-        mod.cmodadd_const(C, gen, q - b, Yr)
+        mod.cmodadd_const(C, gen, q - b, Yr, k=wrap)
         return gen, below
 
     def _eq_flags(self, c, Xr, Yr, flags, points, below=None):
@@ -976,7 +1109,7 @@ class ControlledPointAdd:
             for src, dst in reversed(steps) if inverse else steps:
                 C.cx(src, dst)
 
-        undo, held = [], []
+        undo = []
 
         def flip(wires):
             for w in wires:
@@ -1019,76 +1152,41 @@ class ControlledPointAdd:
                 clear()
                 return None
             undo.append(clear)
-            held.append([t for _, _, t in made])
             return acc, False
 
         conjugate()
-        # zs[k] holds Z_k = [r is zero on its top k places], for k >= 2; Z_1 is ~r's top bit.
-        zero = chain([(Xr[j], True) for j in order])
-        zs = dict(enumerate(held[-1], 2)) if len(order) >= 2 else {}
+        prefix = ZeroPrefix(C, Xr, order)
+        prefix.build()
+        undo.append(prefix.clear)
+        zero = prefix.zero
         y0 = Yr[0]
 
         def less():
             k = below[0]
-            where = {j: i for i, j in enumerate(order)}
-
-            def tops(lo):
-                """[r's top set bit is above lo and pair_x has it], as a set of Z indices to XOR:
-                Z_i ^ Z_(i+1) says r's top set bit is order[i]."""
-                form = set()
-                for j in order:
-                    if j > lo and pair_x >> j & 1:
-                        form ^= {where[j], where[j] + 1}
-                return form
-
-            def lane(y1, y2):
-                # x ^ pair_x = r ^ d on this lane, and x < pair_x when pair_x has its top bit.
-                d = (0 if y1 else pair_x) ^ (single_x if y2 else 0)
-                if not d:
-                    return tops(-1)
-                top = d.bit_length() - 1
-                assert top in (p1, p2)
-                form = tops(top)
-                if pair_x >> top & 1:
-                    form ^= {sum(1 for j in order if j > top)}
-                return form
-
-            f00, f10, f01, f11 = lane(0, 0), lane(1, 0), lane(0, 1), lane(1, 1)
-
-            def xor_form(form, t):
-                for i in sorted(form):
-                    if i == 0:
-                        C.x(t)
-                    elif i == 1:
-                        C.cx(Xr[order[0]], t)
-                        C.x(t)
-                    else:
-                        C.cx(zs[i], t)
-
+            # On lane (y1, y2), x ^ pair_x = r ^ d with d = pair_x*(1 ^ y1) ^ single_x*y2.
+            f00, f10, f01, f11 = (prefix.less(pair_x, (0 if y1 else pair_x) ^ (single_x if y2 else 0))
+                                  for y1, y2 in ((0, 0), (1, 0), (0, 1), (1, 1)))
             (w, g) = C.alloc(2)
-            both = None
             terms = [(x1, f00 ^ f10), (x2, f00 ^ f01), (None, f00 ^ f10 ^ f01 ^ f11)]
 
             def value():
-                nonlocal both
-                xor_form(f00, w)
+                both = None
+                prefix.xor(f00, w)
                 for ctl, form in terms:
                     if not form:
                         continue
                     if ctl is None:
-                        if both is None:
-                            (both,) = C.alloc(1)
-                            C.ccx(x1, x2, both)
+                        (both,) = C.alloc(1)
+                        C.ccx(x1, x2, both)
                         ctl = both
                     (t,) = C.alloc(1)
-                    xor_form(form, t)
+                    prefix.xor(form, t)
                     C.ccx(ctl, t, w)
-                    xor_form(form, t)
+                    prefix.xor(form, t)
                     C.free([t])
                 if both is not None:
                     C.ccx(x1, x2, both)
                     C.free([both])
-                    both = None
 
             def generic():
                 fz = groups[0][0][0]

@@ -381,12 +381,13 @@ class Mod:
         C.free([l0, top, z])
         s[:] = s[-1:] + s[:-1]
 
-    def cmodadd_const(self, C, ctrl, value, b, k=None):
+    def cmodadd_const(self, C, ctrl, value, b, k=None, keep=False):
         """b = (b + ctrl*value) mod q on canonical b, with ctrl restored. k, when given, is a wire
-        that already holds ctrl*[q - value > b]; it is cleared and freed."""
+        that already holds ctrl*[q - value > b]; it is cleared and freed. With keep, the wire
+        holding ctrl*[b < value], for the new b, is returned instead of cleared."""
         value %= self.q
         if value == 0:
-            assert k is None
+            assert k is None and not keep
             return
         if k is None:
             (k,) = C.alloc(1)
@@ -395,6 +396,8 @@ class Mod:
         C.cx(k, ctrl)
         _add_selected_const(C, b, [ctrl, k], [value, value + (1 << self.n) - self.q])
         C.cx(k, ctrl)
+        if keep:
+            return k
         gt_const_into(C, value, b, k, ctrl)
         C.free([k])
 
