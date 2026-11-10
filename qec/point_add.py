@@ -676,7 +676,9 @@ class DialogMultiplier:
         m_in, m_out: the counter's width before and after. It holds rho = pi - 1, pi the ones of
             U and V from cut up, which number at most w - kappa - LAZY_WINDOW + 1.
         leave: the run's last tick.
-        One p is enough because the window stays all ones while p is pending. A borrow leaves
+        One p is enough because the window is all ones under a pending p at every subtract,
+        which comes after the tick's crossing bits have met p. This holds along a run from the
+        borrow that set p, not for an arbitrary p. A borrow leaves
         the window only when it is 0, and leaves it all ones over a low zone 2^kappa - d with
         d <= u + 2. Then v >= 3 * 2^kappa, so u < 2^kappa / 9 by the tick's potential bound, the
         low zone stays above u, and no subtract borrows from the window; each shift halves d,
