@@ -11,7 +11,7 @@ Q = lo + 2^n*hi, and Y - hi = D is at least 0. The rest folds 2^n to f:
 If V >= 2^n, dropping that bit subtracts q and f together and leaves V - 2^n <= f*f - 1 < q.
 Otherwise V - f < q, so subtracting f is enough. So no comparison with q is needed.
 """
-from .arith import _carries, _uncarry, add, add_const, gt_into
+from .arith import _carries, _carry_into, _uncarry, add, add_const, gt_into, load_const
 from .two_bit import Prefix
 
 
@@ -75,6 +75,24 @@ def _change(C, a, b, sign=1, cin=None, signed=False):
     C.free(pad)
 
 
+def _add_const_cin(C, reg, value, cin, cout):
+    """reg += value + cin mod 2^len(reg), cout ^= the carry out, cin a wire left as it was. The
+    carry chain costs what add_const's controlled increment does: one CCX a bit each way."""
+    cs = [cin]
+    for i in range(len(reg) - 1):
+        (t,) = C.alloc(1)
+        _carry_into(C, reg[i], value >> i & 1, cs[i], t)
+        cs.append(t)
+    _carry_into(C, reg[-1], value >> (len(reg) - 1) & 1, cs[-1], cout)
+    for i in reversed(range(len(reg))):
+        if value >> i & 1:
+            C.x(reg[i])
+        C.cx(cs[i], reg[i])
+        if i:
+            _carry_into(C, reg[i - 1], value >> (i - 1) & 1, cs[i - 1], cs[i])
+            C.free([cs[i]])
+
+
 def karatsuba_junk(w, thr):
     """Junk wires _karatsuba takes for width w with leaves of width at most thr."""
     if w <= thr:
@@ -84,7 +102,7 @@ def karatsuba_junk(w, thr):
     return karatsuba_junk(h, thr) + karatsuba_junk(w - h, thr) + 3 * ws + karatsuba_junk(ws, thr)
 
 
-def karatsuba_offset(w, thr, kind="R", exact=True):
+def karatsuba_offset(w, thr, kind="R", exact=True, cins=frozenset(), path=""):
     """The constant o that _karatsuba adds to its Q, or None where an inexact plan breaks a range.
 
     An exact node leaves o = 0. An inexact T node skips its 2^ws - 1 fixup, so its V carries
@@ -92,29 +110,34 @@ def karatsuba_offset(w, thr, kind="R", exact=True):
     exact, so delta = o(S) - o(A), and every o is o(A) + 2^(2h) o(B) + 2^h delta. A child's value
     plus its o must stay below 2^(2w), which holds while o < 3*2^(2w - 2), as R and T are at most
     2^(2w - 2), and o >= 0; V's true value lies in [0, 2^w), so V + delta fits w + 1 bits while |delta| <= 2^w,
-    signed when delta < 0."""
+    signed when delta < 0.
+
+    An R node whose path (A for an A child, S for an S child, from the top's "") is in cins takes a
+    carry in of 1 on Q[h:] += V, which adds 2^h to its o. T nodes take none and need exact children."""
     if w <= thr:
         return 0
     h = (w + 1) // 2
     m, ws = w - h, h + 1
     inner = exact or kind == "T"
-    oa = karatsuba_offset(h, thr, kind, inner)
-    os = karatsuba_offset(ws, thr, "R" if kind == "T" else "T", inner)
+    oa = karatsuba_offset(h, thr, kind, inner, cins, path + "A")
+    os = karatsuba_offset(ws, thr, "R" if kind == "T" else "T", inner, cins, path + "S")
     if oa is None or os is None:
         return None
     if not (0 <= oa < 3 << (2 * h - 2) and 0 <= os < 3 << (2 * ws - 2)):
         return None
-    if exact:
-        return 0
-    delta = (1 << ws) - 1 if kind == "T" else os - oa
+    if kind == "T":
+        if oa or os or path in cins:
+            return None
+        return 0 if exact else ((1 << ws) - 1) << h
+    delta = os - oa
     if abs(delta) > 1 << w:
         return None
-    return oa + (delta << h)
+    return oa + ((delta + (path in cins)) << h)
 
 
-def _karatsuba(C, Y, Q, J, thr, kind="R", K=None, exact=True):
+def _karatsuba(C, Y, Q, J, thr, kind="R", K=None, exact=True, cins=frozenset(), path=""):
     """Q = R(Y) = Y*(2^w - Y) (kind R) or T(Y) = Y*(2^w - 1 - Y) (kind T) on 2w clean wires, plus
-    karatsuba_offset(w, thr, kind, exact).
+    karatsuba_offset(w, thr, kind, exact, cins, path).
 
     Y = A + 2^h*B with h = ceil(w/2), m = w - h, and S = A + B on ws = h + 1 bits. Then
         R(Y) = R(A) + 2^(2h)*T(B) + 2^h*V,   V = T(S) - R(A) - T(B) - [h != m]*2^m*S
@@ -132,7 +155,7 @@ def _karatsuba(C, Y, Q, J, thr, kind="R", K=None, exact=True):
     m = w - h
     inner = exact or kind == "T"
     A, B = Y[:h], Y[h:]
-    _karatsuba(C, A, Q[:2 * h], J, thr, kind, K, inner)
+    _karatsuba(C, A, Q[:2 * h], J, thr, kind, K, inner, cins, path + "A")
     _karatsuba(C, B, Q[2 * h:], J, thr, "T", K)
     ws = h + 1
     S = [J.pop(0) for _ in range(ws)]
@@ -145,7 +168,7 @@ def _karatsuba(C, Y, Q, J, thr, kind="R", K=None, exact=True):
     if kind == "T":
         for x in S:
             C.x(x)
-    _karatsuba(C, S, W, J, thr, "R" if kind == "T" else "T", K, inner)
+    _karatsuba(C, S, W, J, thr, "R" if kind == "T" else "T", K, inner, cins, path + "S")
     if kind == "T":
         for x in S:
             C.x(x)
@@ -155,8 +178,15 @@ def _karatsuba(C, Y, Q, J, thr, kind="R", K=None, exact=True):
     if h != m:
         _change(C, S, V[m:], -1)
     if kind == "R":
-        delta = 0 if exact else karatsuba_offset(ws, thr, "T", False) - karatsuba_offset(h, thr, "R", False)
-        _change(C, V, Q[h:], signed=delta < 0)
+        delta = (karatsuba_offset(ws, thr, "T", inner, cins, path + "S")
+                 - karatsuba_offset(h, thr, "R", inner, cins, path + "A"))
+        one = C.alloc(1) if path in cins else [None]
+        if one[0] is not None:
+            C.x(one[0])
+        _change(C, V, Q[h:], cin=one[0], signed=delta < 0)
+        if one[0] is not None:
+            C.x(one[0])
+            C.free(one)
         return
     if not exact:
         _change(C, V, Q[h:])
@@ -206,6 +236,39 @@ class SquareFold:
         lies below 2^n, so that hi = floor(Q / 2^n) stays at most Y; else 0 from an exact one."""
         o = karatsuba_offset(self.n, self.thr, "R", False)
         return o if o is not None and 0 <= o < 1 << self.n else 0
+
+    def absorb(self, c):
+        """(cins, kappa) with compute(C, Y, J, kappa, cins) leaving J[:n] = (Y^2 - c) mod q, or None.
+
+        compute adds kappa to V before the canonical step, so J = (Y^2 - o + kappa) mod q for the
+        Karatsuba's o, and kappa = (o - c) mod q. That holds for kappa <= q - f*f, as V + kappa
+        then stays below 2^n + q. Below bit m, kappa = f*kE + klo: kE is added onto E, and klo
+        loaded onto the clean T, and
+        T stays below 2^m while f*f + (kappa mod 2^m) < 2^m and E + kE fits b bits; the bits from
+        m up ride the carry ladder. The A child's carry in moves kappa mod 2^m by about 2^m / 2,
+        for the half of the cs that miss that window with none."""
+        n, f, q = self.n, self.f, self.mod.q
+        o_nat = karatsuba_offset(n, self.thr, "R", False)
+        exact = self.offset != o_nat
+        for cins in (frozenset(), frozenset({"A"})):
+            o = karatsuba_offset(n, self.thr, "R", exact, cins)
+            if o is None or not 0 <= o < 1 << n:
+                continue
+            kappa = (o - c) % q
+            if self.split(kappa) is not None:
+                return cins, kappa
+        return None
+
+    def split(self, kappa):
+        """(kE, klo, khi) for compute's kappa, or None outside the window absorb states."""
+        f, m, n = self.f, self.m, self.n
+        x = kappa % (1 << m)
+        kE, klo, khi = x // f, x % f, kappa >> m
+        if kappa > self.mod.q - f * f or f * f + x >= 1 << m or f + kE >= 1 << self.b:
+            return None
+        if khi and n <= m:
+            return None
+        return kE, klo, khi
 
     @staticmethod
     def applies(q):
@@ -277,16 +340,18 @@ class SquareFold:
                 C.x(w)
             cin = None
 
-    def compute(self, C, Y, J):
-        """J clean on entry. On exit J[:n] holds (Y^2 - offset) mod q, canonical, for any n-bit Y.
-        The other wires of J hold values fixed by Y, for the reverse of this block."""
+    def compute(self, C, Y, J, kappa=None, cins=frozenset()):
+        """J clean on entry. On exit J[:n] holds (Y^2 - offset) mod q, canonical, for any n-bit Y, or
+        with kappa and cins from absorb(c), (Y^2 - c) mod q. The other wires of J hold values fixed by
+        Y, for the reverse of this block."""
         n, f, b, m = self.n, self.f, self.b, self.m
         lo, hi, E, T = J[:n], J[n:2 * n], J[2 * n:2 * n + b], J[2 * n + b:2 * n + b + m]
         t, c, k = J[2 * n + b + m:self.fixed_junk]
         junk = list(J[self.fixed_junk:self.junk - self.KEEP])
         keep = list(J[self.junk - self.KEEP:]) if self.KEEP else None
         o = karatsuba_offset(self.n, self.thr, "R", False)
-        _karatsuba(C, Y, lo + hi, junk, self.thr, "R", keep, self.offset != o)
+        kE, klo, khi = (0, 0, 0) if kappa is None else self.split(kappa)
+        _karatsuba(C, Y, lo + hi, junk, self.thr, "R", keep, self.offset != o, cins)
         assert not junk
         # hi = Y - hi = ~(hi + ~Y), and lo = ~lo.
         for w in Y:
@@ -302,11 +367,14 @@ class SquareFold:
         self._multiple(C, hi, lo + E, (1 << n) - 1, (1 << n) - 1, one)
         C.x(one)
         C.free([one])
-        self._multiple(C, E, T, f)
+        if kE:
+            add_const(C, E, kE)
+        load_const(C, T, klo)
+        self._multiple(C, E, T, f + kE, klo)
         high = lo[m:]
         add(C, T, lo[:m], cout=t)
         if high:
-            add_const(C, high, 1, t, c)
+            _add_const_cin(C, high, khi, t, c)
         else:
             C.cx(t, c)
         # With c = 0, lo >= f. Take f off the low bits, and the borrow off the rest.

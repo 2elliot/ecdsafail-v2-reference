@@ -687,11 +687,13 @@ class ControlledPointAdd:
         self.exceptions = [(None, A), (A, twoA), (neg(A), None), (neg(twoA), neg(A))]
         enc = [encode(e, self.n) for e, _ in self.exceptions]
         assert len(set(enc)) == 4, "addend order must exceed 3"
-        self._square_blk = None
         self.square_offset = SquareFold(self.mod).offset if SquareFold.applies(curve.q) else 0
+        # Where the fold can take 3a, the square's J is (Y^2 - 3a) mod q and the kernel adds no 3a.
+        # Its gates then depend on A, so the square is emitted inline, outside the definitions.
+        self._absorb = SquareFold(self.mod).absorb(3 * A[0] % curve.q) if SquareFold.applies(curve.q) else None
 
     def _mulsub(self, gen, Yr, Xr):
-        """X = X - gen * (Y^2 - square_offset) mod q, Y untouched."""
+        """X = X - gen * (Y^2 - square_offset) mod q, or X - gen * (Y^2 - 3a) with _absorb, Y untouched."""
         C, mod, n = self.C, self.mod, self.n
         if SquareFold.applies(mod.q):
             self._square_mulsub(gen, Yr, Xr)
@@ -717,15 +719,18 @@ class ControlledPointAdd:
 
     def _square_mulsub(self, gen, Yr, Xr):
         C, mod, n = self.C, self.mod, self.n
-        if self._square_blk is None:
-            fold = SquareFold(mod)
-            self._square_blk = C.record_shape(lambda y, j: fold.compute(C, y, j), [n, fold.junk])
-            self._modadd_blk = C.record_shape(lambda k, a, b: fold.modadd(C, a, b, k[0]), [1, n, n])
-            self._square_junk = fold.junk
-        J = C.alloc(self._square_junk)
-        C.apply(self._square_blk, [Yr, J])
+        fold = SquareFold(mod)
+        self._modadd_blk = C.record_shape(lambda k, a, b: fold.modadd(C, a, b, k[0]), [1, n, n])
+        J = C.alloc(fold.junk)
+        inline = self._absorb is not None
+        if inline:
+            cins, kappa = self._absorb
+            blk = C.record(lambda y, j: fold.compute(C, y, j, kappa, cins), [Yr, J])
+        else:
+            blk = C.record_shape(lambda y, j: fold.compute(C, y, j), [n, fold.junk])
+        C.apply(blk, [Yr, J], inline=inline)
         C.apply(self._modadd_blk, [[gen], J[:n], Xr], inverse=True)
-        C.apply(self._square_blk, [Yr, J], inverse=True)
+        C.apply(blk, [Yr, J], inverse=True, inline=inline)
         C.free(J)
 
     def _kernel(self, c, gen, Xr, Yr, f0, f1):
@@ -754,7 +759,8 @@ class ControlledPointAdd:
         self.M.apply(Xr, Yr, inverse=True)
         (gen,) = C.alloc(1)
         recode(inverse=True)
-        mod.cmodadd_const(C, gen, 3 * a - self.square_offset, Xr)
+        if self._absorb is None:
+            mod.cmodadd_const(C, gen, 3 * a - self.square_offset, Xr)
         self._mulsub(gen, Yr, Xr)
         recode()
         C.free([gen])
@@ -853,7 +859,7 @@ class ControlledPointAdd:
         Xr, Yr = C.alloc(n), C.alloc(n)
         declared = Xr + Yr
         self.M = DialogMultiplier(C, self.mod)
-        self._modadd_blk = self._square_blk = None
+        self._modadd_blk = None
 
         flags = C.alloc(4)
         self._eq_flags(c, Xr, Yr, flags, [e for e, _ in self.exceptions])

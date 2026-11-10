@@ -117,7 +117,9 @@ class Circuit:
         unflatten_into(regs, flat_in)
         return Block(ops, flat_in, flat_out, calls)
 
-    def apply(self, block, regs, inverse=False):
+    def apply(self, block, regs, inverse=False, inline=False):
+        """Replay block onto regs. inline emits its ops here even in hierarchical mode, so a block
+        whose ops depend on the addend stays out of the definitions; it must hold no calls."""
         src_live, dst_live = (block.flat_out, block.flat_in) if inverse else (block.flat_in, block.flat_out)
         cur = flatten(regs)
         assert len(cur) == len(src_live)
@@ -133,7 +135,8 @@ class Circuit:
         fresh = self.alloc(len(scratch))
         for w, v in zip(scratch, fresh):
             table[w] = v
-        if self.calls is None:
+        if self.calls is None or inline:
+            assert not block.calls
             self._replay(block, table, inverse)
         else:
             wires = [table[w] for w in sorted(block.wires)]
