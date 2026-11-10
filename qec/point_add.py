@@ -670,27 +670,6 @@ class DialogMultiplier:
         self.C.apply(self.block, [Xr, Yr], inverse)
 
 
-def eq_const_into(C, ctrl, bits, value, target):
-    """XOR equality into target, optionally controlled by ctrl."""
-    flips = [w for i, w in enumerate(bits) if not value >> i & 1]
-    for w in flips:
-        C.x(w)
-    chain = []
-    acc = ctrl if ctrl is not None else bits[0]
-    factors = bits[:-1] if ctrl is not None else bits[1:-1]
-    for w in factors:
-        (a,) = C.alloc(1)
-        C.ccx(acc, w, a)
-        chain.append((acc, w, a))
-        acc = a
-    C.ccx(acc, bits[-1], target)
-    for acc, w, a in reversed(chain):
-        C.ccx(acc, w, a)
-    C.free([a for _, _, a in chain])
-    for w in flips:
-        C.x(w)
-
-
 def encode(P, n):
     x, y = (0, 0) if P is None else P
     return x | y << n
@@ -795,52 +774,70 @@ class ControlledPointAdd:
         assert len(groups) == 3 and len(groups.get(0, [])) == 1, "0/a-pair/2A groups"
         pair_x = next(x for x, leaves in groups.items() if len(leaves) == 2)
         single_x = next(x for x in groups if x not in (0, pair_x))
-        shared_zero = [i for i in range(n) if not ((pair_x | single_x) >> i & 1)]
-        shared_one = [i for i in range(n) if (pair_x & single_x) >> i & 1]
-        differing = [i for i in range(n) if (pair_x ^ single_x) >> i & 1]
+        cls = {(p, s): [Xr[i] for i in range(n) if (pair_x >> i & 1, single_x >> i & 1) == (p, s)]
+               for p in (0, 1) for s in (0, 1)}
+        undo = []
 
-        def chain(acc, wires):
-            history = []
-            for wire in wires:
-                if acc is None:
-                    acc = wire
+        def flip(wires):
+            for w in wires:
+                C.x(w)
+
+        def chain(factors, target=None):
+            """AND of the factors, each a (wire, negated) literal or None for 1. With a target, XOR
+            it there and clear the chain; without, return it as a factor held until undo runs."""
+            factors = [f for f in factors if f is not None]
+            if target is None and len(factors) < 2:
+                return factors[0] if factors else None
+            flips = [w for w, neg in factors if neg]
+            wires = [w for w, _ in factors]
+            body = wires if target is None else wires[:-1]
+            made = []
+            flip(flips)
+            acc = body[0] if body else None
+            for w in body[1:]:
+                (t,) = C.alloc(1)
+                C.ccx(acc, w, t)
+                made.append((acc, w, t))
+                acc = t
+            if target is not None:
+                if not wires:
+                    C.x(target)
+                elif acc is None:
+                    C.cx(wires[-1], target)
                 else:
-                    (target,) = C.alloc(1)
-                    C.ccx(acc, wire, target)
-                    history.append((acc, wire, target))
-                    acc = target
-            return acc, history
+                    C.ccx(acc, wires[-1], target)
+            flip(flips)
 
-        def clear(history):
-            for left, right, target in reversed(history):
-                C.ccx(left, right, target)
-            C.free([target for _, _, target in history])
+            def clear():
+                flip(flips)
+                for a, b, t in reversed(made):
+                    C.ccx(a, b, t)
+                C.free([t for _, _, t in made])
+                flip(flips)
 
+            if target is not None:
+                clear()
+                return None
+            undo.append(clear)
+            return acc, False
+
+        # Each class of bits enters the three equalities with one literal per polarity it takes,
+        # so each literal product is built once and shared.
+        zero = chain([(w, True) for w in cls[0, 0]])
+        ones, nones = chain([(w, False) for w in cls[1, 1]]), chain([(w, True) for w in cls[1, 1]])
+        p1, n1 = chain([(w, False) for w in cls[1, 0]]), chain([(w, True) for w in cls[1, 0]])
+        p2, n2 = chain([(w, False) for w in cls[0, 1]]), chain([(w, True) for w in cls[0, 1]])
+        y0 = Yr[0]
         # The zero leaf is uncontrolled; c joins only on the nonzero branches.
-        for i in shared_zero:
-            C.x(Xr[i])
-        root, root_chain = chain(None, [Xr[i] for i in shared_zero])
-        zero_bits = [Xr[i] for i in shared_one + differing]
-        eq_const_into(C, root, zero_bits, 0, groups[0][0][0])
-        common, common_chain = chain(root, [c] + [Xr[i] for i in shared_one])
-        flips = [Xr[i] for i in differing if not (pair_x >> i & 1)]
-        for wire in flips:
-            C.x(wire)
-        leaf, leaf_chain = chain(common, [Xr[i] for i in differing])
+        chain([zero, nones, n1, n2], groups[0][0][0])
+        common = chain([zero, ones, (c, False)])
+        leaf = chain([common, p1, n2])
         for f, y in groups[pair_x]:
-            eq_const_into(C, leaf, Yr[:1], y & 1, f)
-        clear(leaf_chain)
-        for wire in flips:
-            C.x(wire)
+            chain([leaf, (y0, not y & 1)], f)
         f, y = groups[single_x][0]
-        bits = [Xr[i] for i in differing] + Yr[:1]
-        value = sum(((single_x >> i) & 1) << j for j, i in enumerate(differing))
-        value |= (y & 1) << len(differing)
-        eq_const_into(C, common, bits, value, f)
-        clear(common_chain)
-        clear(root_chain)
-        for i in shared_zero:
-            C.x(Xr[i])
+        chain([common, n1, p2, (y0, not y & 1)], f)
+        for step in reversed(undo):
+            step()
 
     def build(self, hierarchical=False):
         curve, A = self.curve, self.A
