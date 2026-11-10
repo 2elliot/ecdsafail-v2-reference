@@ -238,11 +238,12 @@ class DialogMultiplier:
             C.x(v)
         C.cx(zg, g1)
         if lazy:
+            # g1 ^ zg is now the top borrow E s, and p takes the rest of E: E ^ E s.
             s, p = lazy
             C.ccx(E[-1], s, g1)
-            C.x(s)
-            C.ccx(E[-1], s, p)
-            C.x(s)
+            C.cx(E[-1], p)
+            C.cx(g1, p)
+            C.cx(zg, p)
         else:
             C.cx(E[-1], g1)
         for i, v in reversed(list(enumerate(V))):
