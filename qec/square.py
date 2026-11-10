@@ -75,22 +75,41 @@ def _change(C, a, b, sign=1, cin=None, signed=False):
     C.free(pad)
 
 
-def _add_const_cin(C, reg, value, cin, cout):
-    """reg += value + cin mod 2^len(reg), cout ^= the carry out, cin a wire left as it was. The
-    carry chain costs what add_const's controlled increment does: one CCX a bit each way."""
+def _add_const_cin(C, reg, value, cin, cout=None, keep=()):
+    """reg += value + cin mod 2^len(reg), cout ^= the carry out if given, cin a wire left as it was.
+    The carry chain costs what add_const's controlled increment does: one CCX a bit each way. The
+    carries into bits 1 to len(keep) land on keep's clean wires and stay there as junk."""
     cs = [cin]
     for i in range(len(reg) - 1):
-        (t,) = C.alloc(1)
+        (t,) = keep[i:i + 1] or C.alloc(1)
         _carry_into(C, reg[i], value >> i & 1, cs[i], t)
         cs.append(t)
-    _carry_into(C, reg[-1], value >> (len(reg) - 1) & 1, cs[-1], cout)
+    if cout is not None:
+        _carry_into(C, reg[-1], value >> (len(reg) - 1) & 1, cs[-1], cout)
     for i in reversed(range(len(reg))):
         if value >> i & 1:
             C.x(reg[i])
         C.cx(cs[i], reg[i])
-        if i:
+        if i > len(keep):
             _carry_into(C, reg[i - 1], value >> (i - 1) & 1, cs[i - 1], cs[i])
             C.free([cs[i]])
+
+
+class _Lend:
+    """Lends clean wires to the allocator for a stretch of the build and takes the same wires
+    back. Every allocation in the stretch is returned clean before it ends, so the lent wires
+    are clean and free again, and the scratch the stretch needs comes out of them first."""
+
+    def __init__(self, C, wires):
+        self.C, self.wires = C, list(wires)
+
+    def __enter__(self):
+        self.C.free(self.wires)
+
+    def __exit__(self, *exc):
+        stack = self.C.free_stack
+        for w in self.wires:
+            stack.remove(w)
 
 
 def karatsuba_junk(w, thr):
@@ -218,6 +237,10 @@ class SquareFold:
     # Kept row carries: each junk wire saves one CCX each way. 867 fills the 4,096-wire cap at
     # n = 256, where the square's own peak is 3,229 wires and M's peak lies outside it.
     KEEP = 867
+    # The last fold ladder's low carries stay on junk wires through the modadd, one CCX saved each
+    # way per wire. The modadd's 41 scratch wires and these 181 fit in the 222 that ladder itself
+    # peaks at, n = 256, so they cost no row carries.
+    LADDER_KEEP = 181
     def __init__(self, mod):
         self.mod, self.n = mod, mod.n
         self.f = f = (1 << mod.n) - mod.q
@@ -227,7 +250,8 @@ class SquareFold:
         # Karatsuba leaves of at most n // 6 bits: 42 at n = 256, and 3 at the toy sizes so
         # the recursion runs there. KEEP junk wires hold row carries, one CCX saved per wire.
         self.thr = max(3, mod.n // 6)
-        self.fixed_junk = 2 * mod.n + self.b + self.m + 3
+        self.lkeep = min(self.LADDER_KEEP, max(0, mod.n - self.b - 1))
+        self.fixed_junk = 2 * mod.n + self.b + self.m + 3 + self.lkeep
         self.junk = self.fixed_junk + karatsuba_junk(mod.n, self.thr) + self.KEEP
 
     @property
@@ -346,11 +370,28 @@ class SquareFold:
         Y, for the reverse of this block."""
         n, f, b, m = self.n, self.f, self.b, self.m
         lo, hi, E, T = J[:n], J[n:2 * n], J[2 * n:2 * n + b], J[2 * n + b:2 * n + b + m]
-        t, c, k = J[2 * n + b + m:self.fixed_junk]
+        t, c, k = J[2 * n + b + m:2 * n + b + m + 3]
+        ladder = list(J[2 * n + b + m + 3:self.fixed_junk])
         junk = list(J[self.fixed_junk:self.junk - self.KEEP])
         keep = list(J[self.junk - self.KEEP:]) if self.KEEP else None
         o = karatsuba_offset(self.n, self.thr, "R", False)
         kE, klo, khi = (0, 0, 0) if kappa is None else self.split(kappa)
+        # The ladder's kept-carry wires are clean until the last ladder, so everything before it
+        # takes its scratch from them first.
+        with _Lend(C, ladder):
+            self._fold(C, Y, J, junk, keep, o, cins, kE, klo, khi)
+        high = lo[b:]
+        for w in high:
+            C.x(w)
+        _add_const_cin(C, high, 0, k, keep=ladder)
+        for w in high:
+            C.x(w)
+        C.x(c)
+
+    def _fold(self, C, Y, J, junk, keep, o, cins, kE, klo, khi):
+        n, f, b, m = self.n, self.f, self.b, self.m
+        lo, hi, E, T = J[:n], J[n:2 * n], J[2 * n:2 * n + b], J[2 * n + b:2 * n + b + m]
+        t, c, k = J[2 * n + b + m:2 * n + b + m + 3]
         _karatsuba(C, Y, lo + hi, junk, self.thr, "R", keep, self.offset != o, cins)
         assert not junk
         # hi = Y - hi = ~(hi + ~Y), and lo = ~lo.
@@ -381,10 +422,3 @@ class SquareFold:
         C.x(c)
         add_const(C, lo[:b], (1 << b) - f, c, k)
         C.cx(c, k)
-        high = lo[b:]
-        for w in high:
-            C.x(w)
-        add_const(C, high, 1, k)
-        for w in high:
-            C.x(w)
-        C.x(c)
