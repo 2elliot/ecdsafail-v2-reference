@@ -513,8 +513,9 @@ class DialogMultiplier:
                 elif fmode == "final":
                     C.ccx(g0, flag[0], zg)
                 if lazy and leave:
-                    # The next tick's V fits w - 1 bits, so the last bit above the window takes the
-                    # pending borrow and V's extra wire holds what is left of it: p AND NOT bit.
+                    # The next tick's V fits w - 1 bits. The last bit above the window takes the
+                    # pending borrow, and V's extra wire, which held what p left there, p AND NOT
+                    # bit, is cleared against it. The counter goes to 0 and p's wire stays as junk.
                     live = cnt[:m_out]
                     self._count(V[cut], live, scratch, down=True)
                     self._count(V[w], live, scratch, down=True)
@@ -668,7 +669,9 @@ class DialogMultiplier:
     def _lazy_plan(self, plan):
         """Mark the lazy ticks: the high ticks with more than LAZY_WINDOW bits above the threshold.
         There V's physical word is the true one plus p * 2^cut, cut = kappa + LAZY_WINDOW, p the
-        one pending borrow, so V has one more wire. Each gets (raw, m_in, m_out, leave):
+        one pending borrow, so V has one more wire. A raw tick finds p one place lower, at
+        2^(cut - 1), and the count taken over V from cut - 1 up, until its first crossing puts both
+        right. Each gets (raw, m_in, m_out, leave):
         raw: the tick before kept its threshold, so the bit it brought to cut - 1 has not met p.
         m_in, m_out: the counter's width before and after. It holds rho = pi - 1, pi the ones of
             U and V from cut up, which number at most w - kappa - LAZY_WINDOW + 1.
@@ -680,7 +683,8 @@ class DialogMultiplier:
         each subtract takes it to (d + u) / 2, and a bit that comes to the window's top under p
         is a 1 or clears p. The run starts where the word first has LAZY_WINDOW + 1 bits, after
         a drop at the same width, so the one bit above the window is new and V's is 0. It ends
-        at that length before a narrower tick with the same threshold; the plan is left alone
+        at that length before a narrower tick with the same threshold, where the last tick clears
+        the counter and V's extra wire and leaves p's wire as junk; the plan is left alone
         otherwise."""
         R, W = self.LAZY_WINDOW, self.widths
         lazy = [i for i, key in enumerate(plan) if key and key[6] and key[0] - key[5] > R]
