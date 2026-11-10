@@ -461,7 +461,8 @@ class DialogMultiplier:
                             C.cx(spare, r)
                 if w >= 2:
                     C.ccx(b, offset, V[1])
-                for i in range(1, w if lazy else w - 2 if top_clear else w - 1):
+                # A lazy V is below 2^(w + 1), or 2^w with top_clear: one more bit than the true one.
+                for i in range(1, w - 2 + bool(lazy) if top_clear else w - 1 + bool(lazy)):
                     cswap(C, b, [V[i]], [V[i + 1]])
                 if lazy:
                     # The second strip brought one more bit to the window's top, and the pending
