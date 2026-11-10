@@ -210,8 +210,17 @@ WIDE_ADD = 7
 # The add's blocks ramp from 1 up to WIDE_ADD at both ends, each size this many times.
 WIDE_ADD_RAMP = 2
 WIDE_ADD_COPIES = 16
-# Run the add's two CX waves through U as log-depth networks.
+# The add's backward sweep in its own blocks, (top, ramp) as above (None = the forward sweep's).
+# Its chain costs 11 ticks a block against the forward chain's 7, so its blocks are larger.
+WIDE_ADD_BACK = (10, 1)
+# Run the add's first CX wave through U as a log-depth network, and fan p into the word through
+# copies. The forward sweep's blocks then start together instead of one bit a tick.
 WIDE_WAVE = False
+# Hand out the add's copies of J by when each comes free, not in turn.
+COPY_IDLE = True
+# The second wave too. Left serial, it follows the backward sweep down the word, and the rotation
+# starts on the middle bits meanwhile; as a network it waits for the sweep's last bit.
+WIDE_WAVE_BACK = False
 # The tick's P and M as wide.PrefixTree in blocks of this many bits (0 = PrefixR and Prefix). With
 # WIDE_P the first chain's carriers are clean wires, not borrowed H wires.
 WIDE_P = 4
@@ -460,14 +469,16 @@ def _ramp_sizes(m, top, rep):
     products take time in proportion to its size before the chain can cross it, and its fixes take
     as long after, so a block near either end holds the sweep up unless it is short. A width too
     small for both ramps keeps as much of each as fits; what is left over is one middle block."""
-    ramp = [1] + [k for k in range(2, top) for _ in range(rep)]
-    low, high, left, i = [], [], m, 0
-    while i < len(ramp) and left >= 2 * ramp[i]:
-        low.append(ramp[i])
-        high.append(ramp[i])
-        left -= 2 * ramp[i]
-        i += 1
-    mid = [top] * (left // top) if i == len(ramp) else []
+    lo_rep, hi_rep = rep if isinstance(rep, tuple) else (rep, rep)
+    ramps = [[1] + [k for k in range(2, top) for _ in range(r)] for r in (lo_rep, hi_rep)]
+    ends, left = ([], []), m
+    for i in range(max(map(len, ramps))):
+        for end, ramp in zip(ends, ramps):
+            if i < len(ramp) and len(end) == i and left >= ramp[i] + top:
+                end.append(ramp[i])
+                left -= ramp[i]
+    low, high = ends
+    mid = [top] * (left // top)
     left -= sum(mid)
     out = low + mid[:len(mid) // 2] + ([left] if left else []) + mid[len(mid) // 2:] + high[::-1]
     assert sum(out) == m and all(r >= 1 for r in out)
@@ -524,7 +535,19 @@ def add_or_shift_la(C, J, a, word, n, k2f=None, k2b=None, ntemps=5, ncopies=6, f
     tree = _la_fan(C, J, K)
     ki = [0]
 
-    def copy():
+    def copy(*others):
+        """A copy of J for a gate on `others`: the copy that comes free last among those free by
+        the time the others are, else the one free first; without the tick model, in turn. In turn,
+        a bit whose gate is ready waits for the copy's last bit, which may sit deep in a large
+        block."""
+        if idle is not None and COPY_IDLE:
+            r = idle.ready()
+            t = max((r.get(w, 0) for w in others), default=0)
+            fit = [g for g in K if r.get(g, 0) <= t]
+            return max(fit, key=lambda g: r.get(g, 0)) if fit else min(K, key=lambda g: r.get(g, 0))
+        return turn()
+
+    def turn():
         w = K[ki[0] % len(K)]
         ki[0] += 1
         return w
@@ -555,12 +578,15 @@ def add_or_shift_la(C, J, a, word, n, k2f=None, k2b=None, ntemps=5, ncopies=6, f
                 T.append(temps.take())
                 C.ccx(T[i - 1], V[s + i], T[i])
             C.ccx(U[s], T[r - 1], U[s + r])             # the chain step
+            # Every fix before any product is cleared: a fix and the next clear both hold T[i - 1],
+            # and taking turns would make the fixes wait for the clears.
+            for i in reversed(range(1, r)):
+                C.ccx(U[s], T[i - 1], U[s + i])         # fix the inner bits, top down
             for i in reversed(range(1, r)):
                 C.ccx(T[i - 1], V[s + i], T[i])
                 temps.give(T[i])
-                C.ccx(U[s], T[i - 1], U[s + i])         # fix the inner bits, top down
         for j in range(s, s + r):
-            g = copy()
+            g = copy(U[j], V[j])
             C.cx(g, V[j])
             C.ccx(U[j], g, V[j])                        # W_j: V[j] ^= ~J & ~f_j
     for g in K:
@@ -589,24 +615,27 @@ def add_or_shift_la(C, J, a, word, n, k2f=None, k2b=None, ntemps=5, ncopies=6, f
         if r == 1:
             C.ccx(U[s], V[s], U[s + 1])
         else:
+            # The products as one chain, then the unfixes, then the chain step: an unfix between
+            # two products would hold the lower one. The carries unwind before the products clear,
+            # since the next block down waits for the carries only.
             T = [V[s]]
             for i in range(1, r):
                 T.append(temps.take())
                 C.ccx(T[i - 1], V[s + i], T[i])
-                if i + 1 < r:
-                    C.ccx(U[s], T[i], U[s + i + 1])
+            for i in range(1, r - 1):
+                C.ccx(U[s], T[i], U[s + i + 1])
             C.ccx(U[s], T[r - 1], U[s + r])
+            for i in reversed(range(1, r)):
+                C.ccx(U[s + i], V[s + i], U[s + i + 1])
             for i in reversed(range(1, r)):
                 C.ccx(T[i - 1], V[s + i], T[i])
                 temps.give(T[i])
-            for i in reversed(range(1, r)):
-                C.ccx(U[s + i], V[s + i], U[s + i + 1])
 
-    if WIDE_WAVE:
+    if WIDE_WAVE and WIDE_WAVE_BACK:
         _emit(C, reversed(wave.ops))
         for j in reversed(range(m)):
             C.cx(U[j + 1], V[j])
-            C.cx(copy(), V[j])                          # V ^= ~J through J's copies, which hold J
+            C.cx(copy(V[j]), V[j])                      # V ^= ~J through J's copies, which hold J
             C.x(V[j])
     else:
         for j in reversed(range(m)):
@@ -621,9 +650,9 @@ def add_or_shift_la(C, J, a, word, n, k2f=None, k2b=None, ntemps=5, ncopies=6, f
 
     for i in reversed(range(n)):
         if i < (n + 1) // 2:
-            cswap(copy(), word[i], word[n - i])
+            cswap(turn(), word[i], word[n - i])
         if i < n // 2:
-            cswap(copy(), word[i + 1], word[n - i])
+            cswap(turn(), word[i + 1], word[n - i])
 
     C.x(J)
     for s_, t_ in reversed(tree):
@@ -1092,9 +1121,10 @@ class TwoBitMod(Mod):
             return add_or_shift_cdkm(C, J, a, word, self.n)
         if WIDE_ADD and self.n > 3:
             sizes = _ramp_sizes(self.n - 1, WIDE_ADD, WIDE_ADD_RAMP)
-            temps = sum(r - 1 for r in sizes)
+            back = _ramp_sizes(self.n - 1, *WIDE_ADD_BACK) if WIDE_ADD_BACK else sizes
+            temps = max(sum(r - 1 for r in sizes), sum(r - 1 for r in back))
             return add_or_shift_la(C, J, a, word, self.n, ntemps=max(temps, 1), ncopies=WIDE_ADD_COPIES,
-                                   fsizes=sizes, bsizes=sizes)
+                                   fsizes=sizes, bsizes=back)
         if LOOKAHEAD_ADD and self.n > 3:
             fsizes = _la_wide(self.n - 1, *LA_F_WIDE) if LA_F_WIDE else None
             bsizes = _la_wide(self.n - 1, *LA_B_WIDE) if LA_B_WIDE else None
