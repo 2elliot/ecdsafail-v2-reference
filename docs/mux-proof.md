@@ -188,6 +188,21 @@ the existing tick bound, including the proved 384 bound at secp256k1, and reads
 only the terminal cell's g0, so the tail b lend is unaffected. The inverse
 uses the same XOR on the image of this boundary. Fallback steps are unchanged.
 
+**S15a. Cell 0 without the add.**
+The pass ends with R = 0 (S3's recurrence), and cell 0 is A1, J or B1.
+So a J or B1 lane enters cell 0 with R = 0, and a subtract lane's tick result is 0: 2T + R ≡ 0 mod q, or 2H − R ≡ 0 mod q on a held lane.
+Its output is then (0, R), and R is a function of S alone, so `_last_tick` adds nothing:
+
+- **Plain subtract.** R = −2T mod q. With V = 2T, k = ⌊V/q⌋ ≤ 1 and r = V − kq, the second chain adds (k + 1)f − 1, which is f ⊕ 1 or 2f ⊕ 3. V + kf = r + e2ⁿ, so the sum is r + f − 1 + e2ⁿ with r + f − 1 < 2ⁿ: it overflows exactly when e is set, as S6's does, and its complement is q − r. That is R when r ≥ 1.
+- **Held subtract.** R = 2H mod q, and 2H < 5q. The stored word is H − R₀, so `ccx(p, R₀, word[0])` restores H, and S6 reduces 2H with k ≤ 4.
+- **J and B1.** 4T and 2T, as before, with the shift done by n controlled moves.
+
+No lane has a bit 0, so `l0` is a zero wire and wire k0 becomes S₀.
+`R ^= g0·S` then clears R in place of the swap.
+The one lane this misses is T = R = 0 on a plain subtract, where r = 0 and S = q: there the kill leaves R = q, `S ^= R` clears S, and R's top bit is a flag, moved to wire k1 by two CCX.
+One compare [S >> 1 > R >> 1] with R = 0 clears both things left: on a held lane k₂ = [k = 4] = [S ≥ 2] under z, because k ∈ {0, 4} has S ≡ 0 mod 4; on a plain lane the flag is [S = 0] = ¬S₀ · ¬[S ≥ 2].
+On a held lane 2H = S + kq and H's bit 0 is S's, so k ≡ f(S − 2S₀) mod 4, which gives k₁ = S₁ ⊕ (1 ⊕ f₁)S₀.
+
 **S16a. The tick after the terminal cell.**
 That tick has no held lane and enters with S = τR, where τ is the terminal cell's g0, because S16's XOR is the only gate before it.
 On a subtract lane V = (2τ + 1)R, so k ≤ 2, and an even k is 2 only when τ = 1 and 3R ≥ 2q.

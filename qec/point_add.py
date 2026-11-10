@@ -602,7 +602,7 @@ class DialogMultiplier:
                     flag = C.alloc(3)
                     if not first:
                         self.narrow._mark_b1(C, prev, flag[0])
-                after = first and i == T - 2
+                after = first and not last and i == T - 2
                 C.apply(self._bezout_tick(first, last, pebble, after),
                         [prev, G[2 * i:2 * i + 2], nxt, Yr, S, flag,
                          [G[2 * T - 2]] if after else []])

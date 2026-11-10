@@ -430,6 +430,163 @@ class TwoBitMod(Mod):
         C.free([cin, D])
         return hn, t
 
+    def _last_tick(self, C, prev, g, a, s, held):
+        """Cell 0's tick, where g0 implies b. The pass ends with R = 0, so on entry a J or B1 lane
+        has R = 0 and a subtract lane has 2T + R = 0 mod q, or 2H - R = 0 mod q when held. The
+        result on a subtract lane is then R itself, made from S alone with no add:
+
+            plain:  S = -2T mod q = ~(V + (k + 1)f - 1) for V = 2T, k = floor(V / q)
+            held:   S = 2H mod q
+            J:      S = 4T mod q        B1:  S = 2T mod q
+
+        after which R ^= g0*S clears R in place of the swap. V + kf = r + e*2^n for r = V mod q,
+        so the plain lane's sum overflows exactly when e is set, as the other lanes' does, and
+        its complement is q - r. That is R, except on the lane T = R = 0, where it is q."""
+        n, f, w = self.n, self.f, self.window
+        g0, b = g
+        p, spill, high = held
+        if prev is None:
+            C.free([p])
+            p = None
+        word = s + [spill, high]
+        C.cx(g0, b)
+        for i in reversed(range(n)):
+            cswap(C, b, [word[i]], [word[i + 1]])
+        if p is not None:
+            # A held word is H - R0, with bit 0 clear.
+            C.ccx(p, a[0], word[0])
+        (l0,) = C.alloc(1)
+        low = [l0] + word[:n - 1]
+        L, H = low[:w], low[w:]
+        k0, k1, k2 = word[n - 1:n + 2]
+        (one,) = C.alloc(1)
+        C.x(one)
+        ra, rb = self.run
+        P, M = Prefix(C, H), Prefix(C, L[ra:rb])
+        spare = H[:] if len(H) > 1 else []
+
+        def alloc():
+            (c,) = C.alloc(1)
+            return c
+
+        def take():
+            if not spare:
+                return alloc()
+            c = spare.pop()
+            C.x(c)
+            return c
+
+        def drop(c):
+            if c in H:
+                C.x(c)
+                spare.append(c)
+            else:
+                C.free([c])
+
+        def plain():
+            """Toggle the g0 wire between g0 and [plain subtract lane] = g0 ^ p."""
+            if p is not None:
+                C.cx(p, g0)
+
+        (three,) = C.alloc(1)
+        C.ccx(k0, k1, three)
+        selectors = [one, k0, k1, three]
+        masks = [f, f ^ 2 * f, f ^ 3 * f, self.corner ^ 4 * f]
+        chain = self._chain_up(C, L, selectors, masks, M, {}, take)
+        (e,) = C.alloc(1)
+        if H:
+            C.ccx(P.top, chain[w], e)
+        else:
+            C.cx(chain[w], e)
+        self._chain_down(C, L, selectors, masks, M, {}, chain, drop, False)
+        C.x(one)
+        C.ccx(three, e, k2)
+        C.ccx(e, k1, three)
+        C.free([one])
+        one = three
+        C.ccx(k0, e, k1)
+        C.cx(e, k0)
+        # A plain lane has k <= 1 and adds (k + 1)f - 1, which is f ^ 1 or 2f ^ 3.
+        plain()
+        (ck0,) = C.alloc(1)
+        C.ccx(g0, k0, ck0)
+        selectors = [one, k0, k1, k2, g0, ck0]
+        masks = [self.corner, f, 2 * f, 4 * f, f ^ 1, 2 * f ^ 2]
+        perch = self._perches(selectors, masks)
+        chain = self._chain_up(C, L, selectors, masks, M, perch, alloc)
+        if H:
+            C.ccx(P.top, chain[w], e)
+        else:
+            C.cx(chain[w], e)
+        C.free([e])
+        P.write(chain[w])
+        self._chain_down(C, L, selectors, masks, M, perch, chain, drop, True, alloc)
+        C.ccx(g0, k0, ck0)
+        C.free([ck0])
+        for x in word[:n]:
+            C.cx(g0, x)
+        plain()
+
+        if p is not None:
+            cswap(C, p, [k1], [k2])
+        # one = k0*k1 becomes z = (p ^ wire k2)*~k0, which is [k is 0 or 4] on a held lane and 0
+        # elsewhere, as in tick with p for g0.
+        z = one
+        if p is not None:
+            C.cx(p, k1)
+        C.ccx(k0, k1, z)
+        if p is not None:
+            C.cx(p, k1)
+            C.cx(p, z)
+        C.cx(k2, z)
+
+        for r, x in zip(a, [k0] + word[:n - 1]):
+            C.ccx(g0, x, r)
+        # R is now 0, or q on the lane T = R = 0, where S is q too. R's top bit flags that lane.
+        q = self.q
+        for i, (r, x) in enumerate(zip(a, [k0] + word[:n - 1])):
+            C.cx(r, x)
+            if i < n - 1 and q >> i & 1:
+                C.cx(a[n - 1], r)
+        plain()
+        C.ccx(g0, a[n - 1], k1)
+        C.ccx(g0, k1, a[n - 1])
+        # Wire k1 holds the flag on a plain lane and k's bit 2 on a held lane. With R = 0,
+        # [S >> 1 > R >> 1] is [S >= 2]: it clears bit 2 under z, and the flag is
+        # [S is 0] = ~S0 * ~[S >= 2] on a plain lane.
+        (zc,) = C.alloc(1)
+        C.x(k0)
+        C.ccx(g0, k0, zc)
+        C.cx(zc, k1)
+        C.cx(zc, z)
+        gt_into(C, low[1:], a[1:], k1, ctrl=z)
+        C.cx(zc, z)
+        C.ccx(g0, k0, zc)
+        C.x(k0)
+        C.free([zc])
+        plain()
+        if p is not None:
+            C.cx(k2, p)
+            C.x(k0)
+            C.ccx(p, k0, z)
+            C.x(k0)
+            C.cx(k2, p)
+            # 2H = S + kq and H's bit 0 is S's, so k = f*(S - 2*S0) mod 4.
+            if not f >> 1 & 1:
+                C.cx(k0, low[1])
+            C.ccx(p, low[1], k2)
+            if not f >> 1 & 1:
+                C.cx(k0, low[1])
+        C.free([z])
+        self._drop_after_b1(C, prev, p)
+        C.ccx(b, low[1], k1)
+        if f >> 1 & 1:
+            C.ccx(b, k0, k1)
+        C.cx(g0, b)
+        C.free([l0, spill, high])
+        s[:] = s[-1:] + s[:-1]
+        return None
+
     def tick(self, C, prev, g, nxt, a, s, pebble=False, held=None, cell0=False, tau=None):
         """One tick of a swept tape. prev is the cell before, or None on the first tick.
         nxt is the next cell's g0 wire, or None on the last tick, whose B1 reduces normally.
@@ -438,11 +595,13 @@ class TwoBitMod(Mod):
         lane, which become word[n] and word[n + 1], and 0 elsewhere. All three are 0 when prev is
         None.
         cell0 says this is cell 0, where g0 implies b (Euclid's tick 0 runs on U = q > x, so its
-        subtract always swaps): there sw is g0 itself and J is b ^ g0.
+        subtract always swaps). It has its own tick, _last_tick.
         tau, when given, is a wire with S = tau*R on entry and no held lane: the tick after the
         pass's terminal cell, with tau that cell's g0.
         Returns the three wires to hand to the next tick, or None when nxt is None.
         sw and [prev is B1] each stay on one wire for the whole tick."""
+        if cell0:
+            return self._last_tick(C, prev, g, a, s, held)
         n, f, w = self.n, self.f, self.window
         g0, b = g
         p, spill, high = held
@@ -453,11 +612,7 @@ class TwoBitMod(Mod):
         if tau is not None:
             (rtop,) = C.alloc(1)
             C.cx(s[n - 1], rtop)
-        if cell0:
-            sw = g0
-            C.cx(g0, b)
-        else:
-            sw = self._begin(C, g0, b)
+        sw = self._begin(C, g0, b)
         if p is not None:
             for x in word:
                 C.cx(p, x)
@@ -598,8 +753,6 @@ class TwoBitMod(Mod):
         C.free([l0, spill, high])
         s[:] = s[-1:] + s[:-1]
         cswap(C, sw, a, s)
-        if cell0:
-            return None
         if nxt is None:
             self._end(C, g0, b, sw)
             return None
