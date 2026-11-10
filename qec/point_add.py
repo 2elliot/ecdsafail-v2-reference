@@ -888,7 +888,8 @@ class ControlledPointAdd:
         C.apply(blk, [Yr, J], inverse=True, inline=inline)
         C.free(J)
 
-    def _kernel(self, c, gen, Xr, Yr, f0, f1):
+    def _kernel(self, c, gen, Xr, Yr, f0, f1, below):
+        """below holds gen*[x < a] and is cleared. Returns gen and a wire holding gen*[x3 <= a]."""
         C, mod, q = self.C, self.mod, self.curve.q
         a, b = self.A
 
@@ -906,7 +907,7 @@ class ControlledPointAdd:
                 C.cx(gen, f0)
                 C.cx(gen, c)
 
-        mod.cmodadd_const(C, gen, q - a, Xr)
+        mod.cmodadd_const(C, gen, q - a, Xr, k=below)
         mod.cmodadd_const(C, gen, q - b, Yr)
         C.ccx(f0, f1, Xr[0])
         recode()
@@ -923,11 +924,17 @@ class ControlledPointAdd:
         (gen,) = C.alloc(1)
         recode(inverse=True)
         C.ccx(f0, f1, Xr[0])
-        mod.creflect(C, gen, a, Xr)
+        below = mod.creflect(C, gen, a, Xr, keep=True)
         mod.cmodadd_const(C, gen, q - b, Yr)
-        return gen
+        return gen, below
 
-    def _eq_flags(self, c, Xr, Yr, flags, points):
+    def _eq_flags(self, c, Xr, Yr, flags, points, below=None):
+        """flags[i] ^= [the point is points[i]], c-controlled except on the x = 0 point.
+
+        below = (k, late) also does k ^= g*[x < pair_x], where g = c*~[x = 0] ^ (the other three
+        flags) is the generic lane's flag. Early (late false), the flags come in 0 and g reads them
+        once set. Late, they come in set and g reads them before they clear. g is 0 at x = pair_x
+        either way, so this is g*[x <= pair_x] too."""
         C, n = self.C, self.n
         groups = {}
         for f, p in zip(flags, points):
@@ -936,25 +943,40 @@ class ControlledPointAdd:
         assert len(groups) == 3 and len(groups.get(0, [])) == 1, "0/a-pair/2A groups"
         pair_x = next(x for x, leaves in groups.items() if len(leaves) == 2)
         single_x = next(x for x in groups if x not in (0, pair_x))
-        # A CX network sends pair_x to the unit word at bit i1 and single_x to the one at bit i2,
-        # and fixes 0. The three equalities then share one all-zero product over the other bits.
-        i1 = (pair_x & -pair_x).bit_length() - 1
-        fan1 = pair_x ^ 1 << i1
-        moved = single_x ^ (fan1 if single_x >> i1 & 1 else 0)
-        rest = moved & ~(1 << i1)
-        assert rest, "the pair and the single differ"
-        i2 = (rest & -rest).bit_length() - 1
-        fan2 = moved ^ 1 << i2
-        fans = [(Xr[i1], [Xr[j] for j in range(n) if fan1 >> j & 1]),
-                (Xr[i2], [Xr[j] for j in range(n) if fan2 >> j & 1])]
+        # A CX network writes x = r ^ y1*pair_x ^ y2*single_x, with y1 and y2 on the two pivot
+        # wires and r, zero on the pivots, on the rest. Then x is 0, pair_x or single_x exactly when
+        # r = 0 and (y1, y2) is (0, 0), (1, 0) or (0, 1), so the three equalities share r's all-zero
+        # product. The pivots are the top bits of pair_x, single_x and their XOR (two places), so
+        # that the top bit of x ^ pair_x is r's top bit or a pivot on every (y1, y2) lane.
+        p1 = pair_x.bit_length() - 1
+        p2 = single_x.bit_length() - 1
+        if p2 == p1:
+            p2 = (pair_x ^ single_x).bit_length() - 1
+        col = lambda v: (v >> p1 & 1) | (v >> p2 & 1) << 1
+        pick = None
+        for ops in ((), ((0, 1),), ((1, 0),)):
+            rows = [1, 2]
+            for src, dst in ops:
+                rows[dst] ^= rows[src]
+            for i1 in (0, 1):
+                # Wire i1 must read 1 on pair_x and 0 on single_x, and the other wire the reverse.
+                on = lambda i, v: (rows[i] & col(v)).bit_count() & 1
+                if (on(i1, pair_x), on(i1, single_x), on(1 - i1, pair_x), on(1 - i1, single_x)) == (1, 0, 0, 1):
+                    pick = pick or (ops, i1)
+        assert pick, "the pivot bits separate the pair and the single"
+        ops, i1 = pick
+        pivots = [Xr[p1], Xr[p2]]
+        x1, x2 = pivots[i1], pivots[1 - i1]
+        order = [j for j in reversed(range(n)) if j not in (p1, p2)]
 
         def conjugate(inverse=False):
-            for src, dsts in reversed(fans) if inverse else fans:
-                for d in dsts:
-                    C.cx(src, d)
+            steps = [(pivots[src], pivots[dst]) for src, dst in ops]
+            steps += [(x1, Xr[j]) for j in order if pair_x >> j & 1]
+            steps += [(x2, Xr[j]) for j in order if single_x >> j & 1]
+            for src, dst in reversed(steps) if inverse else steps:
+                C.cx(src, dst)
 
-        x1, x2 = Xr[i1], Xr[i2]
-        undo = []
+        undo, held = [], []
 
         def flip(wires):
             for w in wires:
@@ -997,11 +1019,94 @@ class ControlledPointAdd:
                 clear()
                 return None
             undo.append(clear)
+            held.append([t for _, _, t in made])
             return acc, False
 
         conjugate()
-        zero = chain([(Xr[i], True) for i in range(n) if i not in (i1, i2)])
+        # zs[k] holds Z_k = [r is zero on its top k places], for k >= 2; Z_1 is ~r's top bit.
+        zero = chain([(Xr[j], True) for j in order])
+        zs = dict(enumerate(held[-1], 2)) if len(order) >= 2 else {}
         y0 = Yr[0]
+
+        def less():
+            k = below[0]
+            where = {j: i for i, j in enumerate(order)}
+
+            def tops(lo):
+                """[r's top set bit is above lo and pair_x has it], as a set of Z indices to XOR:
+                Z_i ^ Z_(i+1) says r's top set bit is order[i]."""
+                form = set()
+                for j in order:
+                    if j > lo and pair_x >> j & 1:
+                        form ^= {where[j], where[j] + 1}
+                return form
+
+            def lane(y1, y2):
+                # x ^ pair_x = r ^ d on this lane, and x < pair_x when pair_x has its top bit.
+                d = (0 if y1 else pair_x) ^ (single_x if y2 else 0)
+                if not d:
+                    return tops(-1)
+                top = d.bit_length() - 1
+                assert top in (p1, p2)
+                form = tops(top)
+                if pair_x >> top & 1:
+                    form ^= {sum(1 for j in order if j > top)}
+                return form
+
+            f00, f10, f01, f11 = lane(0, 0), lane(1, 0), lane(0, 1), lane(1, 1)
+
+            def xor_form(form, t):
+                for i in sorted(form):
+                    if i == 0:
+                        C.x(t)
+                    elif i == 1:
+                        C.cx(Xr[order[0]], t)
+                        C.x(t)
+                    else:
+                        C.cx(zs[i], t)
+
+            (w, g) = C.alloc(2)
+            both = None
+            terms = [(x1, f00 ^ f10), (x2, f00 ^ f01), (None, f00 ^ f10 ^ f01 ^ f11)]
+
+            def value():
+                nonlocal both
+                xor_form(f00, w)
+                for ctl, form in terms:
+                    if not form:
+                        continue
+                    if ctl is None:
+                        if both is None:
+                            (both,) = C.alloc(1)
+                            C.ccx(x1, x2, both)
+                        ctl = both
+                    (t,) = C.alloc(1)
+                    xor_form(form, t)
+                    C.ccx(ctl, t, w)
+                    xor_form(form, t)
+                    C.free([t])
+                if both is not None:
+                    C.ccx(x1, x2, both)
+                    C.free([both])
+                    both = None
+
+            def generic():
+                fz = groups[0][0][0]
+                C.cx(c, g)
+                C.ccx(c, fz, g)
+                for f in flags:
+                    if f != fz:
+                        C.cx(f, g)
+
+            value()
+            generic()
+            C.ccx(g, w, k)
+            generic()
+            value()
+            C.free([w, g])
+
+        if below and below[1]:
+            less()
         # The zero leaf is uncontrolled; c joins only on the nonzero branches.
         chain([zero, (x1, True), (x2, True)], groups[0][0][0])
         common = chain([zero, (c, False)])
@@ -1010,6 +1115,8 @@ class ControlledPointAdd:
             chain([leaf, (y0, not y & 1)], f)
         f, y = groups[single_x][0]
         chain([common, (x1, True), (x2, False), (y0, not y & 1)], f)
+        if below and not below[1]:
+            less()
         for step in reversed(undo):
             step()
         conjugate(inverse=True)
@@ -1030,7 +1137,10 @@ class ControlledPointAdd:
         self._modadd_blk = None
 
         flags = C.alloc(4)
-        self._eq_flags(c, Xr, Yr, flags, [e for e, _ in self.exceptions])
+        # The flag blocks' zero chain also compares x with a: the first block makes the wrap flag
+        # of the kernel's X -= a, and the second clears the reflect's.
+        (below,) = C.alloc(1)
+        self._eq_flags(c, Xr, Yr, flags, [e for e, _ in self.exceptions], below=(below, False))
         f0, f1, f2, gen = flags
         for f, (e_in, e_out) in zip(flags[1:], self.exceptions[1:]):
             load_const(C, Xr + Yr, encode(e_in, n) ^ encode(e_out, n), f)
@@ -1051,7 +1161,7 @@ class ControlledPointAdd:
         C.ccx(f0, f1, f2)
         C.free([f2])
 
-        gen = self._kernel(c, gen, Xr, Yr, f0, f1)
+        gen, below = self._kernel(c, gen, Xr, Yr, f0, f1, below)
 
         (f2,) = C.alloc(1)
         C.ccx(f0, f1, f2)
@@ -1061,8 +1171,8 @@ class ControlledPointAdd:
             C.cx(w, gen)
         C.ccx(c, f2, gen)
         flags = [f0, f1, f2, gen]
-        self._eq_flags(c, Xr, Yr, flags, [e for _, e in self.exceptions])
-        C.free(flags)
+        self._eq_flags(c, Xr, Yr, flags, [e for _, e in self.exceptions], below=(below, True))
+        C.free(flags + [below])
 
         _restore_layout(C, Xr + Yr, declared)
         self.layout = {"control": [c], "x": declared[:n], "y": declared[n:]}

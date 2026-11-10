@@ -381,13 +381,16 @@ class Mod:
         C.free([l0, top, z])
         s[:] = s[-1:] + s[:-1]
 
-    def cmodadd_const(self, C, ctrl, value, b):
-        """b = (b + ctrl*value) mod q on canonical b, with ctrl restored."""
+    def cmodadd_const(self, C, ctrl, value, b, k=None):
+        """b = (b + ctrl*value) mod q on canonical b, with ctrl restored. k, when given, is a wire
+        that already holds ctrl*[q - value > b]; it is cleared and freed."""
         value %= self.q
         if value == 0:
+            assert k is None
             return
-        (k,) = C.alloc(1)
-        gt_const_into(C, self.q - value, b, k, ctrl)
+        if k is None:
+            (k,) = C.alloc(1)
+            gt_const_into(C, self.q - value, b, k, ctrl)
         C.cx(ctrl, k)
         C.cx(k, ctrl)
         _add_selected_const(C, b, [ctrl, k], [value, value + (1 << self.n) - self.q])
@@ -395,8 +398,9 @@ class Mod:
         gt_const_into(C, value, b, k, ctrl)
         C.free([k])
 
-    def creflect(self, C, ctrl, a, b):
-        """b = (a - b) mod q when ctrl, valid on all canonical b."""
+    def creflect(self, C, ctrl, a, b, keep=False):
+        """b = (a - b) mod q when ctrl, valid on all canonical b. With keep, the wire holding
+        ctrl*[b <= a], for the new b, is returned instead of cleared."""
         a %= self.q
         (k,) = C.alloc(1)
         gt_const_into(C, a + 1, b, k, ctrl)
@@ -407,6 +411,8 @@ class Mod:
         _add_selected_const(C, b, [ctrl, k], [a + 1, (a + 1 + self.q) % (1 << self.n)])
         C.cx(k, ctrl)
         C.cx(ctrl, k)
+        if keep:
+            return k
         gt_const_into(C, a + 1, b, k, ctrl)
         C.free([k])
 
