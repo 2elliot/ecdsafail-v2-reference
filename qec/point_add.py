@@ -510,21 +510,24 @@ class DialogMultiplier:
             self._bezout_step = C.record_shape(step, [2, mod.n, mod.n])
         return self._bezout_step
 
-    def _bezout_tick(self, first, last, pebble=False):
-        if (first, last, pebble) not in self._bezout_ticks:
+    def _bezout_tick(self, first, last, pebble=False, after=False):
+        """after marks a first tick that follows the terminal cell, where S is 0 or R. It takes
+        that cell's g0 as a last argument."""
+        if (first, last, pebble, after) not in self._bezout_ticks:
             C, n = self.C, self.mod.n
 
-            def tick(prev, g, nxt, R, S, flag):
+            def tick(prev, g, nxt, R, S, flag, tau):
                 # flag comes in holding [previous cell is B1] and H's two top bits, or 0 on a
                 # first tick, which has no previous cell, and goes out holding this cell's, or
                 # empty after the last.
                 out = self.narrow.tick(C, prev or None, g, nxt[0] if nxt else None, R, S,
-                                       pebble=pebble, held=flag, cell0=last)
+                                       pebble=pebble, held=flag, cell0=last,
+                                       tau=tau[0] if after else None)
                 flag[:] = [] if out is None else out
 
-            sizes = [0 if first else 2, 2, 0 if last else 1, n, n, 3]
-            self._bezout_ticks[first, last, pebble] = C.record_shape(tick, sizes)
-        return self._bezout_ticks[first, last, pebble]
+            sizes = [0 if first else 2, 2, 0 if last else 1, n, n, 3, int(after)]
+            self._bezout_ticks[first, last, pebble, after] = C.record_shape(tick, sizes)
+        return self._bezout_ticks[first, last, pebble, after]
 
     def _b1_step(self, G, i, both):
         """Use the pass-wide mark while both cells are still raw."""
@@ -599,8 +602,10 @@ class DialogMultiplier:
                     flag = C.alloc(3)
                     if not first:
                         self.narrow._mark_b1(C, prev, flag[0])
-                C.apply(self._bezout_tick(first, last, pebble),
-                        [prev, G[2 * i:2 * i + 2], nxt, Yr, S, flag])
+                after = first and i == T - 2
+                C.apply(self._bezout_tick(first, last, pebble, after),
+                        [prev, G[2 * i:2 * i + 2], nxt, Yr, S, flag,
+                         [G[2 * T - 2]] if after else []])
             prev_block = (i + 1) // TICKS
             if (i + 1) % TICKS == 0 and i + 1 < T and prev_block < self.blocks:
                 C.free(self._encode(G, prev_block, swept))

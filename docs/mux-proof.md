@@ -188,6 +188,14 @@ the existing tick bound, including the proved 384 bound at secp256k1, and reads
 only the terminal cell's g0, so the tail b lend is unaffected. The inverse
 uses the same XOR on the image of this boundary. Fallback steps are unchanged.
 
+**S16a. The tick after the terminal cell.**
+That tick has no held lane and enters with S = τR, where τ is the terminal cell's g0, because S16's XOR is the only gate before it.
+On a subtract lane V = (2τ + 1)R, so k ≤ 2, and an even k is 2 only when τ = 1 and 3R ≥ 2q.
+Then R ≥ 2q/3 ≥ 2ⁿ⁻¹, because 4f < 2ⁿ gives q > 3 · 2ⁿ⁻², and k = 0 has R < q/3 < 2ⁿ⁻¹.
+So k₁ = z · (τR)'s top bit.
+The tick copies S's top wire before the add, writes k₁ with one CCX in place of S7's compare, and clears the copy with `ccx(τ, R's top, copy)` before the swap.
+On J and B1 lanes z = 0, as on every tick.
+
 ## The whole circuit
 
 **S17. Both directions.**

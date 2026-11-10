@@ -430,7 +430,7 @@ class TwoBitMod(Mod):
         C.free([cin, D])
         return hn, t
 
-    def tick(self, C, prev, g, nxt, a, s, pebble=False, held=None, cell0=False):
+    def tick(self, C, prev, g, nxt, a, s, pebble=False, held=None, cell0=False, tau=None):
         """One tick of a swept tape. prev is the cell before, or None on the first tick.
         nxt is the next cell's g0 wire, or None on the last tick, whose B1 reduces normally.
 
@@ -439,6 +439,8 @@ class TwoBitMod(Mod):
         None.
         cell0 says this is cell 0, where g0 implies b (Euclid's tick 0 runs on U = q > x, so its
         subtract always swaps): there sw is g0 itself and J is b ^ g0.
+        tau, when given, is a wire with S = tau*R on entry and no held lane: the tick after the
+        pass's terminal cell, with tau that cell's g0.
         Returns the three wires to hand to the next tick, or None when nxt is None.
         sw and [prev is B1] each stay on one wire for the whole tick."""
         n, f, w = self.n, self.f, self.window
@@ -448,6 +450,9 @@ class TwoBitMod(Mod):
             C.free([p])
             p = None
         word = s + [spill, high]
+        if tau is not None:
+            (rtop,) = C.alloc(1)
+            C.cx(s[n - 1], rtop)
         if cell0:
             sw = g0
             C.cx(g0, b)
@@ -558,7 +563,15 @@ class TwoBitMod(Mod):
         C.cx(g0, k1)
         C.cx(g0, z)
         C.cx(k2, z)
-        gt_into(C, a[1:], low[1:], k1, ctrl=z)
+        if tau is None:
+            gt_into(C, a[1:], low[1:], k1, ctrl=z)
+        else:
+            # V = (2*tau + 1)*R here, so an even k is 2 only when V = 3R >= 2q. Then R >= 2q/3,
+            # which is at least 2^(n - 1) because 4f < 2^n, and k = 0 has R < q/3 < 2^(n - 1): k's
+            # bit 1 is tau*R's top bit, copied from S before the add.
+            C.ccx(z, rtop, k1)
+            C.ccx(tau, a[n - 1], rtop)
+            C.free([rtop])
         mark_even(z)
         C.free([z])
         if p is not None:
