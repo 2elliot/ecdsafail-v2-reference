@@ -15,10 +15,10 @@ adds R and does no reduction, leaving H = 2T + R, and the subtract after it make
 Add and shift now have complementary controls, so one rolling XOR wire D, the sum of the x lines
 so far, lets one CCX carry both: a pair of neighbouring word bits takes D, or on J its own XOR.
 
-H's bit 0 is R's, so it is not stored. On a B1 its wire and the next cell's g0, which must be 1,
-hold H's two top bits between the ticks. The only other wire held across them is
-[this cell is B1], which the tick makes from its own sw with an X and two CX and the next tick
-reads as held, in place of computing it with a CCX.
+H's bit 0 is R's, so it is not stored. Three wires are held between ticks: [this cell is B1],
+which the tick makes from its own sw with an X and two CX and the next tick reads as held, in
+place of computing it with a CCX, and H's bits n and n + 1, which a B1 moves off the word onto two
+clean wires (0 on every other lane) and the next tick takes as its word's top two wires.
 """
 from functools import lru_cache
 import heapq
@@ -346,14 +346,6 @@ class TwoBitMod(Mod):
                 best = key, kept
         return best[1]
 
-    def _after_b1(self, C, prev):
-        """Fresh wire = [the previous cell is B1], or None on a pass's first tick."""
-        if prev is None:
-            return None
-        (p,) = C.alloc(1)
-        self._mark_b1(C, prev, p)
-        return p
-
     def _mark_b1(self, C, prev, p):
         for w in prev:
             C.x(w)
@@ -417,25 +409,20 @@ class TwoBitMod(Mod):
         """One tick of a swept tape. prev is the cell before, or None on the first tick.
         nxt is the next cell's g0 wire, or None on the last tick, whose B1 reduces normally.
 
-        held is the wire the tick before handed over, holding [prev is B1], or None to compute
-        it here. cell0 says this is cell 0, where g0 implies b (Euclid's tick 0 runs on U = q > x,
-        so its subtract always swaps): there sw is g0 itself and J is b ^ g0.
-        Returns the wire that holds [this cell is B1] for the next tick, or None when nxt is None.
+        held is what the tick before handed over: [prev is B1], then H's bits n and n + 1 on a held
+        lane, which become word[n] and word[n + 1], and 0 elsewhere. All three are 0 when prev is
+        None.
+        cell0 says this is cell 0, where g0 implies b (Euclid's tick 0 runs on U = q > x, so its
+        subtract always swaps): there sw is g0 itself and J is b ^ g0.
+        Returns the three wires to hand to the next tick, or None when nxt is None.
         sw and [prev is B1] each stay on one wire for the whole tick."""
         n, f, w = self.n, self.f, self.window
         g0, b = g
-        (spill, high) = C.alloc(2)
-        word = s + [spill, high]
+        p, spill, high = held
         if prev is None:
+            C.free([p])
             p = None
-        elif held is not None:
-            p = held
-        else:
-            p = self._after_b1(C, prev)
-        if p is not None:
-            cswap(C, p, [s[0]], [spill])
-            cswap(C, p, [g0], [high])
-            C.cx(p, g0)
+        word = s + [spill, high]
         if cell0:
             sw = g0
             C.cx(g0, b)
@@ -462,9 +449,12 @@ class TwoBitMod(Mod):
             C.cx(g0, one)
             C.cx(b, one)
             C.x(one)
-            cswap(C, one, [k0], [l0])
-            C.cx(one, nxt)
-            cswap(C, one, [k1], [nxt])
+            # H's bits n and n + 1 leave the word for the next tick on two clean wires.
+            hn, hb = C.alloc(2)
+            C.ccx(one, k0, hn)
+            C.cx(hn, k0)
+            C.ccx(one, k1, hb)
+            C.cx(hb, k1)
             C.x(one)
         ra, rb = self.run
         P, M = Prefix(C, H), Prefix(C, L[ra:rb])
@@ -565,12 +555,6 @@ class TwoBitMod(Mod):
         if f >> 1 & 1:
             C.ccx(b, k0, k1)
         C.cx(l0, k0)
-        if nxt is not None:
-            C.cx(g0, b)
-            C.x(b)
-            C.ccx(b, k0, l0)
-            C.x(b)
-            C.cx(g0, b)
         C.cx(sw, b)
         C.ccx(g0, a[0], l0)
         C.free([l0, spill, high])
@@ -585,4 +569,4 @@ class TwoBitMod(Mod):
         C.x(sw)
         C.cx(g0, sw)
         C.cx(b, sw)
-        return sw
+        return [sw, hn, hb]

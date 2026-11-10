@@ -437,14 +437,14 @@ class DialogMultiplier:
             C, n = self.C, self.mod.n
 
             def tick(prev, g, nxt, R, S, flag):
-                # flag comes in holding [previous cell is B1], or 0 on a first tick, which has no
-                # previous cell, and goes out holding [this cell is B1], or empty after the last.
+                # flag comes in holding [previous cell is B1] and H's two top bits, or 0 on a
+                # first tick, which has no previous cell, and goes out holding this cell's, or
+                # empty after the last.
                 out = self.narrow.tick(C, prev or None, g, nxt[0] if nxt else None, R, S,
-                                       pebble=pebble, held=None if first else flag[0],
-                                       cell0=last)
-                flag[:] = [] if out is None else [out]
+                                       pebble=pebble, held=flag, cell0=last)
+                flag[:] = [] if out is None else out
 
-            sizes = [0 if first else 2, 2, 0 if last else 1, n, n, 1]
+            sizes = [0 if first else 2, 2, 0 if last else 1, n, n, 3]
             self._bezout_ticks[first, last, pebble] = C.record_shape(tick, sizes)
         return self._bezout_ticks[first, last, pebble]
 
@@ -516,8 +516,9 @@ class DialogMultiplier:
                     C.ccx(G[2 * i], r, s)
             else:
                 if not flag:
-                    # The pass's first tick call: no tick before it handed a flag over.
-                    flag = C.alloc(1)
+                    # The pass's first tick call: no tick before it handed a flag over, and the
+                    # cell before, if any, is the terminal cell, never B1, so H's bits are 0.
+                    flag = C.alloc(3)
                     if not first:
                         self.narrow._mark_b1(C, prev, flag[0])
                 C.apply(self._bezout_tick(first, last, pebble),
