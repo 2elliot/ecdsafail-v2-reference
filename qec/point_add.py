@@ -20,8 +20,8 @@ class DialogMultiplier:
     RAW_TAPE = True
     # Chain carries the forward pass leaves as junk for the inverse pass. Each is held through the
     # Bezout pass and saves one CCX in each Euclid pass, so this is the one knob that trades wires
-    # for CCX; 2,401 puts the whole circuit at 4,095 wires at n = 256.
-    CARRY_JUNK = 2401
+    # for CCX; 2,399 puts the climb stack at 4,096 wires at n = 256.
+    CARRY_JUNK = 2399
 
     def __init__(self, C, mod):
         self.C, self.mod = C, mod
