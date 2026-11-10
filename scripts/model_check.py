@@ -69,6 +69,28 @@ def b1_swept(cells):
     return list(reversed(out))
 
 
+def _junk_value(m, q, x):
+    """The pass's junk register: per tick, a carry tick's chain carries c_2 .. c_chain of
+    U + NOT(V ^ E) on its width, then NOT add AND bit of the semantic tape."""
+    states = tick_pass(q, x, m.iters)[0]
+    cells = tick_tape(q, x, m.iters)[2]
+    bits = []
+    for key, (U, V, E), (add, bit) in zip(m._tick_plan(), states, cells):
+        if key is None or key[3]:
+            continue
+        w, top_clear, narrow, _, carry = key
+        if carry:
+            chain = w - 1 if w >= 2 and (top_clear or narrow) else w
+            nb = ~(V ^ E) & ((1 << w) - 1)
+            c = nb & 1
+            for i in range(1, chain):
+                a, b = U >> i & 1, nb >> i & 1
+                c = a & b | a & c | b & c
+                bits.append(c)
+        bits.append((1 - add) * bit)
+    return sum(b << k for k, b in enumerate(bits))
+
+
 def _pass_bad(q, xs, iters):
     C = Circuit()
     mod = Mod(q)
@@ -93,10 +115,7 @@ def _pass_bad(q, xs, iters):
     if m.swept:
         cells = [b1_swept(c) for c in cells]
     tapes = [sum((add + 2 * bit) << (2 * i) for i, (add, bit) in enumerate(c)) for c in cells]
-    # Each junk wire holds its tick's second strip, NOT add AND bit on the semantic tape.
-    sizes = m._junk_sizes()
-    junks = [sum(((1 - add) * bit) << k for k, (add, bit) in enumerate(
-        cell for cell, size in zip(tick_tape(q, x, m.iters)[2], sizes) if size)) for x in xs]
+    junks = [_junk_value(m, q, x) for x in xs]
     want = sim.pack([q if x == 0 else 1 for x in xs], U) | sim.pack(tapes, G) | sim.pack(junks, junk)
     bad = 0
     for w, actual in enumerate(state):
