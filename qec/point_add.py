@@ -688,9 +688,10 @@ class ControlledPointAdd:
         enc = [encode(e, self.n) for e, _ in self.exceptions]
         assert len(set(enc)) == 4, "addend order must exceed 3"
         self._square_blk = None
+        self.square_offset = SquareFold(self.mod).offset if SquareFold.applies(curve.q) else 0
 
     def _mulsub(self, gen, Yr, Xr):
-        """X = X - gen * Y^2 mod q, Y untouched."""
+        """X = X - gen * (Y^2 - square_offset) mod q, Y untouched."""
         C, mod, n = self.C, self.mod, self.n
         if SquareFold.applies(mod.q):
             self._square_mulsub(gen, Yr, Xr)
@@ -753,7 +754,7 @@ class ControlledPointAdd:
         self.M.apply(Xr, Yr, inverse=True)
         (gen,) = C.alloc(1)
         recode(inverse=True)
-        mod.cmodadd_const(C, gen, 3 * a, Xr)
+        mod.cmodadd_const(C, gen, 3 * a - self.square_offset, Xr)
         self._mulsub(gen, Yr, Xr)
         recode()
         C.free([gen])

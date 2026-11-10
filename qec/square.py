@@ -84,8 +84,37 @@ def karatsuba_junk(w, thr):
     return karatsuba_junk(h, thr) + karatsuba_junk(w - h, thr) + 3 * ws + karatsuba_junk(ws, thr)
 
 
-def _karatsuba(C, Y, Q, J, thr, kind="R", K=None):
-    """Q = R(Y) = Y*(2^w - Y) (kind R) or T(Y) = Y*(2^w - 1 - Y) (kind T) on 2w clean wires.
+def karatsuba_offset(w, thr, kind="R", exact=True):
+    """The constant o that _karatsuba adds to its Q, or None where an inexact plan breaks a range.
+
+    An exact node leaves o = 0. An inexact T node skips its 2^ws - 1 fixup, so its V carries
+    delta = 2^ws - 1 more. An inexact R node takes its A and S children inexact and its B child
+    exact, so delta = o(S) - o(A), and every o is o(A) + 2^(2h) o(B) + 2^h delta. A child's value
+    plus its o must stay below 2^(2w), which holds while o < 3*2^(2w - 2), as R and T are at most
+    2^(2w - 2), and o >= 0; V's true value lies in [0, 2^w), so V + delta fits w + 1 bits while |delta| <= 2^w,
+    signed when delta < 0."""
+    if w <= thr:
+        return 0
+    h = (w + 1) // 2
+    m, ws = w - h, h + 1
+    inner = exact or kind == "T"
+    oa = karatsuba_offset(h, thr, kind, inner)
+    os = karatsuba_offset(ws, thr, "R" if kind == "T" else "T", inner)
+    if oa is None or os is None:
+        return None
+    if not (0 <= oa < 3 << (2 * h - 2) and 0 <= os < 3 << (2 * ws - 2)):
+        return None
+    if exact:
+        return 0
+    delta = (1 << ws) - 1 if kind == "T" else os - oa
+    if abs(delta) > 1 << w:
+        return None
+    return oa + (delta << h)
+
+
+def _karatsuba(C, Y, Q, J, thr, kind="R", K=None, exact=True):
+    """Q = R(Y) = Y*(2^w - Y) (kind R) or T(Y) = Y*(2^w - 1 - Y) (kind T) on 2w clean wires, plus
+    karatsuba_offset(w, thr, kind, exact).
 
     Y = A + 2^h*B with h = ceil(w/2), m = w - h, and S = A + B on ws = h + 1 bits. Then
         R(Y) = R(A) + 2^(2h)*T(B) + 2^h*V,   V = T(S) - R(A) - T(B) - [h != m]*2^m*S
@@ -101,8 +130,9 @@ def _karatsuba(C, Y, Q, J, thr, kind="R", K=None):
         return
     h = (w + 1) // 2
     m = w - h
+    inner = exact or kind == "T"
     A, B = Y[:h], Y[h:]
-    _karatsuba(C, A, Q[:2 * h], J, thr, kind, K)
+    _karatsuba(C, A, Q[:2 * h], J, thr, kind, K, inner)
     _karatsuba(C, B, Q[2 * h:], J, thr, "T", K)
     ws = h + 1
     S = [J.pop(0) for _ in range(ws)]
@@ -115,7 +145,7 @@ def _karatsuba(C, Y, Q, J, thr, kind="R", K=None):
     if kind == "T":
         for x in S:
             C.x(x)
-    _karatsuba(C, S, W, J, thr, "R" if kind == "T" else "T", K)
+    _karatsuba(C, S, W, J, thr, "R" if kind == "T" else "T", K, inner)
     if kind == "T":
         for x in S:
             C.x(x)
@@ -125,6 +155,10 @@ def _karatsuba(C, Y, Q, J, thr, kind="R", K=None):
     if h != m:
         _change(C, S, V[m:], -1)
     if kind == "R":
+        delta = 0 if exact else karatsuba_offset(ws, thr, "T", False) - karatsuba_offset(h, thr, "R", False)
+        _change(C, V, Q[h:], signed=delta < 0)
+        return
+    if not exact:
         _change(C, V, Q[h:])
         return
     # V holds the cross term plus 2^ws - 1. Take 2^ws off its top bits, which leaves at
@@ -135,7 +169,6 @@ def _karatsuba(C, Y, Q, J, thr, kind="R", K=None):
     _change(C, V, Q[h:], cin=one, signed=True)
     C.x(one)
     C.free([one])
-
 
 
 def signed_digits(v):
@@ -164,6 +197,13 @@ class SquareFold:
         self.thr = max(3, mod.n // 6)
         self.fixed_junk = 2 * mod.n + self.b + self.m + 3
         self.junk = self.fixed_junk + karatsuba_junk(mod.n, self.thr) + self.KEEP
+
+    @property
+    def offset(self):
+        """The o with compute's J[:n] = (Y^2 - o) mod q: the inexact Karatsuba's constant, when it
+        lies below 2^n, so that hi = floor(Q / 2^n) stays at most Y; else 0 from an exact one."""
+        o = karatsuba_offset(self.n, self.thr, "R", False)
+        return o if o is not None and 0 <= o < 1 << self.n else 0
 
     @staticmethod
     def applies(q):
@@ -236,14 +276,15 @@ class SquareFold:
             cin = None
 
     def compute(self, C, Y, J):
-        """J clean on entry. On exit J[:n] holds Y^2 mod q, canonical, for any n-bit Y.
+        """J clean on entry. On exit J[:n] holds (Y^2 - offset) mod q, canonical, for any n-bit Y.
         The other wires of J hold values fixed by Y, for the reverse of this block."""
         n, f, b, m = self.n, self.f, self.b, self.m
         lo, hi, E, T = J[:n], J[n:2 * n], J[2 * n:2 * n + b], J[2 * n + b:2 * n + b + m]
         t, c, k = J[2 * n + b + m:self.fixed_junk]
         junk = list(J[self.fixed_junk:self.junk - self.KEEP])
         keep = list(J[self.junk - self.KEEP:]) if self.KEEP else None
-        _karatsuba(C, Y, lo + hi, junk, self.thr, "R", keep)
+        o = karatsuba_offset(self.n, self.thr, "R", False)
+        _karatsuba(C, Y, lo + hi, junk, self.thr, "R", keep, self.offset != o)
         assert not junk
         # hi = Y - hi = ~(hi + ~Y), and lo = ~lo.
         for w in Y:
