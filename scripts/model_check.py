@@ -70,8 +70,8 @@ def b1_swept(cells):
 
 
 def _junk_value(m, q, x):
-    """The pass's junk register: E as the last tick found it, then per tick a carry tick's chain
-    carries c_2 .. c_chain of U + NOT(V') on its width, V' being V ^ E at bit 0 with a no-subtract
+    """The pass's junk register: E as the last tick found it, then per tick its chain's lowest carries
+    c_2 .. c_(carry+1) of U + NOT(V') on its width, V' being V ^ E at bit 0 with a no-subtract
     tick's second strip already done on V[1:], then add AND E, the offset a subtract retires."""
     states = tick_pass(q, x, m.iters)[0]
     cells = tick_tape(q, x, m.iters)[2]
@@ -81,7 +81,6 @@ def _junk_value(m, q, x):
             continue
         w, top_clear, narrow, _, carry = key
         if carry:
-            chain = w - 1 if w >= 2 and (top_clear or narrow) else w
             vv = V ^ E
             if not add and bit and w >= 2:
                 hi = w - 2 if top_clear else w - 1
@@ -90,7 +89,7 @@ def _junk_value(m, q, x):
                 vv = sum(b << i for i, b in enumerate(vb))
             nb = ~vv & ((1 << w) - 1)
             c = nb & 1
-            for i in range(1, chain):
+            for i in range(1, carry + 1):
                 a, b = U >> i & 1, nb >> i & 1
                 c = a & b | a & c | b & c
                 bits.append(c)

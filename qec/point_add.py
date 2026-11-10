@@ -18,9 +18,10 @@ class DialogMultiplier:
     # code call below is gated on blocks or tail, and each encode was paired with a decode that
     # nothing between reads past, so the passes are the same maps on the same states.
     RAW_TAPE = True
-    # Chain carries the forward pass may leave for the inverse pass, per bit of q: 9.375n keeps
-    # the multiplier under 4,096 wires at n = 256, each wire saving one CCX in each pass.
-    CARRY_JUNK = (75, 8)
+    # Chain carries the forward pass leaves as junk for the inverse pass. Each is held through the
+    # Bezout pass and saves one CCX in each Euclid pass, so this is the one knob that trades wires
+    # for CCX; 2,401 puts the whole circuit at 4,095 wires at n = 256.
+    CARRY_JUNK = 2401
 
     def __init__(self, C, mod):
         self.C, self.mod = C, mod
@@ -35,7 +36,7 @@ class DialogMultiplier:
         self._bezout_ticks = {}
         self.narrow = TwoBitMod(q)
         self.block = None
-        self.carry_junk = self.CARRY_JUNK[0] * n // self.CARRY_JUNK[1]
+        self.carry_junk = self.CARRY_JUNK
 
     @property
     def pass_tail_width(self):
@@ -135,16 +136,14 @@ class DialogMultiplier:
 
     def _shared_difference(self, U, V, g0, g1, top=None, junk=None):
         """Compare and form the even difference using one majority chain. With top set, bit w - 1
-        is done by _top_bit on the domain that mode names. With junk, carries c_2 .. c_chain are
-        made on those wires and left there for the inverse pass, so a middle bit is 3 CCX."""
+        is done by _top_bit on the domain that mode names. With junk, bits 1 .. len(junk) make
+        their carries c_2 .. on those wires and leave them for the inverse pass, at 3 CCX a bit."""
         C = self.C
         (cin,) = C.alloc(1)
         chain = len(U) if top is None else len(U) - 1
-        if junk is None:
-            carries = [cin] + U[:-1]
-        else:
-            assert len(junk) == max(chain - 1, 0)
-            carries = [cin, U[0]] + list(junk)
+        m = len(junk) if junk else 0
+        assert m <= max(chain - 1, 0)
+        carries = [cin, U[0]] + list(junk or []) + U[m + 1:]
         for wire in V:
             C.x(wire)
         for i in range(chain):
@@ -152,7 +151,7 @@ class DialogMultiplier:
                 C.cx(U[i], V[i])
                 C.cx(U[i], carries[i])
                 C.cx(V[i], U[i])
-            elif junk is None:
+            elif i > m:
                 _maj(C, carries[i], V[i], U[i])
             else:
                 # carries[i + 1] = c ^ (a ^ c)(b ^ c) = MAJ(a, b, c), leaving a ^ c and b ^ c.
@@ -160,13 +159,12 @@ class DialogMultiplier:
                 C.cx(carries[i], V[i])
                 C.ccx(U[i], V[i], carries[i + 1])
                 C.cx(carries[i], carries[i + 1])
-        top_carry = U[-1] if junk is None else carries[chain]
         if top is None:
-            C.ccx(g0, top_carry, g1)
+            C.ccx(g0, carries[chain], g1)
         else:
-            self._top_bit(C, top, g0, U[-1], V[-1], U[-2] if junk is None else carries[chain], g1)
+            self._top_bit(C, top, g0, U[-1], V[-1], carries[chain], g1)
         for i in reversed(range(chain)):
-            if junk is not None and i != 0:
+            if 1 <= i <= m:
                 # a ^ c and b ^ c: select b ^ g0*(a ^ c); on g1 (so g0) b ^ c ^ (a ^ c) = NOT v ^ a.
                 C.ccx(g0, U[i], V[i])
                 C.x(V[i])
@@ -251,19 +249,20 @@ class DialogMultiplier:
 
     @staticmethod
     def _carry_junk(w, top_clear, narrow):
-        """Carry wires a carry-junk step at width w leaves: c_2 .. c_chain."""
+        """The most carry wires a step at width w can leave: c_2 .. c_chain."""
         top = w >= 2 and (top_clear or narrow)
         return max(w - (1 if top else 0) - 1, 0)
 
     def _euclid_step(self, w: int, top_clear: bool = False, narrow: bool = False, last: bool = False,
-                     carry: bool = False):
+                     carry: int = 0):
         """top_clear: the tick before ran at the same width, so V is below 2^(w - 1) on entry
         and the second strip's last swap, of two zero bits, never fires.
         narrow: the next width is w - 1, so by E7 this step leaves U below 2^(w - 1).
         last: the pass's last tick, whose input reaches (U, V, E) = (1, 0, 0) by E3.
-        carry: the chain's carries stay on junk wires ahead of the old offset's."""
+        carry: the chain's lowest carries, this many, stay on junk wires ahead of the old offset's."""
         if last:
-            top_clear = narrow = carry = False
+            top_clear = narrow = False
+            carry = 0
         key = (w, top_clear, narrow, last, carry)
         if key not in self._euclid_steps:
             C = self.C
@@ -305,12 +304,12 @@ class DialogMultiplier:
                 # g1 lands on the junk wire, then goes to b, where the swept tape wants a subtract's
                 # own swap; the old offset moves onto the junk wire and E takes g1.
                 (g1,) = junk[-1:]
-                self._shared_difference(U[:w], V[:w], g0, g1, top, junk[:-1] if carry else None)
+                self._shared_difference(U[:w], V[:w], g0, g1, top, junk[:-1])
                 C.cx(g1, b)
                 cswap(C, g0, [offset], [g1])
                 V[:] = V[1:] + V[:1]
 
-            size = 0 if last else 1 + (self._carry_junk(w, top_clear, narrow) if carry else 0)
+            size = 0 if last else 1 + carry
             self._euclid_steps[key] = C.record_shape(step, [w, w, 1, 2, size])
         return self._euclid_steps[key]
 
@@ -374,7 +373,8 @@ class DialogMultiplier:
 
     def _tick_plan(self):
         """Per tick, None for tick 0 on U = q, else its step's (w, top_clear, narrow, last, carry).
-        Carry-junk steps run on the latest ticks whose carries fit carry_junk wires in all."""
+        The latest ticks keep their chain carries as junk while carry_junk wires last, the
+        earliest of them perhaps only its lowest ones."""
         T, W = self.iters, self.widths
         plan = []
         for i in range(T):
@@ -387,22 +387,20 @@ class DialogMultiplier:
             # E7: the next tick's U fits its width. E3: the last tick ends at (1, 0, 0).
             last = i == T - 1
             narrow = not last and W[i + 1] == w - 1
-            plan.append([w, top_clear, narrow, last, False])
+            plan.append([w, top_clear, narrow, last, 0])
         budget = self.carry_junk
         for key in reversed(plan):
             if key is None or key[3]:
                 continue
-            need = self._carry_junk(*key[:3])
-            if need > budget:
+            key[4] = min(budget, self._carry_junk(*key[:3]))
+            budget -= key[4]
+            if not budget:
                 break
-            budget -= need
-            key[4] = True
         return [None if key is None else tuple(key) for key in plan]
 
     def _junk_sizes(self):
         """Junk wires each tick leaves for the inverse pass."""
-        return [0 if key is None or key[3] else 1 + (self._carry_junk(*key[:3]) if key[4] else 0)
-                for key in self._tick_plan()]
+        return [0 if key is None or key[3] else 1 + key[4] for key in self._tick_plan()]
 
     @property
     def junk_width(self):
