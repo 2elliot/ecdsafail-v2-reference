@@ -185,7 +185,9 @@ def signed_digits(v):
 
 
 class SquareFold:
-    KEEP = 0
+    # Kept row carries: each junk wire saves one CCX each way. 867 fills the 4,096-wire cap at
+    # n = 256, where the square's own peak is 3,229 wires and M's peak lies outside it.
+    KEEP = 867
     def __init__(self, mod):
         self.mod, self.n = mod, mod.n
         self.f = f = (1 << mod.n) - mod.q
