@@ -226,14 +226,16 @@ def _lookahead_tree(C, U, V, q, r):
     while d < m:
         for R in range(2 * d - 1, m, 2 * d):
             L = R - d
-            C.ccx(G[L], P[R], G[R])
+            # The product first: it is the next level's P, and both gates hold P[R].
+            own = P[R]
             if P[L] is None:
                 P[R] = None
             else:
                 t = q.take()
-                C.ccx(P[L], P[R], t)
-                made.append((P[L], P[R], t))
+                C.ccx(P[L], own, t)
+                made.append((P[L], own, t))
                 P[R] = t
+            C.ccx(G[L], own, G[R])
         d *= 2
     while d > 1:
         d //= 2

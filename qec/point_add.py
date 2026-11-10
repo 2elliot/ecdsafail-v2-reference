@@ -158,9 +158,10 @@ WIDE_RING = True
 TICK0_TREE = True
 TICK0_SCRATCH = 450
 TICK0_COPIES = 31
-# Clean wires a step may take beyond the pass's tape for the bit-level tree's ring; the pass runs
-# below the circuit's peak, so up to that margin they cost no wire.
-RING_BORROW = 18
+# Clean wires a step may take beyond the pass's tape for the bit-level tree's ring. The steps short
+# of a full ring take 42 at most, and the pass runs further than that below the circuit's peak, so
+# they cost no wire.
+RING_BORROW = 300
 
 
 def _ring_size(w, avail):
@@ -492,8 +493,6 @@ class DialogMultiplier:
                 C.cx(V[0], g0)
                 self._shared_difference(U[:w], V[:w], g0, b, list(cp))
                 V[:] = V[1:] + V[:1]
-                # A subtract keeps its swap on E and moves the old offset to the cell.
-                cswap(C, g0, [offset], [b])
                 # A no-subtract tick strips a second bit when V + E is even.
                 (two,) = C.alloc(1)
                 C.cx(offset, V[0])
@@ -505,6 +504,10 @@ class DialogMultiplier:
                 C.cx(offset, V[0])
                 C.cx(two, b)
                 C.ccx(two, offset, V[0])
+                # A subtract keeps its swap on E and moves the old offset to the cell. It follows
+                # the gates above so that `two` does not wait for it: on g0 they do nothing (two
+                # is 0 and the two CXs from offset cancel), and off g0 the swap does nothing.
+                cswap(C, g0, [offset], [b])
                 if cp:
                     _par_rotate(C, two, V[:w - 1], list(cp))
                 else:

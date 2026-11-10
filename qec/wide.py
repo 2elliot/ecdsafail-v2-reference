@@ -102,11 +102,12 @@ def _carry_out(T, A, B, alloc, block):
         lo, hi = node["kids"]
         build(lo)
         build(hi)
-        T.ccx(hi["p"], lo["g"], hi["g"])
+        # The product first: it is the next join's P, and both gates hold hi's P.
         node["p"] = None
         if node["need"]:
             node["p"] = alloc()
             T.ccx(hi["p"], lo["p"], node["p"])
+        T.ccx(hi["p"], lo["g"], hi["g"])
 
     build(root)
     return root["g"]
@@ -267,9 +268,10 @@ class LowAdd:
         L_, K = self.L, self.K
         for lo, hi in spans:
             z = self._alloc()
-            self.up.cx(K[lo], L_[lo])
-            self.up.cx(K[lo], z)
-            self.up.ccx(z, L_[lo], K[lo])
+            if self._on(lo):                            # else K[lo] is 0, and so is its carry out
+                self.up.cx(K[lo], L_[lo])
+                self.up.cx(K[lo], z)
+                self.up.ccx(z, L_[lo], K[lo])
             for i in range(lo + 1, hi):
                 self.up.cx(K[i], L_[i])
                 self.up.cx(K[i], K[i - 1])
@@ -341,7 +343,8 @@ class LowAdd:
         for blk in self.blocks:
             if blk["cin"] is None:
                 continue
-            C.cx(blk["z"], blk["cin"])
+            if self._on(blk["lo"]):
+                C.cx(blk["z"], blk["cin"])
             for s in self._on(blk["lo"]):
                 C.cx(s, blk["z"])
         first = self.blocks[0]
