@@ -260,17 +260,24 @@ class DialogMultiplier:
             C.x(v)
             C.cx(zg, v)
 
-    def _count(self, ctl, reg, scratch, down=False):
-        """reg += ctl, or reg -= ctl with down, on a two's complement register, low bit first."""
+    def _count(self, ctl, reg, scratch, down=False, twice=None):
+        """reg += ctl, or reg -= ctl with down, on a two's complement register, low bit first.
+        With twice the step is ctl + 2 * twice, for a twice that is never set beside ctl: it and
+        the carry out of bit 0 are then never both set, and their XOR is the carry into bit 1."""
         C = self.C
+        assert twice is None or len(reg) >= 2
         if down:
             for r in reg:
                 C.x(r)
         a = [ctl] + list(scratch[:len(reg) - 1])
         for i in range(len(reg) - 1):
             C.ccx(a[i], reg[i], a[i + 1])
+            if i == 0 and twice is not None:
+                C.cx(twice, a[1])
         for i in range(len(reg) - 1, 0, -1):
             C.cx(a[i], reg[i])
+            if i == 1 and twice is not None:
+                C.cx(twice, a[1])
             C.ccx(a[i - 1], reg[i - 1], a[i])
         C.cx(ctl, reg[0])
         if down:
@@ -428,18 +435,30 @@ class DialogMultiplier:
                             C.x(r)
                     for r in cnt[m_in:] if m_in else []:
                         C.cx(cnt[m_in - 1], r)
+                    # The second strip takes V[cut] out of the count as well: spare = b * V[cut].
+                    C.ccx(b, V[cut], spare)
                     if raw:
-                        bit, new = V[cut - 1], lzj[0]
-                        self._count(bit, cnt, scratch, down=True)
+                        bit, new, both = V[cut - 1], lzj[0], scratch[len(cnt)]
+                        C.ccx(bit, spare, both)
+                        C.cx(bit, spare)
+                        self._count(spare, cnt, scratch, down=True, twice=both)
+                        C.cx(bit, spare)
+                        C.ccx(bit, spare, both)
                         C.x(bit)
                         C.ccx(lz[0], bit, new)
                         C.x(bit)
                         C.cx(lz[0], bit)
                         lz[0], lzj[0] = new, lz[0]
                     else:
-                        self._count(U[cut], cnt, scratch)
-                    C.ccx(b, V[cut], spare)
-                    self._count(spare, cnt, scratch, down=True)
+                        # U[cut] set means U holds the word and V[cut] is 0, so the step is one
+                        # up or one down: down is up between two flips of the counter.
+                        for r in cnt:
+                            C.cx(spare, r)
+                        C.cx(U[cut], spare)
+                        self._count(spare, cnt, scratch)
+                        C.cx(U[cut], spare)
+                        for r in cnt:
+                            C.cx(spare, r)
                 if w >= 2:
                     C.ccx(b, offset, V[1])
                 for i in range(1, w if lazy else w - 2 if top_clear else w - 1):
@@ -515,7 +534,7 @@ class DialogMultiplier:
         w, kappa, high, fmode, init, lazy = key[0], key[5], key[6], key[7], key[8], key[9]
         word = w - kappa + 1 if high else 0
         if lazy:
-            word = max(DialogMultiplier.LAZY_WINDOW + 1, max(lazy[1:3]), w - kappa - 2 if init else 0)
+            word = max(DialogMultiplier.LAZY_WINDOW + 1, max(lazy[1:3]) + lazy[0], w - kappa - 2 if init else 0)
         return word + (1 if fmode in ("drop", "final") else 0)
 
     def _euclid_tick0(self):
