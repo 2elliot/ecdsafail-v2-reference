@@ -936,8 +936,24 @@ class ControlledPointAdd:
         assert len(groups) == 3 and len(groups.get(0, [])) == 1, "0/a-pair/2A groups"
         pair_x = next(x for x, leaves in groups.items() if len(leaves) == 2)
         single_x = next(x for x in groups if x not in (0, pair_x))
-        cls = {(p, s): [Xr[i] for i in range(n) if (pair_x >> i & 1, single_x >> i & 1) == (p, s)]
-               for p in (0, 1) for s in (0, 1)}
+        # A CX network sends pair_x to the unit word at bit i1 and single_x to the one at bit i2,
+        # and fixes 0. The three equalities then share one all-zero product over the other bits.
+        i1 = (pair_x & -pair_x).bit_length() - 1
+        fan1 = pair_x ^ 1 << i1
+        moved = single_x ^ (fan1 if single_x >> i1 & 1 else 0)
+        rest = moved & ~(1 << i1)
+        assert rest, "the pair and the single differ"
+        i2 = (rest & -rest).bit_length() - 1
+        fan2 = moved ^ 1 << i2
+        fans = [(Xr[i1], [Xr[j] for j in range(n) if fan1 >> j & 1]),
+                (Xr[i2], [Xr[j] for j in range(n) if fan2 >> j & 1])]
+
+        def conjugate(inverse=False):
+            for src, dsts in reversed(fans) if inverse else fans:
+                for d in dsts:
+                    C.cx(src, d)
+
+        x1, x2 = Xr[i1], Xr[i2]
         undo = []
 
         def flip(wires):
@@ -983,23 +999,20 @@ class ControlledPointAdd:
             undo.append(clear)
             return acc, False
 
-        # Each class of bits enters the three equalities with one literal per polarity it takes,
-        # so each literal product is built once and shared.
-        zero = chain([(w, True) for w in cls[0, 0]])
-        ones, nones = chain([(w, False) for w in cls[1, 1]]), chain([(w, True) for w in cls[1, 1]])
-        p1, n1 = chain([(w, False) for w in cls[1, 0]]), chain([(w, True) for w in cls[1, 0]])
-        p2, n2 = chain([(w, False) for w in cls[0, 1]]), chain([(w, True) for w in cls[0, 1]])
+        conjugate()
+        zero = chain([(Xr[i], True) for i in range(n) if i not in (i1, i2)])
         y0 = Yr[0]
         # The zero leaf is uncontrolled; c joins only on the nonzero branches.
-        chain([zero, nones, n1, n2], groups[0][0][0])
-        common = chain([zero, ones, (c, False)])
-        leaf = chain([common, p1, n2])
+        chain([zero, (x1, True), (x2, True)], groups[0][0][0])
+        common = chain([zero, (c, False)])
+        leaf = chain([common, (x1, False), (x2, True)])
         for f, y in groups[pair_x]:
             chain([leaf, (y0, not y & 1)], f)
         f, y = groups[single_x][0]
-        chain([common, n1, p2, (y0, not y & 1)], f)
+        chain([common, (x1, True), (x2, False), (y0, not y & 1)], f)
         for step in reversed(undo):
             step()
+        conjugate(inverse=True)
 
     def build(self, hierarchical=False):
         curve, A = self.curve, self.A
