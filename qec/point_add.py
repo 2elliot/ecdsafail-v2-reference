@@ -1,7 +1,7 @@
 """Exact, complete, controlled fixed-addend point addition:
 |c>|R>|0> -> |c>|R + c*A>|0> for every R in E(F_q) encoded as little-endian
 affine (x, y) with infinity = (0, 0)."""
-from .arith import Mod, _maj, add_const, cswap, load_const
+from .arith import Mod, _maj, cswap, load_const
 from .builder import Circuit
 from .curve import Curve
 from .square import SquareFold
@@ -314,33 +314,51 @@ class DialogMultiplier:
         return self._euclid_steps[key]
 
     def _euclid_tick0(self):
-        """First Euclid step on U=q, E=0, using unwritten tape for carries."""
+        """First Euclid step on U = q, E = 0. U is clean once q's bits flip, so it holds the add's
+        carries, which then become the select's x without being cleared."""
         if self._euclid_tick0_block is None:
             C, q, n = self.C, self.mod.q, self.mod.n
             f1 = (1 << n) - q + 1
-            k = n - 1 - ((f1 & -f1).bit_length() - 1)
+            j = (f1 & -f1).bit_length() - 1
 
-            def step(U, V, E, cell, scr):
-                C.free(scr)
+            def step(U, V, E, cell):
                 g0, b = cell
                 C.cx(V[0], g0)
+                for i in range(n):
+                    if q >> i & 1:
+                        C.x(U[i])
+                # U[i] = g0*c_i, c_i the carry into bit i of x + f1; f1 has no bit below j.
+                for i in range(j, n - 1):
+                    if i == j:
+                        C.ccx(g0, V[i], U[i + 1])
+                    elif f1 >> i & 1:
+                        # x_i OR c_i under g0 is d ^ x_i*(g0 ^ d), d = g0*c_i.
+                        C.cx(U[i], U[i + 1])
+                        C.cx(g0, U[i])
+                        C.ccx(U[i], V[i], U[i + 1])
+                        C.cx(g0, U[i])
+                    else:
+                        C.ccx(U[i], V[i], U[i + 1])
+                for i in range(j, n):
+                    if i > j:
+                        C.cx(U[i], V[i])
+                    if f1 >> i & 1:
+                        C.cx(g0, V[i])
+                # V = x ^ g0*(f1 ^ c) now, so U ^= V ^ g0*f1 leaves U = x on every lane.
+                for i in range(n):
+                    C.cx(V[i], U[i])
+                    if f1 >> i & 1:
+                        C.cx(g0, U[i])
+                # Off g0, V still holds x, and U takes q back: U ^= NOT g0 * (x ^ q). Bit 0 of x is g0.
+                C.x(g0)
+                C.cx(g0, U[0])
                 for i in range(1, n):
                     if q >> i & 1:
                         C.x(V[i])
                     C.ccx(g0, V[i], U[i])
                     if q >> i & 1:
                         C.x(V[i])
-                # The select left U[j] = q_j ^ g0*(v_j ^ q_j), so the first carry g0*v_j,
-                # j the lowest set bit of f1, is U[j], or U[j] ^ g0 ^ 1 when q_j = 1.
-                j = (f1 & -f1).bit_length() - 1
-
-                def low(t):
-                    C.cx(U[j], t)
-                    if q >> j & 1:
-                        C.cx(g0, t)
-                        C.x(t)
-
-                add_const(C, V, f1, ctrl=g0, low=low)
+                C.x(g0)
                 for wire in V:
                     C.cx(g0, wire)
                 C.cx(g0, E[0])
@@ -355,18 +373,13 @@ class DialogMultiplier:
                 # A subtract on U = q > x always swaps, and the swept cell keeps that swap.
                 C.cx(g0, b)
 
-            self._euclid_tick0_block = C.record_shape(step, [n, n, 1, 2, k])
+            self._euclid_tick0_block = C.record_shape(step, [n, n, 1, 2])
         return self._euclid_tick0_block
-
-    def _tick0_scratch(self):
-        n, q = self.mod.n, self.mod.q
-        f1 = (1 << n) - q + 1
-        return n - 1 - ((f1 & -f1).bit_length() - 1)
 
     @property
     def tick0_fits(self):
-        """Whether tick 0 runs as _euclid_tick0, on unwritten tape as its only scratch."""
-        if self.widths[0] != self.mod.n or self.tape_external - 2 < self._tick0_scratch():
+        """Whether tick 0 runs as _euclid_tick0, which needs no scratch."""
+        if self.widths[0] != self.mod.n:
             return False
         tick0 = self._euclid_tick0()
         return tick0.wires <= set(tick0.flat_in) and set(tick0.flat_out) == set(tick0.flat_in)
@@ -416,7 +429,6 @@ class DialogMultiplier:
         V, available, G = pool[:n], pool[n:], []
         lend = U[n - self.u_lent:]
         E = junk[:1]
-        k = self._tick0_scratch()
         plan, sizes, used = self._tick_plan(), self._junk_sizes(), 1
         assert len(junk) == 1 + sum(sizes)
         for i in range(self.iters):
@@ -424,7 +436,7 @@ class DialogMultiplier:
             assert len(V) == w and len(available) >= 2
             cell, available = available[:2], available[2:]
             if plan[i] is None:
-                self.C.apply(self._euclid_tick0(), [U, V, E, cell, available[:k]])
+                self.C.apply(self._euclid_tick0(), [U, V, E, cell])
             else:
                 tick_junk = junk[used:used + sizes[i]]
                 used += sizes[i]
