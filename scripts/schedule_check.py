@@ -13,6 +13,13 @@ window is all ones under p once the tick's crossing bits have met it, p is never
 word, physical V fits w + 1 bits, and the last tick's top bit and extra wire are what its exit
 assumes.
 
+The lag blocks must be runs of c lazy ticks, none the lazy run's first or last, with fronts F, F - 1, ..
+and the last one marked; F must keep the holes clear of the cells a lazy tick reads, F - 2 e >= cut_e + 2,
+and above a U whose flag came on inside the block, F - (c - 1) - e >= kappa_(e-1) for e >= 1, and leave
+a cell at or above the front after the block. On the recurrence, with k the strips counted so far
+(two AND NOT flag): F - e - k >= cut + 2 at every tick; under the flag U is below 2^(F - e - k) when
+k > 0 and V is below 2^kappa.
+
     python3 -I -B scripts/schedule_check.py     # toy primes, every x; secp256k1, sampled x
 """
 import json
@@ -38,8 +45,15 @@ def joint_threshold(q, t):
     return k
 
 
-def plan_of(q):
-    return DialogMultiplier(Circuit(), Mod(q))._tick_plan()
+def plan_of(q, lag=None):
+    """The plan, or with lag = c the plan that has a lag block of c ticks wherever one fits."""
+    saved = DialogMultiplier.LAG_BLOCK, DialogMultiplier.LAG_MIN_SAVING
+    if lag:
+        DialogMultiplier.LAG_BLOCK, DialogMultiplier.LAG_MIN_SAVING = lag, None
+    try:
+        return DialogMultiplier(Circuit(), Mod(q))._tick_plan()
+    finally:
+        DialogMultiplier.LAG_BLOCK, DialogMultiplier.LAG_MIN_SAVING = saved
 
 
 def thresholds_ok(q, plan):
@@ -156,6 +170,73 @@ def lazy_states_ok(q, plan, xs):
     return True
 
 
+def lag_blocks(plan):
+    """[(first tick, c, front)] or None when the far fields are not whole blocks."""
+    blocks, t = [], 0
+    while t < len(plan):
+        far = plan[t] and plan[t][10]
+        if not far:
+            t += 1
+            continue
+        front, c, _ = far
+        for e in range(c):
+            key = plan[t + e] if t + e < len(plan) else None
+            if not (key and key[10] == (front - e, c, e == c - 1)):
+                return None
+        blocks.append((t, c, front))
+        t += c
+    return blocks
+
+
+def lag_fields_ok(q, plan):
+    blocks = lag_blocks(plan)
+    if blocks is None:
+        return False
+    lazy = [t for t, key in enumerate(plan) if key and key[9]]
+    for t, c, front in blocks:
+        ticks = range(t, t + c)
+        if not all(lazy[0] < s < lazy[-1] and plan[s][9] and plan[s][5] == joint_threshold(q, s) for s in ticks):
+            return False
+        K = [joint_threshold(q, s) for s in ticks]
+        if any(front - 2 * e < K[e] + WINDOW + 2 for e in range(c)):
+            return False
+        if any(front - (c - 1) - e < K[e - 1] for e in range(1, c)):
+            return False
+        if plan[t + c] is None or plan[t + c][0] + c < front - c or front - 2 * c < 0:
+            return False
+    return True
+
+
+def lag_states_ok(q, plan, xs):
+    blocks = lag_blocks(plan)
+    if not blocks:
+        return blocks is not None
+    start = {t: (c, front) for t, c, front in blocks}
+    for x in xs:
+        u, v, e = q, x, 0
+        left = 0
+        for t, key in enumerate(plan):
+            if t in start:
+                left, front = start[t]
+                k = 0
+            odd, two = v & 1, int(v % 4 == 0)
+            if left:
+                kappa = key[5]
+                z = u >> kappa != 0
+                if front - k < kappa + WINDOW + 2 or (z and k and u >> (front - k)):
+                    return False
+                if z and (v - e) >> kappa:
+                    return False
+                k += (1 - odd) & two & (1 - z)
+                front -= 1
+                left -= 1
+            if odd:
+                u, v, e = min(u, v), abs(u - v) // 2, int(u > v)
+            else:
+                v //= 4 if two else 2
+    return True
+
+
 def secp_inputs():
     q, rng = SECP, random.Random(2026)
     xs = {x for k in range(256) for d in (-1, 0, 1) for x in ((1 << k) + d, q - (1 << k) + d, (q >> k) + d)}
@@ -167,19 +248,26 @@ def secp_inputs():
     return sorted(x for x in xs if 0 < x < q)
 
 
-def schedule_ok(q, xs):
-    plan = plan_of(q)
+def schedule_ok(q, xs, lag=None):
+    plan = plan_of(q, lag)
     return (thresholds_ok(q, plan) and states_ok(q, plan, xs)
-            and lazy_fields_ok(q, plan) and lazy_states_ok(q, plan, xs))
+            and lazy_fields_ok(q, plan) and lazy_states_ok(q, plan, xs)
+            and lag_fields_ok(q, plan) and lag_states_ok(q, plan, xs))
 
 
 def main():
     rows = [{"q": q, "high_ticks": sum(1 for key in plan_of(q) if key and key[6]),
              "lazy_ticks": sum(1 for key in plan_of(q) if key and key[9]),
              "schedule_ok": schedule_ok(q, range(1, q))} for q in TOY]
+    for lag in (1, 2, 3):
+        for q in TOY:
+            ticks = sum(1 for key in plan_of(q, lag) if key and key[10])
+            if ticks:
+                rows.append({"q": q, "lag_block": lag, "lag_ticks": ticks, "schedule_ok": schedule_ok(q, range(1, q), lag)})
     xs = secp_inputs()
     rows.append({"q": "secp256k1", "high_ticks": sum(1 for key in plan_of(SECP) if key and key[6]),
-                 "lazy_ticks": sum(1 for key in plan_of(SECP) if key and key[9]), "inputs": len(xs), "schedule_ok": schedule_ok(SECP, xs)})
+                 "lazy_ticks": sum(1 for key in plan_of(SECP) if key and key[9]),
+                 "lag_ticks": sum(1 for key in plan_of(SECP) if key and key[10]), "inputs": len(xs), "schedule_ok": schedule_ok(SECP, xs)})
     for row in rows:
         print(json.dumps(row))
     return 0 if all(row["schedule_ok"] for row in rows) else 1
