@@ -21,16 +21,16 @@ class DialogMultiplier:
     RAW_TAPE = True
     # Chain carries the forward pass leaves as junk for the inverse pass. Each is held through the
     # Bezout pass and saves one CCX in each Euclid pass, so this is the one knob that trades wires
-    # for CCX; 1,523 puts the climb stack at 4,096 wires at n = 256.
-    CARRY_JUNK = 1523
+    # for CCX; 1,516 puts the climb stack at 4,096 wires at n = 256.
+    CARRY_JUNK = 1516
     # A tick whose registers reach this many bits above its joint threshold runs those bits as one
     # high word, 3 CCX a bit, on a flag that says which register holds it. 6 is 148 CCX cheaper at
     # n = 256; 2 keeps the high word in every toy prime of 8 bits or more.
     HIGH_MIN = 2
     # A high word longer than this is lazy: its lowest LAZY_WINDOW bits keep the borrow chain, and
-    # the bits above only move from U to V. 3 is the least window for which one pending borrow
-    # wire is enough: see _lazy_plan.
-    LAZY_WINDOW = 3
+    # the bits above only move from U to V. One pending borrow wire is enough from 2 up: see
+    # _lazy_plan.
+    LAZY_WINDOW = 2
 
     def __init__(self, C, mod):
         self.C, self.mod = C, mod
@@ -673,12 +673,15 @@ class DialogMultiplier:
         m_in, m_out: the counter's width before and after. It holds rho = pi - 1, pi the ones of
             U and V from cut up, which number at most w - kappa - LAZY_WINDOW + 1.
         leave: the run's last tick.
-        One p is enough at window 3. A borrow leaves the window only when it is 0, and leaves it
-        7. While p is pending each bit that comes to the window's top is a 1, so the window is at
-        least 4 after it, and the thresholds drop twice in three ticks, so at most three subtracts
-        come before the next one. The run starts where the word first has 4 bits, after a drop
-        at the same width, so the one bit above the window is new and V's is 0. It ends at 4
-        bits before a narrower tick with the same threshold; the plan is left alone otherwise."""
+        One p is enough because the window stays all ones while p is pending. A borrow leaves
+        the window only when it is 0, and leaves it all ones over a low zone 2^kappa - d with
+        d <= u + 2. Then v >= 3 * 2^kappa, so u < 2^kappa / 9 by the tick's potential bound, the
+        low zone stays above u, and no subtract borrows from the window; each shift halves d,
+        each subtract takes it to (d + u) / 2, and a bit that comes to the window's top under p
+        is a 1 or clears p. The run starts where the word first has LAZY_WINDOW + 1 bits, after
+        a drop at the same width, so the one bit above the window is new and V's is 0. It ends
+        at that length before a narrower tick with the same threshold; the plan is left alone
+        otherwise."""
         R, W = self.LAZY_WINDOW, self.widths
         lazy = [i for i, key in enumerate(plan) if key and key[6] and key[0] - key[5] > R]
         if not lazy:

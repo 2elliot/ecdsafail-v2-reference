@@ -7,11 +7,11 @@ there leaves U below 2^kappa.
 
 The lazy ticks must be the high ticks with more than WINDOW bits above kappa, in one run that starts
 at WINDOW + 1 bits after a drop at the same width and ends at WINDOW + 1 bits before a narrower tick
-at the same threshold; raw must say that the tick before kept its threshold, with at most three
-ticks from one raw tick to the next; the counter must be wide enough. On the same recurrence, with
-the pending borrow p followed through the lazy rules, the window is never 0 under p once the tick's
-crossing bits have met it, p is never set beside U's word, physical V fits w + 1 bits, and the last
-tick's top bit and extra wire are what its exit assumes.
+at the same threshold; raw must say that the tick before kept its threshold; the counter must be
+wide enough. On the same recurrence, with the pending borrow p followed through the lazy rules, the
+window is all ones under p once the tick's crossing bits have met it, p is never set beside U's
+word, physical V fits w + 1 bits, and the last tick's top bit and extra wire are what its exit
+assumes.
 
     python3 -I -B scripts/schedule_check.py     # toy primes, every x; secp256k1, sampled x
 """
@@ -28,7 +28,7 @@ from qec.point_add import DialogMultiplier
 
 SECP = 2**256 - 2**32 - 977
 TOY = [3, 5, 7, 11, 13, 31, 43, 61, 127, 151, 251, 509, 1021, 4093, 8117, 65521]
-WINDOW = 3
+WINDOW = 2
 
 
 def joint_threshold(q, t):
@@ -89,13 +89,12 @@ def lazy_fields_ok(q, plan):
         return False
     if w[final + 1] != w[final] - 1 or K[final + 1] != K[final] or w[final] - K[final] != WINDOW + 1:
         return False
-    width, since_raw = 0, 0
+    width = 0
     for t in lazy:
         raw, m_in, m_out, leave = plan[t][9]
-        since_raw = 0 if raw else since_raw + 1
         if raw != (t > first and K[t - 1] == K[t]) or (t > first and not raw and K[t - 1] != K[t] + 1):
             return False
-        if m_in != width or since_raw > 2 or leave != (t == final) or plan[t][5] != K[t]:
+        if m_in != width or leave != (t == final) or plan[t][5] != K[t]:
             return False
         if w[t] - K[t] - WINDOW + 1 > 1 << (m_out - 1) or m_out < 1:
             return False
@@ -139,7 +138,7 @@ def lazy_states_ok(q, plan, xs):
                     r = hi >> (WINDOW - 1) & 1
                     hi ^= p << (WINDOW - 1)
                     p &= 1 - r
-                if (z and (hi or p)) or (p and hi & mask == 0):
+                if (z and (hi or p)) or (p and hi & mask != mask):
                     return False
                 if odd:
                     word = u >> k if z else hi
