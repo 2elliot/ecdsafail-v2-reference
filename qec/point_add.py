@@ -235,7 +235,7 @@ class DialogMultiplier:
         if key not in self._euclid_steps:
             C = self.C
 
-            def step(U, V, E, cell):
+            def step(U, V, E, cell, junk):
                 g0, b = cell
                 offset = E[0]
                 if last:
@@ -261,8 +261,9 @@ class DialogMultiplier:
                 V[:] = V[1:] + V[:1]
                 # A subtract keeps its swap on E and moves the old offset to the cell.
                 cswap(C, g0, [offset], [b])
-                # A no-subtract tick strips a second bit when V + E is even.
-                (two,) = C.alloc(1)
+                # A no-subtract tick strips a second bit when V + E is even. two stays on its junk
+                # wire, equal to NOT g0 AND b, until the inverse pass takes it back.
+                (two,) = junk
                 C.cx(offset, V[0])
                 C.x(g0)
                 C.x(V[0])
@@ -274,12 +275,8 @@ class DialogMultiplier:
                 C.ccx(two, offset, V[0])
                 for i in range(w - 3 if top_clear else w - 2):
                     cswap(C, two, [V[i]], [V[i + 1]])
-                C.x(g0)
-                C.ccx(g0, b, two)
-                C.x(g0)
-                C.free([two])
 
-            self._euclid_steps[key] = C.record_shape(step, [w, w, 1, 2])
+            self._euclid_steps[key] = C.record_shape(step, [w, w, 1, 2, 0 if last else 1])
         return self._euclid_steps[key]
 
     def _euclid_tick0(self):
@@ -325,30 +322,55 @@ class DialogMultiplier:
             self._euclid_tick0_block = C.record_shape(step, [n, n, 1, 2, k])
         return self._euclid_tick0_block
 
-    def _euclid_pass(self, U: list[int], pool: list[int], block0_raw: bool = False) -> None:
+    def _tick0_scratch(self):
+        n, q = self.mod.n, self.mod.q
+        f1 = (1 << n) - q + 1
+        return n - 1 - ((f1 & -f1).bit_length() - 1)
+
+    @property
+    def tick0_fits(self):
+        """Whether tick 0 runs as _euclid_tick0, on unwritten tape as its only scratch."""
+        if self.widths[0] != self.mod.n or self.tape_external - 2 < self._tick0_scratch():
+            return False
+        tick0 = self._euclid_tick0()
+        return tick0.wires <= set(tick0.flat_in) and set(tick0.flat_out) == set(tick0.flat_in)
+
+    def _junk_sizes(self):
+        """Junk wires each tick leaves for the inverse pass."""
+        T = self.iters
+        return [0 if i == T - 1 or (i == 0 and self.tick0_fits) else 1 for i in range(T)]
+
+    @property
+    def junk_width(self):
+        return sum(self._junk_sizes())
+
+    def _euclid_pass(self, U: list[int], pool: list[int], junk: list[int], block0_raw: bool = False) -> None:
         # The pool starts as V plus clean external tape. It ends as the zero wires U did not
         # take back, then tape; U ends as its low wires and those zero wires. The boundary is a
-        # permutation of U and the pool together.
+        # permutation of U and the pool together. junk starts zero and ends holding each tick's
+        # junk, which only the inverse pass clears.
         n = self.mod.n
         V, available, G = pool[:n], pool[n:], []
         lend = U[n - self.u_lent:]
         E = self.C.alloc(1)
-        f1 = (1 << n) - self.mod.q + 1
-        k = n - 1 - ((f1 & -f1).bit_length() - 1)
+        k = self._tick0_scratch()
+        sizes, used = self._junk_sizes(), 0
+        assert len(junk) == sum(sizes)
         for i in range(self.iters):
             w = self.widths[i]
             assert len(V) == w and len(available) >= 2
             cell, available = available[:2], available[2:]
-            tick0 = self._euclid_tick0() if i == 0 and w == n and len(available) >= k else None
-            if tick0 is not None and tick0.wires <= set(tick0.flat_in) and set(tick0.flat_out) == set(tick0.flat_in):
-                self.C.apply(tick0, [U, V, E, cell, available[:k]])
+            if i == 0 and self.tick0_fits:
+                self.C.apply(self._euclid_tick0(), [U, V, E, cell, available[:k]])
             else:
                 # A tick leaves V below 2^(w' - 1), w' its own width.
                 top_clear = i >= 1 and w >= 3 and self.widths[i - 1] == w
                 # E7: the next tick's U fits its width. E3: the last tick ends at (1, 0, 0).
                 last = i == self.iters - 1
                 narrow = not last and self.widths[i + 1] == w - 1
-                self.C.apply(self._euclid_step(w, top_clear, narrow, last), [U[:w], V, E, cell])
+                tick_junk = junk[used:used + sizes[i]]
+                used += sizes[i]
+                self.C.apply(self._euclid_step(w, top_clear, narrow, last), [U[:w], V, E, cell, tick_junk])
             G.extend(cell)
             next_width = self.widths[i + 1] if i + 1 < self.iters else self.pass_tail_width
             assert w - 1 <= next_width <= w
@@ -553,7 +575,8 @@ class DialogMultiplier:
         # On the merged path block 0 stays decoded from Bezout's end into the inverse pass, so
         # the pass is recorded without its last encode, which runs here instead.
         raw0 = self.swept and self.blocks > 0
-        E = C.run(lambda U, pool: self._euclid_pass(U, pool, raw0), [U, pool])
+        junk = C.alloc(self.junk_width)
+        E = C.run(lambda U, pool, junk: self._euclid_pass(U, pool, junk, raw0), [U, pool, junk])
         if raw0:
             self._code_block0(U, pool)
         lent = self.lent_after_pass
@@ -579,10 +602,10 @@ class DialogMultiplier:
             C.free([reg[i] for reg, i in places])
             for (reg, i), w in zip(places, raw):
                 reg[i] = w
-        C.apply(E, [Yr, pool], inverse=True)
+        C.apply(E, [Yr, pool, junk], inverse=True)
         load_const(C, Yr, q)
         Xr[:] = pool[:n]
-        C.free(Yr + pool[n:])
+        C.free(Yr + pool[n:] + junk)
         Yr[:] = S
 
     def apply(self, Xr, Yr, inverse=False):

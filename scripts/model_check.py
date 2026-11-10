@@ -79,7 +79,8 @@ def _pass_bad(q, xs, iters):
     inputs = list(V)
     pool = V + C.alloc(m.tape_external)
     load_const(C, U, q)
-    m._euclid_pass(U, pool)
+    junk = C.alloc(m.junk_width)
+    m._euclid_pass(U, pool, junk)
     G = m.coded_tape(pool)
     for j in range(m.blocks):
         m._decode(G, j, C.alloc(len(m._block_free(j, m.swept))), m.swept)
@@ -92,7 +93,11 @@ def _pass_bad(q, xs, iters):
     if m.swept:
         cells = [b1_swept(c) for c in cells]
     tapes = [sum((add + 2 * bit) << (2 * i) for i, (add, bit) in enumerate(c)) for c in cells]
-    want = sim.pack([q if x == 0 else 1 for x in xs], U) | sim.pack(tapes, G)
+    # Each junk wire holds its tick's second strip, NOT add AND bit on the semantic tape.
+    sizes = m._junk_sizes()
+    junks = [sum(((1 - add) * bit) << k for k, (add, bit) in enumerate(
+        cell for cell, size in zip(tick_tape(q, x, m.iters)[2], sizes) if size)) for x in xs]
+    want = sim.pack([q if x == 0 else 1 for x in xs], U) | sim.pack(tapes, G) | sim.pack(junks, junk)
     bad = 0
     for w, actual in enumerate(state):
         bad |= actual ^ want.get(w, 0)
