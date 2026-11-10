@@ -518,8 +518,6 @@ class TwoBitMod(Mod):
                          keep_first=p is not None)
         # Carry 1 of the second chain is l0*k0, and l0 = R0 on a held lane, so it is bit_one's AND.
         k0r0 = chain[1] if p is not None else None
-        C.ccx(k0, k1, one)
-        C.free([one])
 
         # On a held lane k1 and k2 change wires, so the compare's target is k's top bit there.
         if p is not None:
@@ -531,8 +529,15 @@ class TwoBitMod(Mod):
             C.x(k0)
             C.cx(k2, g0)
 
-        (z,) = C.alloc(1)
-        mark_even(z)
+        # one = k0*k1 becomes z = (g0 ^ wire k2)*~k0 with one CCX. Wire k2 now holds k's bit 1 on a
+        # held lane and 0 elsewhere, and k0*k2 = 0 because k <= 4, so k0*k1 = k0*(wire k1 ^ wire k2)
+        # and z ^ k0*k1 = k0*(wire k1 ^ g0) ^ g0 ^ wire k2.
+        z = one
+        C.cx(g0, k1)
+        C.ccx(k0, k1, z)
+        C.cx(g0, k1)
+        C.cx(g0, z)
+        C.cx(k2, z)
         gt_into(C, a[1:], low[1:], k1, ctrl=z)
         mark_even(z)
         C.free([z])
