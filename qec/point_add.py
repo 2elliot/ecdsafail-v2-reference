@@ -21,12 +21,16 @@ class DialogMultiplier:
     RAW_TAPE = True
     # Chain carries the forward pass leaves as junk for the inverse pass. Each is held through the
     # Bezout pass and saves one CCX in each Euclid pass, so this is the one knob that trades wires
-    # for CCX; 2,023 puts the climb stack at 4,096 wires at n = 256.
-    CARRY_JUNK = 2023
+    # for CCX; 1,523 puts the climb stack at 4,096 wires at n = 256.
+    CARRY_JUNK = 1523
     # A tick whose registers reach this many bits above its joint threshold runs those bits as one
     # high word, 3 CCX a bit, on a flag that says which register holds it. 6 is 148 CCX cheaper at
     # n = 256; 2 keeps the high word in every toy prime of 8 bits or more.
     HIGH_MIN = 2
+    # A high word longer than this is lazy: its lowest LAZY_WINDOW bits keep the borrow chain, and
+    # the bits above only move from U to V. 3 is the least window for which one pending borrow
+    # wire is enough: see _lazy_plan.
+    LAZY_WINDOW = 3
 
     def __init__(self, C, mod):
         self.C, self.mod = C, mod
@@ -141,7 +145,8 @@ class DialogMultiplier:
                      [self._block_wires(G, j, swept)], inverse=True)
 
 
-    def _shared_difference(self, U, V, g0, g1, top=None, junk=None, high=0, held=None, scratch=None):
+    def _shared_difference(self, U, V, g0, g1, top=None, junk=None, high=0, held=None, scratch=None,
+                           lazy=None):
         """Compare and form the even difference using one majority chain. With top set, bit w - 1
         is done by _top_bit on the domain that mode names. With junk, bits 1 .. len(junk) make
         their carries c_2 .. on those wires and leave them for the inverse pass, at 3 CCX a bit.
@@ -168,7 +173,7 @@ class DialogMultiplier:
                 C.ccx(U[i], V[i], carries[i + 1])
                 C.cx(carries[i], carries[i + 1])
         if high:
-            self._high_word(U[chain:], V[chain:], carries[chain], g0, g1, held, scratch)
+            self._high_word(U[chain:], V[chain:], carries[chain], g0, g1, held, scratch, lazy)
         elif top is None:
             C.ccx(g0, carries[chain], g1)
         else:
@@ -205,14 +210,17 @@ class DialogMultiplier:
         for wire in V[1:]:
             C.cx(g1, wire)
 
-    def _high_word(self, U, V, cw, g0, g1, held, scratch):
+    def _high_word(self, U, V, cw, g0, g1, held, scratch, lazy=None):
         """The chain's bits above the tick's joint threshold, where U or V is zero. held is
         (z, zg): z is 1 when U is the nonzero one and may be either when both are zero, zg = g0*z.
         On entry V holds NOT v and cw the carry c into these bits; g1 is 0. The word X = U ^ V is
         the one that is there. A subtract leaves U = 0 and V = X - e, e = g0*(c ^ z) the borrow
         of the larger minus the smaller, and swaps exactly when z or the borrow leaves the top:
         with z the carries are NOT of the borrows and g1 = g0; without, they are the borrows and
-        the top one is g1. scratch holds e and the borrows, and goes back clean."""
+        the top one is g1. scratch holds e and the borrows, and goes back clean.
+        With lazy = (s, p) these bits are only the window of a longer word, and s says the word
+        has nothing above them. Then the window's top borrow is the word's when s is set, and
+        otherwise stays pending on p, the bits above being left as they are."""
         C = self.C
         z, zg = held
         E = scratch[:len(U) + 1]
@@ -229,7 +237,14 @@ class DialogMultiplier:
             C.ccx(E[i], v, E[i + 1])
             C.x(v)
         C.cx(zg, g1)
-        C.cx(E[-1], g1)
+        if lazy:
+            s, p = lazy
+            C.ccx(E[-1], s, g1)
+            C.x(s)
+            C.ccx(E[-1], s, p)
+            C.x(s)
+        else:
+            C.cx(E[-1], g1)
         for i, v in reversed(list(enumerate(V))):
             C.x(v)
             C.ccx(E[i], v, E[i + 1])
@@ -244,6 +259,23 @@ class DialogMultiplier:
             C.cx(u, v)
             C.x(v)
             C.cx(zg, v)
+
+    def _count(self, ctl, reg, scratch, down=False):
+        """reg += ctl, or reg -= ctl with down, on a two's complement register, low bit first."""
+        C = self.C
+        if down:
+            for r in reg:
+                C.x(r)
+        a = [ctl] + list(scratch[:len(reg) - 1])
+        for i in range(len(reg) - 1):
+            C.ccx(a[i], reg[i], a[i + 1])
+        for i in range(len(reg) - 1, 0, -1):
+            C.cx(a[i], reg[i])
+            C.ccx(a[i - 1], reg[i - 1], a[i])
+        C.cx(ctl, reg[0])
+        if down:
+            for r in reg:
+                C.x(r)
 
     def _or_into(self, bits, target, scratch):
         """target ^= OR of bits, through scratch wires that go back clean."""
@@ -328,7 +360,8 @@ class DialogMultiplier:
         return max(w - (1 if top else 0) - 1, 0)
 
     def _euclid_step(self, w: int, top_clear: bool = False, narrow: bool = False, last: bool = False,
-                     carry: int = 0, kappa=None, high: bool = False, fmode=None, init: bool = False):
+                     carry: int = 0, kappa=None, high: bool = False, fmode=None, init: bool = False,
+                     lazy=None):
         """top_clear: the tick before ran at the same width, so V is below 2^(w - 1) on entry
         and the second strip's last swap, of two zero bits, never fires.
         narrow: the next width is w - 1, so by E7 this step leaves U below 2^(w - 1).
@@ -341,16 +374,23 @@ class DialogMultiplier:
             wire takes flag AND NOT g0 and g0*flag stays as junk. drop: the next threshold is
             kappa - 1, a fresh wire takes that OR U'[kappa - 1] and the old flag stays as junk.
             final: no tick after this reads it.
-        init: the flag is made here, from U."""
+        init: the flag is made here, from U.
+        lazy: (raw, m_in, m_out, leave) for a high word longer than LAZY_WINDOW; see _lazy_plan.
+            V then has one more wire on top, and lz holds the pending borrow p and the counter."""
         if last:
             top_clear = narrow = False
             carry = 0
-        key = (w, top_clear, narrow, last, carry, kappa, high, fmode, init)
+        key = (w, top_clear, narrow, last, carry, kappa, high, fmode, init, lazy)
         if key not in self._euclid_steps:
             C = self.C
 
-            def step(U, V, E, cell, junk, flag, slot, scratch):
+            def step(U, V, E, cell, junk, flag, slot, scratch, lz, lzj):
                 g0, b = cell
+                if lazy:
+                    raw, m_in, m_out, leave = lazy
+                    cut = kappa + self.LAZY_WINDOW
+                    cnt = lz[1:]
+                    spare = scratch[len(cnt) - 1]
                 offset = E[0]
                 if last:
                     # The input is (1, 0, 0), (1, 1, 0) or (1, 0, 1), and the swept cell is
@@ -379,10 +419,43 @@ class DialogMultiplier:
                 C.x(low)
                 C.x(g0)
                 C.cx(offset, low)
+                if lazy:
+                    # rho = pi - 1 on max(m_in, m_out) bits, pi the ones of U's and V's bits from
+                    # cut up. A bit that the tick before brought to the window's top leaves the
+                    # count and takes the pending borrow; a threshold that dropped brings U[cut].
+                    if m_in == 0:
+                        for r in cnt:
+                            C.x(r)
+                    for r in cnt[m_in:] if m_in else []:
+                        C.cx(cnt[m_in - 1], r)
+                    if raw:
+                        bit, new = V[cut - 1], lzj[0]
+                        self._count(bit, cnt, scratch, down=True)
+                        C.x(bit)
+                        C.ccx(lz[0], bit, new)
+                        C.x(bit)
+                        C.cx(lz[0], bit)
+                        lz[0], lzj[0] = new, lz[0]
+                    else:
+                        self._count(U[cut], cnt, scratch)
+                    C.ccx(b, V[cut], spare)
+                    self._count(spare, cnt, scratch, down=True)
                 if w >= 2:
                     C.ccx(b, offset, V[1])
-                for i in range(1, w - 2 if top_clear else w - 1):
+                for i in range(1, w if lazy else w - 2 if top_clear else w - 1):
                     cswap(C, b, [V[i]], [V[i + 1]])
+                if lazy:
+                    # The second strip brought one more bit to the window's top, and the pending
+                    # borrow, now one place lower, moves back up through it.
+                    bit, t = V[cut - 1], lzj[-1]
+                    C.ccx(b, bit, spare)
+                    C.ccx(b, lz[0], t)
+                    C.cx(t, bit)
+                    C.x(bit)
+                    C.ccx(t, bit, lz[0])
+                    C.x(bit)
+                    for r in cnt[m_out:]:
+                        C.cx(cnt[m_out - 1], r)
                 # g1 lands on the junk wire, then goes to b, where the swept tape wants a subtract's
                 # own swap; the old offset moves onto the junk wire and E takes g1.
                 (g1,) = junk[-1:]
@@ -392,7 +465,12 @@ class DialogMultiplier:
                 if fmode:
                     zg = slot[0] if fmode == "same" else scratch[-1]
                     C.ccx(g0, flag[0], zg)
-                if high:
+                if lazy:
+                    # pi = 0 is rho's sign. Above the window the word only moves from U to V.
+                    self._shared_difference(U[:cut], V[:cut], g0, g1, None, junk[:-1], self.LAZY_WINDOW,
+                                            (flag[0], zg), scratch, (cnt[m_out - 1], lz[0]))
+                    cswap(C, zg, U[cut:w], V[cut:w])
+                elif high:
                     self._shared_difference(U[:w], V[:w], g0, g1, None, junk[:-1], w - kappa,
                                             (flag[0], zg), scratch)
                 else:
@@ -413,18 +491,32 @@ class DialogMultiplier:
                     flag[0], slot[0] = new, flag[0]
                 elif fmode == "final":
                     C.ccx(g0, flag[0], zg)
+                if lazy and leave:
+                    # The next tick's V fits w - 1 bits, so the last bit above the window takes the
+                    # pending borrow and V's extra wire holds what is left of it: p AND NOT bit.
+                    live = cnt[:m_out]
+                    self._count(V[cut], live, scratch, down=True)
+                    self._count(V[w], live, scratch, down=True)
+                    for r in live:
+                        C.x(r)
+                    C.cx(lz[0], V[cut])
+                    C.ccx(lz[0], V[cut], V[w])
                 V[:] = V[1:] + V[:1]
 
-            sizes = [w, w, 1, 2, 0 if last else 1 + carry, 1 if fmode else 0,
-                     1 if fmode in ("same", "drop") else 0, self._step_scratch(key)]
+            sizes = [w, w + bool(lazy), 1, 2, 0 if last else 1 + carry, 1 if fmode else 0,
+                     1 if fmode in ("same", "drop") else 0, self._step_scratch(key),
+                     1 + max(lazy[1:3]) if lazy else 0, lazy[0] + 1 if lazy else 0]
             self._euclid_steps[key] = C.record_shape(step, sizes)
         return self._euclid_steps[key]
 
     @staticmethod
     def _step_scratch(key):
         """Clean wires a step borrows: the high word's borrows, and g0*flag unless it stays."""
-        w, kappa, high, fmode = key[0], key[5], key[6], key[7]
-        return (w - kappa + 1 if high else 0) + (1 if fmode in ("drop", "final") else 0)
+        w, kappa, high, fmode, init, lazy = key[0], key[5], key[6], key[7], key[8], key[9]
+        word = w - kappa + 1 if high else 0
+        if lazy:
+            word = max(DialogMultiplier.LAZY_WINDOW + 1, max(lazy[1:3]), w - kappa - 2 if init else 0)
+        return word + (1 if fmode in ("drop", "final") else 0)
 
     def _euclid_tick0(self):
         """First Euclid step on U = q, E = 0. U is clean once q's bits flip, so it holds the add's
@@ -510,7 +602,7 @@ class DialogMultiplier:
 
     def _tick_plan(self):
         """Per tick, None for tick 0 on U = q, else its step's key (w, top_clear, narrow, last,
-        carry, kappa, high, fmode, init). The latest ticks keep their chain carries as junk while
+        carry, kappa, high, fmode, init, lazy). The latest ticks keep their chain carries as junk while
         carry_junk wires last, the earliest of them perhaps only its lowest ones. A tick with
         HIGH_MIN or more bits above its joint threshold, and the clean wires to borrow, runs them
         as a high word; the flag is made at the first such tick and kept up to the last."""
@@ -529,7 +621,7 @@ class DialogMultiplier:
             narrow = not last and W[i + 1] == w - 1
             kappa = min(w, joint[i])
             high = not last and kappa >= 1 and w - kappa >= self.HIGH_MIN and w - kappa + 2 <= clean[i]
-            plan.append([w, top_clear, narrow, last, 0, kappa, high, None, False])
+            plan.append([w, top_clear, narrow, last, 0, kappa, high, None, False, None])
         flagged = [i for i, key in enumerate(plan) if key and key[6]]
         if flagged:
             first, final = flagged[0], flagged[-1]
@@ -538,6 +630,7 @@ class DialogMultiplier:
                 step = plan[i][5] - plan[i + 1][5] if i < final else None
                 assert step in (None, 0, 1) and clean[i] >= 1
                 plan[i][7] = "final" if i == final else "drop" if step else "same"
+        self._lazy_plan(plan)
         for i, key in enumerate(plan):
             if key and not key[7]:
                 key[5] = None
@@ -551,11 +644,56 @@ class DialogMultiplier:
                 break
         return [None if key is None else tuple(key) for key in plan]
 
+    def _lazy_plan(self, plan):
+        """Mark the lazy ticks: the high ticks with more than LAZY_WINDOW bits above the threshold.
+        There V's physical word is the true one plus p * 2^cut, cut = kappa + LAZY_WINDOW, p the
+        one pending borrow, so V has one more wire. Each gets (raw, m_in, m_out, leave):
+        raw: the tick before kept its threshold, so the bit it brought to cut - 1 has not met p.
+        m_in, m_out: the counter's width before and after. It holds rho = pi - 1, pi the ones of
+            U and V from cut up, which number at most w - kappa - LAZY_WINDOW + 1.
+        leave: the run's last tick.
+        One p is enough at window 3. A borrow leaves the window only when it is 0, and leaves it
+        7. While p is pending each bit that comes to the window's top is a 1, so the window is at
+        least 4 after it, and the thresholds drop twice in three ticks, so at most three subtracts
+        come before the next one. The run starts where the word first has 4 bits, after a drop
+        at the same width, so the one bit above the window is new and V's is 0. It ends at 4
+        bits before a narrower tick with the same threshold; the plan is left alone otherwise."""
+        R, W = self.LAZY_WINDOW, self.widths
+        lazy = [i for i, key in enumerate(plan) if key and key[6] and key[0] - key[5] > R]
+        if not lazy:
+            return
+        first, final = lazy[0], lazy[-1]
+        if lazy != list(range(first, final + 1)) or plan[first - 1] is None or final + 1 >= len(plan):
+            return
+        before, after = plan[first - 1], plan[final + 1]
+        if (before[0], before[5]) != (W[first], plan[first][5] + 1) or W[first] - plan[first][5] != R + 1:
+            return
+        if (after[0], after[5]) != (W[final] - 1, plan[final][5]) or W[final] - plan[final][5] != R + 1:
+            return
+        m_in = 0
+        for i in lazy:
+            w, kappa = plan[i][0], plan[i][5]
+            m_out = (w - kappa - R).bit_length() + 1
+            plan[i][9] = (i > first and plan[i - 1][5] == kappa, m_in, m_out, i == final)
+            m_in = m_out
+
+    def _lazy_width(self, plan):
+        """The widest the lazy counter gets."""
+        return max((key[9][2] for key in plan if key and key[9]), default=0)
+
     def _junk_sizes(self):
         """Junk wires each tick leaves for the inverse pass: its carries, the flag it makes, the
-        wire its flag update leaves, and the retired offset."""
-        return [0 if key is None or key[3] else 1 + key[4] + (key[7] in ("same", "drop")) + key[8]
-                for key in self._tick_plan()]
+        wire its flag update leaves, a lazy tick's, and the retired offset. A lazy tick leaves
+        the wire that held p if the tick is raw, and b * p; the first one brings V's extra wire,
+        p and the counter, which the last one clears but for p."""
+        plan = self._tick_plan()
+        m = self._lazy_width(plan)
+
+        def lazy(key):
+            return (2 + m if key[9][1] == 0 else 0) + key[9][0] + 1 if key[9] else 0
+
+        return [0 if key is None or key[3] else 1 + key[4] + (key[7] in ("same", "drop")) + key[8] + lazy(key)
+                for key in plan]
 
     @property
     def junk_width(self):
@@ -572,6 +710,7 @@ class DialogMultiplier:
         lend = U[n - self.u_lent:]
         E = junk[:1]
         plan, sizes, used, flag = self._tick_plan(), self._junk_sizes(), 1, []
+        counter, ext, pending = self._lazy_width(plan), None, []
         assert len(junk) == 1 + sum(sizes)
         for i in range(self.iters):
             w = self.widths[i]
@@ -588,15 +727,35 @@ class DialogMultiplier:
                 if key[8]:
                     flag = [extra.pop(0)]
                 held = flag if key[7] else []
+                slot = [extra.pop(0)] if key[7] in ("same", "drop") else []
+                lz = []
+                if key[9]:
+                    if key[9][1] == 0:
+                        ext, pending = junk.index(extra[0]), [extra[1]]
+                        count = extra[2:2 + counter]
+                        V.append(extra[0])
+                        del extra[:2 + counter]
+                    else:
+                        V.append(spare)
+                    lz = pending + count[:max(key[9][1:3])]
                 scratch = (available + junk[used:])[:self._step_scratch(key)]
                 assert len(scratch) == self._step_scratch(key)
                 self.C.apply(self._euclid_step(*key),
-                             [U[:w], V, E, cell, tick_junk[:key[4]] + tick_junk[-1:], held, extra, scratch])
+                             [U[:w], V, E, cell, tick_junk[:key[4]] + tick_junk[-1:], held, slot, scratch,
+                              lz, extra if key[9] else []])
                 if key[7]:
                     flag = held
+                if key[9]:
+                    pending = lz[:1]
             G.extend(cell)
             next_width = self.widths[i + 1] if i + 1 < self.iters else self.pass_tail_width
             assert w - 1 <= next_width <= w
+            if plan[i] is not None and plan[i][9]:
+                # V's extra wire stays above the next width; the run's last tick leaves it clear,
+                # and it takes the place in the junk that the first one's came from.
+                spare = V.pop(next_width)
+                if plan[i][9][3]:
+                    junk[ext] = spare
             available.extend(V[next_width:])
             V[:] = V[:next_width]
             # By L6, u < 2**next_width from here on, and later steps touch only U[:w] for

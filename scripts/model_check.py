@@ -70,23 +70,67 @@ def b1_swept(cells):
     return list(reversed(out))
 
 
+def _lazy_pending(m, plan, states, cells):
+    """Per lazy tick, the pending borrow p as the tick finds it, after the raw bit took it, and as the
+    tick leaves it. V's physical word is the model's plus p at cut = kappa + LAZY_WINDOW. A bit that
+    comes to the window's top takes p and clears it if the bit was 1; a subtract's borrow e that finds
+    the window 0 sets p when U or V has a 1 from cut up, and is the swap otherwise."""
+    R = m.LAZY_WINDOW
+    out, p, V = {}, 0, None
+    for t, key in enumerate(plan):
+        if not (key and key[9]):
+            continue
+        k = key[5]
+        cut = k + R
+        U, Y, _ = states[t]
+        Yn = states[t + 1][1]
+        add, bit = cells[t]
+        if key[9][1] == 0:
+            V, p = Y, 0
+        found = p
+        if key[9][0]:
+            r = V >> (cut - 1) & 1
+            V ^= p << (cut - 1)
+            p &= 1 - r
+        mid = p
+        z, hi = U >> k != 0, V >> k
+        if not add and bit:
+            hi >>= 1
+            r = hi >> (R - 1) & 1
+            hi ^= p << (R - 1)
+            p &= 1 - r
+        if add:
+            X = U >> k if z else hi
+            e = bit if X == 0 else (X if z else X - (p << R)) - (Yn >> (k - 1))
+            if e and X & ((1 << R) - 1) == 0 and (hi >> R or U >> cut):
+                p ^= 1
+        V = (Yn >> (k - 1)) + (p << R) << (k - 1) | Yn & ((1 << (k - 1)) - 1)
+        out[t] = (found, mid, p)
+    return out
+
+
 def _junk_value(m, q, x):
     """The pass's junk register: E as the last tick found it, then per tick its chain's lowest carries
     c_2 .. c_(carry+1) of U + NOT(V') on its width, V' being V ^ E at bit 0 with a no-subtract
     tick's second strip already done on V[1:]; then the flag wire the tick makes, and the wire its
-    flag update leaves; then add AND E, the offset a subtract retires. The flag before a tick is
-    [U >= 2^kappa]. A wire that carries it holds the flag of the tick that last wrote it."""
+    flag update leaves; then a lazy tick's wires; then add AND E, the offset a subtract retires. The
+    flag before a tick is [U >= 2^kappa]. A wire that carries it holds the flag of the tick that last
+    wrote it. The first lazy tick brings V's extra wire and the counter, which end 0, and the wire for
+    p. A raw tick moves p to a new wire, the old one keeping p as the tick found it, and every lazy
+    tick leaves two AND p."""
     states = tick_pass(q, x, m.iters)[0]
     cells = tick_tape(q, x, m.iters)[2]
     plan = m._tick_plan()
     flags = [None if key is None or key[5] is None else int(states[t][0] >> key[5] != 0)
              for t, key in enumerate(plan)]
     bits = [states[m.iters - 1][2]]
-    holder = None
+    holder = p_wire = None
+    pending = _lazy_pending(m, plan, states, cells)
+    counter = m._lazy_width(plan)
     for t, (key, (U, V, E), (add, bit)) in enumerate(zip(plan, states, cells)):
         if key is None or key[3]:
             continue
-        w, top_clear, narrow, _, carry, kappa, high, fmode, init = key
+        w, top_clear, narrow, _, carry, kappa, high, fmode, init, _ = key
         if carry:
             vv = V ^ E
             if not add and bit and w >= 2:
@@ -109,6 +153,17 @@ def _junk_value(m, q, x):
         elif fmode == "drop":
             holder = len(bits)
             bits.append(flags[t + 1])
+        if key[9]:
+            found, mid, left = pending[t]
+            if key[9][1] == 0:
+                p_wire = len(bits) + 1
+                bits.extend([0] * (2 + counter))
+            if key[9][0]:
+                bits[p_wire] = found
+                p_wire = len(bits)
+                bits.append(0)
+            bits.append((1 - add) & bit & mid)
+            bits[p_wire] = left
         bits.append(add & E)
     return sum(b << k for k, b in enumerate(bits))
 
