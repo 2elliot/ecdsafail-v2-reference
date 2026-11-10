@@ -269,7 +269,9 @@ class TwoBitMod(Mod):
             rise(i)
         return chain
 
-    def _chain_down(self, C, L, selectors, masks, M, perch, chain, drop, write, take=None):
+    def _chain_down(self, C, L, selectors, masks, M, perch, chain, drop, write, take=None,
+                    keep_first=False):
+        """keep_first leaves carry 1 on its wire for the caller to clear."""
         a, b, w = *self.run, self.window
 
         def fall(i):
@@ -280,6 +282,8 @@ class TwoBitMod(Mod):
                 C.cx(s, L[i])
                 for other in reversed(rest):
                     C.cx(other, s)
+            elif i == 0 and keep_first:
+                pass
             else:
                 _selected_carry(C, L[i], selectors, masks, i, chain[i], chain[i + 1])
                 drop(chain[i + 1])
@@ -520,7 +524,10 @@ class TwoBitMod(Mod):
             C.cx(chain[w], e)
         C.free([e])
         P.write(chain[w])
-        self._chain_down(C, L, selectors, masks, M, perch, chain, drop, True, alloc)
+        self._chain_down(C, L, selectors, masks, M, perch, chain, drop, True, alloc,
+                         keep_first=p is not None)
+        # Carry 1 of the second chain is l0*k0, and l0 = R0 on a held lane, so it is bit_one's AND.
+        k0r0 = chain[1] if p is not None else None
         C.ccx(k0, k1, one)
         C.free([one])
 
@@ -542,17 +549,16 @@ class TwoBitMod(Mod):
         if p is not None:
             # S = R + k*f mod 4 names k's bit 1, which now sits on k2.
             def bit_one(m):
-                C.ccx(k0, a[0], m)
                 C.cx(low[1], m)
                 C.cx(a[1], m)
                 if f >> 1 & 1:
                     C.cx(k0, m)
 
-            (m,) = C.alloc(1)
-            bit_one(m)
-            C.ccx(p, m, k2)
-            bit_one(m)
-            C.free([m])
+            bit_one(k0r0)
+            C.ccx(p, k0r0, k2)
+            bit_one(k0r0)
+            C.ccx(L[0], k0, k0r0)
+            C.free([k0r0])
         self._drop_after_b1(C, prev, p)
         C.cx(sw, b)
         C.ccx(b, low[1], k1)
