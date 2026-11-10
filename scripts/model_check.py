@@ -70,24 +70,31 @@ def b1_swept(cells):
 
 
 def _junk_value(m, q, x):
-    """The pass's junk register: per tick, a carry tick's chain carries c_2 .. c_chain of
-    U + NOT(V ^ E) on its width, then NOT add AND bit of the semantic tape."""
+    """The pass's junk register: E as the last tick found it, then per tick a carry tick's chain
+    carries c_2 .. c_chain of U + NOT(V') on its width, V' being V ^ E at bit 0 with a no-subtract
+    tick's second strip already done on V[1:], then add AND E, the offset a subtract retires."""
     states = tick_pass(q, x, m.iters)[0]
     cells = tick_tape(q, x, m.iters)[2]
-    bits = []
+    bits = [states[m.iters - 1][2]]
     for key, (U, V, E), (add, bit) in zip(m._tick_plan(), states, cells):
         if key is None or key[3]:
             continue
         w, top_clear, narrow, _, carry = key
         if carry:
             chain = w - 1 if w >= 2 and (top_clear or narrow) else w
-            nb = ~(V ^ E) & ((1 << w) - 1)
+            vv = V ^ E
+            if not add and bit and w >= 2:
+                hi = w - 2 if top_clear else w - 1
+                vb = [vv >> i & 1 for i in range(w)]
+                vb[1:hi + 1] = vb[2:hi + 1] + [0]
+                vv = sum(b << i for i, b in enumerate(vb))
+            nb = ~vv & ((1 << w) - 1)
             c = nb & 1
             for i in range(1, chain):
                 a, b = U >> i & 1, nb >> i & 1
                 c = a & b | a & c | b & c
                 bits.append(c)
-        bits.append((1 - add) * bit)
+        bits.append(add & E)
     return sum(b << k for k, b in enumerate(bits))
 
 
