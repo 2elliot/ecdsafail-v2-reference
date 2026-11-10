@@ -358,11 +358,13 @@ class TwoBitMod(Mod):
             self._mark_b1(C, prev, p)
             C.free([p])
 
-    def _add_or_shift(self, C, J, a, word, held_lane=True):
+    def _add_or_shift(self, C, J, a, word, held_lane=True, g0=None):
         """On J, word = 2*word. Off J, word += a >> 1, through word's top two bits.
 
         word[n] must be 0 on J: a J cell never follows a B1 (D1), so a J lane is never held.
-        held_lane=False promises that no lane is held, so word[n] = 0 on every lane."""
+        held_lane=False promises that no lane is held, so word[n] = 0 on every lane.
+        With g0, a B1 lane's sum bits n and n + 1 leave the word for two clean wires, returned as
+        (hn, hb) and 0 on every other lane, and the word's top bits n - 1 and n end 0 there."""
         n = self.n
         (cin, D, t) = C.alloc(3)
         ops, tgt = a[1:], word[:n - 1]
@@ -381,7 +383,24 @@ class TwoBitMod(Mod):
         C.ccx(J, top, mid)
         C.cx(t, top)
         C.cx(t, mid)
-        C.ccx(c, top, t)
+        if g0 is None:
+            C.ccx(c, top, t)
+        else:
+            # hn = B1*(top ^ c), with B1 = 1 ^ g0 ^ J on the g0 wire, and top ^= hn leaves c there.
+            # t's clear then reads top ^ B1: c*top off B1, and c*(c ^ 1) = 0 on B1, where t keeps
+            # the carry c*top, H's bit n + 1.
+            (hn,) = C.alloc(1)
+            C.x(g0)
+            C.cx(J, g0)
+            C.cx(c, top)
+            C.ccx(g0, top, hn)
+            C.cx(c, top)
+            C.cx(hn, top)
+            C.cx(g0, top)
+            C.ccx(c, top, t)
+            C.cx(g0, top)
+            C.cx(J, g0)
+            C.x(g0)
         # top ^= c ^ D off J: its carry, and the cancel of the D that pair n - 2 hands it. On J top
         # becomes 0, read through mid, which holds top's old value there.
         C.cx(c, D)
@@ -390,6 +409,8 @@ class TwoBitMod(Mod):
         C.ccx(J, D, top)
         C.cx(mid, D)
         C.cx(c, D)
+        if g0 is not None:
+            C.cx(t, mid)
         for i in reversed(range(n - 1)):
             c, u, v, o = carries[i], word[i], word[i + 1], ops[i]
             C.ccx(c, u, o)
@@ -403,7 +424,11 @@ class TwoBitMod(Mod):
             C.cx(v, u)
             C.cx(c, D)
             C.cx(o, c)
-        C.free([cin, D, t])
+        if g0 is None:
+            C.free([cin, D, t])
+            return None
+        C.free([cin, D])
+        return hn, t
 
     def tick(self, C, prev, g, nxt, a, s, pebble=False, held=None, cell0=False):
         """One tick of a swept tape. prev is the cell before, or None on the first tick.
@@ -431,7 +456,8 @@ class TwoBitMod(Mod):
         if p is not None:
             for x in word:
                 C.cx(p, x)
-        self._add_or_shift(C, b, a, word, held_lane=prev is not None)
+        hand = self._add_or_shift(C, b, a, word, held_lane=prev is not None,
+                                  g0=None if nxt is None else g0)
         if p is not None:
             for x in word:
                 C.cx(p, x)
@@ -448,14 +474,8 @@ class TwoBitMod(Mod):
         else:
             C.cx(g0, one)
             C.cx(b, one)
-            C.x(one)
-            # H's bits n and n + 1 leave the word for the next tick on two clean wires.
-            hn, hb = C.alloc(2)
-            C.ccx(one, k0, hn)
-            C.cx(hn, k0)
-            C.ccx(one, k1, hb)
-            C.cx(hb, k1)
-            C.x(one)
+            # The add-or-shift moved H's bits n and n + 1 off a B1 lane's word for the next tick.
+            hn, hb = hand
         ra, rb = self.run
         P, M = Prefix(C, H), Prefix(C, L[ra:rb])
 
