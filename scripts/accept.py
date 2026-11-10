@@ -507,7 +507,9 @@ def i6_cost(run):
         problems.append("in-process [1]G JSON differs from scripts/emit.py's G")
     _, hier = run.secp_hier()
     cross = {label(k): {"counted": run.addend(k)["gates"], "expanded": r["counts"]} for k, r in hier.items()}
-    problems += [f"{label(k)}: counts differ from the expanded upload" for k, r in hier.items() if run.addend(k)["gates"] != r["counts"]]
+    # The JSON summary lists only the gate kinds present; the expansion lists all four.
+    present = lambda counts: {kind: v for kind, v in counts.items() if v}
+    problems += [f"{label(k)}: counts differ from the expanded upload" for k, r in hier.items() if present(run.addend(k)["gates"]) != present(r["counts"])]
     problems += [f"{label(k)}: counted JSON is not the simulated JSON" for k, r in hier.items() if run.addend(k)["sha256"] != r["json_sha256"]]
     toy_hier, toy_flat = run.emitted("toy127.hier").summary, run.emitted("toy127").meta
     cross["toy127"] = {"hier_expanded": [toy_hier["ops"], toy_hier["ccx"]], "flat": [toy_flat["ops"], toy_flat["ccx"]]}
@@ -516,7 +518,7 @@ def i6_cost(run):
     if not run.quick:
         _, flat = run.secp_flat()
         cross["secp256k1_G_flat"] = {"hier_expanded": g_file["gates"], "flat": flat and flat["counts"]}
-        if flat is None or g_file["gates"] != flat["counts"]:
+        if flat is None or present(g_file["gates"]) != present(flat["counts"]):
             problems.append("256-bit G expanded hierarchical gate counts differ from the flat build")
     evidence = {"t_per_ccx": T_PER_CCX, "seed": run.seed, "random_addends": run.sample, "per_addend": rows,
                 "sample_max": {"addend": worst, **rows[worst]}, "sample_min": {"addend": best, **rows[best]},
