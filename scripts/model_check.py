@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from check import expand, structural
+import schedule_check
 from qec import flatten, sim
 from qec.arith import Mod, load_const
 from qec.builder import Circuit
@@ -246,7 +247,8 @@ for q in [3, 5, 7, 11, 13, 31, 43, 61, 127, 251, 509, 1021, 4093]:
                  "multiplier_gates_ok": forward_bad == inverse_bad == 0,
                  "forward_bad": forward_bad, "inverse_bad": inverse_bad,
                  "pass_offset_ok": pass_offset, "pass_tape_ok": pass_tape, "pass_zero_outside_domain": pass_zero_outside,
-                 "joint_domain_ok": joint_ok, "high_ticks": sum(1 for key in DialogMultiplier(Circuit(), Mod(q))._tick_plan() if key and key[6])})
+                 "joint_domain_ok": joint_ok, "schedule_ok": schedule_check.schedule_ok(q, range(1, q)),
+                 "high_ticks": sum(1 for key in DialogMultiplier(Circuit(), Mod(q))._tick_plan() if key and key[6])})
     print(json.dumps(rows[-1]))
 q = 2**256 - 2**32 - 977
 rng = random.Random(1)
@@ -257,11 +259,14 @@ pass_end = all(tick_tape(q, x or 1, tick_bound(q))[:2] == (1, 0)
 offset_ok = all(offset_checks(q, [1, q - 1] + [x for x, _ in pairs]))
 edge_pairs = [(x, y) for x, y in width_edge_inputs(q) if x != 0]
 width_edge_ok = gate_pairs(q, edge_pairs) == 0 and gate_pairs(q, edge_pairs, inverse=True) == 0
+schedule_ok = (all(schedule_check.schedule_ok(p, range(1, p)) for p in schedule_check.TOY)
+               and schedule_check.schedule_ok(q, schedule_check.secp_inputs()))
 print(json.dumps({"q": "secp256k1", "bound": tick_bound(q), "random_pairs": 2000,
                   "multiplier_ok": ok, "pass_end_ok": pass_end, "offset_ok": offset_ok,
-                  "width_edge_ok": width_edge_ok, "width_edge_lanes": len(edge_pairs)}))
+                  "width_edge_ok": width_edge_ok, "schedule_ok": schedule_ok,
+                  "schedule_primes": schedule_check.TOY, "width_edge_lanes": len(edge_pairs)}))
 keys = ("width_schedule_ok", "multiplier_ok", "pass_end_ok", "remap_control_ok",
         "pass_short_rejected", "pass_gates_ok", "multiplier_gates_ok",
-        "pass_offset_ok", "pass_tape_ok", "pass_zero_outside_domain", "joint_domain_ok")
-sys.exit(0 if ok and pass_end and offset_ok and width_edge_ok and all(r["worst_iterations"] <= r["bound"]
+        "pass_offset_ok", "pass_tape_ok", "pass_zero_outside_domain", "joint_domain_ok", "schedule_ok")
+sys.exit(0 if ok and pass_end and offset_ok and width_edge_ok and schedule_ok and all(r["worst_iterations"] <= r["bound"]
          and all(r[k] for k in keys) for r in rows) else 1)
