@@ -15,8 +15,9 @@ from .arith import (_carries, _uncarry, add, add_const, add_lookahead, cadd_look
                     gt_lookahead, prefix_xor)
 from .two_bit import Prefix
 
-# Add the square's rows as lookahead trees, on ROW_TEMPS clean wires beside the fold's own.
-ROW_TREE = True
+# Add the square's rows as lookahead trees, on ROW_TEMPS clean wires beside the fold's own. Off on
+# this branch: the CCX they cost buy more ticks in the Bezout tick's add (two_bit.CDKM_MIX).
+ROW_TREE = False
 ROW_TEMPS = 30
 # Fan each row's Gray-code step out through at most this many copies on clean temps, and undo the walk
 # by a prefix network; 0 runs both as CX chains.

@@ -8,7 +8,7 @@ from .curve import Curve
 from .square import SquareFold
 from .two_bit import TwoBitMod
 from .model import tick_bound, tick_widths
-from . import block0_code, tail_code, tape_block
+from . import block0_code, tail_code, tape_block, two_bit
 from .tape_block import FREE, TICKS
 
 
@@ -671,10 +671,11 @@ class DialogMultiplier:
             self._bezout_step = C.record_shape(step, [2, mod.n, mod.n])
         return self._bezout_step
 
-    def _bezout_tick(self, first, last, pebble=False, consume=False, produce=False):
+    def _bezout_tick(self, first, last, pebble=False, consume=False, produce=False, cdkm=False):
         """consume: the previous cell's B1 mark arrives on a wire from the tick before.
-        produce: this tick leaves the next tick's mark, NOR of its own cell, on a given clean wire."""
-        key = first, last, pebble, consume, produce
+        produce: this tick leaves the next tick's mark, NOR of its own cell, on a given clean wire.
+        cdkm: this tick's add is the CDKM ripple (two_bit.CDKM_MIX)."""
+        key = first, last, pebble, consume, produce, cdkm
         if key not in self._bezout_ticks:
             C, n = self.C, self.mod.n
 
@@ -684,7 +685,11 @@ class DialogMultiplier:
                                  pout=pout[0] if pout else None)
 
             sizes = [0 if first else 2, 2, 0 if last else 1, n, n, int(consume), int(produce)]
-            self._bezout_ticks[key] = C.record_shape(tick, sizes)
+            self.narrow.force_cdkm = cdkm
+            try:
+                self._bezout_ticks[key] = C.record_shape(tick, sizes)
+            finally:
+                self.narrow.force_cdkm = False
         return self._bezout_ticks[key]
 
     def _b1_step(self, G, i, both):
@@ -773,7 +778,9 @@ class DialogMultiplier:
                     assert mark_at == (len(C.prims), len(C.calls or ())) and not first
                 pin = [hand] if consume else []
                 pout = C.alloc(1) if produce else []
-                C.apply(self._bezout_tick(first, last, pebble, consume, produce),
+                mix = two_bit.CDKM_MIX
+                cdkm = int((i + 1) * mix) > int(i * mix)
+                C.apply(self._bezout_tick(first, last, pebble, consume, produce, cdkm),
                         [prev, G[2 * i:2 * i + 2], nxt, Yr, S, pin, pout])
                 C.free(pin)
                 hand = pout[0] if produce else None
