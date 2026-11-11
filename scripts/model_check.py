@@ -124,7 +124,7 @@ def _junk_value(m, q, x):
     flags = [None if key is None or key[5] is None else int(states[t][0] >> key[5] != 0)
              for t, key in enumerate(plan)]
     bits = [states[m.iters - 1][2]]
-    holder = p_wire = None
+    holder = p_wire = count_wire = None
     pending = _lazy_pending(m, plan, states, cells)
     counter = m._lazy_width(plan)
     for t, (key, (U, V, E), (add, bit)) in enumerate(zip(plan, states, cells)):
@@ -157,7 +157,16 @@ def _junk_value(m, q, x):
             found, mid, left = pending[t]
             if key[9][1] == 0:
                 p_wire = len(bits) + 1
+                count_wire = p_wire + 1
                 bits.extend([0] * (2 + counter))
+            if key[9][3] and key[0] - key[5] > m.LAZY_WINDOW + 1:
+                # A run that ends at a longer word leaves the counter as it stands: rho = pi - 1 on
+                # m_out bits, pi the ones of U and of V's physical word from cut up.
+                cut, Un, Yn = key[5] + m.LAZY_WINDOW, states[t + 1][0], states[t + 1][1]
+                rho = bin(Un >> cut).count("1") + bin((Yn + (left << (cut - 1))) >> (cut - 1)).count("1") - 1
+                rho &= (1 << key[9][2]) - 1
+                for i in range(counter):
+                    bits[count_wire + i] = rho >> i & 1
             if key[9][0]:
                 bits[p_wire] = found
                 p_wire = len(bits)

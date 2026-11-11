@@ -100,13 +100,18 @@ def lazy_fields_ok(q, plan):
     if not lazy:
         return True
     first, final = lazy[0], lazy[-1]
-    if lazy != long_high or lazy != list(range(first, final + 1)) or final + 1 >= len(plan) or first < 1:
+    # The run is the long high ticks from the first, up to the last whose word is long enough to end at
+    # (all of them, or a later end at a longer word: the ticks after it run their word whole).
+    if lazy != long_high[:len(lazy)] or lazy != list(range(first, final + 1)) or final + 1 >= len(plan) or first < 1:
         return False
     K = [None if key is None else min(key[0], joint_threshold(q, t)) for t, key in enumerate(plan)]
     w = [None if key is None else key[0] for key in plan]
     if w[first - 1] != w[first] or K[first - 1] != K[first] + 1 or w[first] - K[first] != WINDOW + 1:
         return False
-    if w[final + 1] != w[final] - 1 or K[final + 1] != K[final] or w[final] - K[final] != WINDOW + 1:
+    if lazy == long_high:
+        if w[final + 1] != w[final] - 1 or K[final + 1] != K[final] or w[final] - K[final] != WINDOW + 1:
+            return False
+    elif w[final] - K[final] <= WINDOW + 1 or plan[final + 1][9] or not plan[final + 1][6]:
         return False
     width = 0
     for t in lazy:
@@ -167,7 +172,10 @@ def lazy_states_ok(q, plan, xs):
                     if borrow and word & mask == 0 and (hi >> WINDOW or u >> cut):
                         p = 1
                 phys = Vn + (p << (cut - 1))
-                if leave:
+                if leave and w - k > WINDOW + 1:
+                    if phys >> (w + 1) or phys - (p << (cut - 1)) != Vn:
+                        return False
+                elif leave:
                     r = phys >> (cut - 1) & 1
                     if phys >> (w - 1) != p & (1 - r) or (phys ^ (p << (cut - 1)) ^ (p & (1 - r)) << (w - 1)) != Vn:
                         return False
@@ -308,6 +316,15 @@ def main():
             ticks = sum(1 for key in plan_of(q, lag) if key and key[10])
             if ticks:
                 rows.append({"q": q, "lag_block": lag, "lag_ticks": ticks, "schedule_ok": schedule_ok(q, range(1, q), lag)})
+    saved = DialogMultiplier.LAZY_END
+    for end in (4, 5):
+        DialogMultiplier.LAZY_END = end
+        for q in TOY:
+            plan = plan_of(q)
+            ticks = sum(1 for key in plan if key and key[9])
+            if any(key and key[6] and not key[9] and key[0] - key[5] > WINDOW for key in plan):
+                rows.append({"q": q, "lazy_end": end, "lazy_ticks": ticks, "schedule_ok": schedule_ok(q, range(1, q))})
+    DialogMultiplier.LAZY_END = saved
     xs = secp_inputs()
     for lag in (1, 3, 7, 15):
         rows.append({"q": "secp256k1", "lag_block": lag, "lag_ticks": sum(1 for key in plan_of(SECP, lag) if key and key[10]),

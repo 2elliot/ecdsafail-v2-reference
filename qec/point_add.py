@@ -32,6 +32,9 @@ class DialogMultiplier:
     # the bits above only move from U to V. One pending borrow wire is enough from 2 up: see
     # _lazy_plan.
     LAZY_WINDOW = 2
+    # The lazy run ends at the last tick whose word has this many bits above the threshold, and the
+    # ticks after it run their word whole; None ends it at LAZY_WINDOW + 1 bits.
+    LAZY_END = 9
     # Lazy ticks run in blocks with a far front: the cells from the front up are one register for
     # U's word and V's, which stays put through the block and lags behind V's shifts; one shift
     # after the block's last tick brings it down by the count. These are the block lengths the
@@ -541,7 +544,19 @@ class DialogMultiplier:
                     flag[0], slot[0] = new, flag[0]
                 elif fmode == "final":
                     C.ccx(g0, flag[0], zg)
-                if lazy and leave:
+                if lazy and leave and w - kappa > self.LAZY_WINDOW + 1:
+                    # The ticks after this one run the word whole, so V takes the pending borrow,
+                    # V[cut:] -= p, its borrows on scratch. The counter stays as junk.
+                    cells = V[cut:w + 1]
+                    a = [lz[0]] + list(scratch[:len(cells) - 2])
+                    C.cx(a[0], cells[0])
+                    for j in range(1, len(cells) - 1):
+                        C.ccx(a[j - 1], cells[j - 1], a[j])
+                        C.cx(a[j], cells[j])
+                    C.ccx(a[-1], cells[-2], cells[-1])
+                    for j in range(len(cells) - 2, 0, -1):
+                        C.ccx(a[j - 1], cells[j - 1], a[j])
+                elif lazy and leave:
                     # The next tick's V fits w - 1 bits. The last bit above the window takes the
                     # pending borrow, and V's extra wire, which held what p left there, p AND NOT
                     # bit, is cleared against it. The counter goes to 0 and p's wire stays as junk.
@@ -567,7 +582,8 @@ class DialogMultiplier:
         w, kappa, high, fmode, init, lazy = key[0], key[5], key[6], key[7], key[8], key[9]
         word = w - kappa + 1 if high else 0
         if lazy:
-            word = max(DialogMultiplier.LAZY_WINDOW + 1, max(lazy[1:3]) + lazy[0], w - kappa - 2 if init else 0)
+            word = max(DialogMultiplier.LAZY_WINDOW + 1, max(lazy[1:3]) + lazy[0], w - kappa - 2 if init else 0,
+                       w - kappa - 3 if lazy[3] else 0)
         return word + (1 if fmode in ("drop", "final") else 0)
 
     def _euclid_tick0(self):
@@ -731,6 +747,11 @@ class DialogMultiplier:
             return
         if (after[0], after[5]) != (W[final] - 1, plan[final][5]) or W[final] - plan[final][5] != R + 1:
             return
+        if self.LAZY_END is not None:
+            keep = [i for i in lazy if W[i] - plan[i][5] >= self.LAZY_END]
+            if keep and keep[-1] > first:
+                lazy = lazy[:lazy.index(keep[-1]) + 1]
+                final = lazy[-1]
         m_in = 0
         for i in lazy:
             w, kappa = plan[i][0], plan[i][5]
