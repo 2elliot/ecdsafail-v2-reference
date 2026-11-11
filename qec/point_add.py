@@ -1,6 +1,8 @@
 """Exact, complete, controlled fixed-addend point addition:
 |c>|R>|0> -> |c>|R + c*A>|0> for every R in E(F_q) encoded as little-endian
 affine (x, y) with infinity = (0, 0)."""
+import functools
+
 from .arith import Mod, _maj, cswap, load_const
 from .builder import Circuit, flatten
 from .curve import Curve
@@ -760,24 +762,69 @@ class DialogMultiplier:
             m_in = m_out
 
     @staticmethod
-    def _lag_counts(c):
-        """For a block of c ticks: the adders that count its strips, and per shift stage j the cells
-        under the front whose swap waits on the count's lower bits."""
-        J, sizes, adders = c.bit_length(), [c], 0
+    def _lag_counts(c, digits=0):
+        """For c count wires: the adders that count them, and per shift stage j the cells under the
+        front whose swap waits on the count's lower bits. With digits, the wires are c / 2 of weight
+        1 and the binary digits of a number below 2^digits <= c / 2 + 1."""
+        J, adders = c.bit_length(), 0
+        sizes = [c // 2 + 1] + [1] * (digits - 1) if digits else [c]
+        sizes += [0] * (J + 1 - len(sizes))
         for j in range(J):
             carries = 0
             while sizes[j] >= 2:
                 sizes[j] -= 2 if sizes[j] >= 3 else 1
                 carries += 1
             adders += carries
-            sizes.append(carries)
+            sizes[j + 1] += carries
         assert sizes[J] == 0 and all(sizes[:J])
         return adders, [min((1 << j) - 1, c - (1 << j)) if j == J - 1 else (1 << j) - 1 for j in range(J)]
 
-    def _lag_cost(self, c, cells):
+    def _lag_cost(self, c, cells, digits=0):
         """CCX of _realign on c count wires with this many cells from the front up."""
-        adders, under = self._lag_counts(c)
+        adders, under = self._lag_counts(c, digits)
         return 2 * (adders + sum(under)) + sum(under) + c.bit_length() * cells
+
+    @staticmethod
+    @functools.cache
+    def _thermo_cases(c):
+        """For a block of c = 2^J - 1 ticks, the flag-off patterns left_e = NOT z_(e+1) that are not 0s
+        then 1s, grouped by (j, es): j the last tick whose flag comes back on (left_(j-1) = 1, left_j = 0),
+        es the first tick after it that turns the flag off, or None if it stays on. Each maps to the
+        most the thermometer count can take there: the number whose binary digits are the XORs that
+        count a thermometer, plus the strips that can count (a tick whose flag found is off)."""
+        out = {}
+        for bits in range(1 << c):
+            left = [bits >> e & 1 for e in range(c)]
+            if all(left[e] <= left[e + 1] for e in range(c - 1)):
+                continue
+            j = max(e for e in range(1, c) if left[e - 1] and not left[e])
+            es = next((e for e in range(j, c) if left[e]), None)
+            count = DialogMultiplier._thermo_count(left) + 1 + sum(left[:c - 1])
+            out[j, es] = max(out.get((j, es), 0), count)
+        return out
+
+    @staticmethod
+    def _thermo_count(left):
+        """The number whose digit j is the XOR of left_(c - m) over the m in 1 .. c where m - 1 and m differ
+        in bit j: the count of left when it is 0s then 1s."""
+        c = len(left)
+        return sum((sum(left[c - m] for m in range(1, c + 1) if (m ^ (m - 1)) >> j & 1) & 1) << j
+                   for j in range(c.bit_length()))
+
+    def _thermo(self, K, front, c):
+        """1 when a block of c ticks with thresholds K (and K[c] the tick after's) may count its flag-off
+        bits as a thermometer. With a word in the far cells they are 0s then 1s and the count is exact.
+        Otherwise X is 0 and only V's word must lie under front - k'. If the flag is on at the end, V is
+        below 2^K_c (Jp). Else it went off at es by a subtract that swapped, u < 2^K_j since tick j:
+        after es u < 2^K_es, and v < 2^(K_j - 1) halves each tick while v >= u, where alone a pending
+        borrow can be (it needs v >= 3 2^kappa > u), and the physical word is below 4 v."""
+        if c < 3 or c & (c + 1):
+            return 0
+        for (j, es), count in self._thermo_cases(c).items():
+            bound = K[c] if es is None else max(K[es], K[j] + 1 - (c - 1 - es))
+            if front - count < bound:
+                return 0
+        return 1
 
     def _lag_plan(self, plan):
         """Mark the lag blocks: runs of lazy ticks, none the lazy run's first or last, of a length
@@ -818,7 +865,9 @@ class DialogMultiplier:
             if front > W[i + c] or front < 2 * c:
                 return None
             eager = sum(2 * plan[t][0] - 1 - plan[t][1] - plan[t][5] - R for t in ticks)
-            mine = sum(2 * front - 2 - kappa[e] - R for e in range(c)) + 3 * c + self._lag_cost(2 * c, W[i] + 1 - front - self._top_free(plan, i))
+            digits = c.bit_length() * self._thermo(kappa + [plan[i + c][5]], front, c)
+            mine = (sum(2 * front - 2 - kappa[e] - R for e in range(c)) + 3 * c
+                    + self._lag_cost(2 * c, W[i] + 1 - front - self._top_free(plan, i), digits))
             return eager - mine, front
 
         choice = [None] * T
@@ -866,18 +915,38 @@ class DialogMultiplier:
         bound = (2 * q * q * (q - 1)) >> 2 * i
         return int(bool(plan[i][1]) or (bound.bit_length() < 2 * w and w - kappa >= 4))
 
-    def _realign(self, c, cells):
+    def _lag_tally(self, after, flag, digits, tally):
+        """XOR into tally the block's flag-off bits left_e = NOT z_(e+1), one a wire, or with digits their
+        count as a thermometer: digit j takes left_e for each m = c - e where m - 1 and m differ in bit j.
+        after holds what each tick's flag update left: a drop keeps the flag it found on its old wire, and
+        a same tick's flag found is the flag it leaves XOR its g0 * flag, which are never both set; flag is
+        the flag the last tick leaves."""
+        c = len(after)
+        for e in range(c):
+            for j, wire in enumerate(tally):
+                if not (j == e if not digits else ((c - e) ^ (c - e - 1)) >> j & 1):
+                    continue
+                k = e + 1
+                while k < c and after[k][0] == "same":
+                    self.C.cx(after[k][1], wire)
+                    k += 1
+                self.C.cx(after[k][1] if k < c else flag, wire)
+                self.C.x(wire)
+
+    def _realign(self, c, cells, digits=0):
         """Close a lag block's holes. V is the cells from c below the front up, xs the block's c
-        count bits, k their sum: the cells [front - k, front) are 0, and every cell from the front up
+        count bits, k their sum (with digits, c / 2 strips and then the digits, low first, of a
+        number added to them): the cells [front - k, front) are 0, and every cell from the front up
         moves down k places, zeros coming in on top. The count is made by adders on scratch, and
         the shift goes low bit first: at stage j the cells from front - r up, r = k mod 2^j, move
         down 2^j, so the swaps of the 2^j - 1 cells under the front wait on k_j AND [r >= m], which
         are the upper half of the next stage's thresholds [k mod 2^(j+1) >= 2^j + m]."""
-        key = (c, cells)
+        key = (c, cells, digits)
         if key not in self._realigns:
             C = self.C
             J = c.bit_length()
-            adders, under = self._lag_counts(c)
+            adders, under = self._lag_counts(c, digits)
+            n = c // 2 + digits if digits else c
 
             def body(V, xs, scratch):
                 undo, free = [], list(scratch)
@@ -890,7 +959,9 @@ class DialogMultiplier:
                     C.ccx(a, b, t)
                     undo.append((a, b, t))
 
-                buckets, k = [list(xs)] + [[] for _ in range(J)], []
+                buckets, k = [list(xs[:n - digits])] + [[] for _ in range(J)], []
+                for j, d in enumerate(xs[n - digits:]):
+                    buckets[j].append(d)
                 for j in range(J):
                     ws = buckets[j]
                     while len(ws) >= 2:
@@ -931,7 +1002,7 @@ class DialogMultiplier:
                 for gate in reversed(undo):
                     (C.cx if len(gate) == 2 else C.ccx)(*gate)
 
-            self._realigns[key] = C.record_shape(body, [c + cells, c, adders + sum(under)])
+            self._realigns[key] = C.record_shape(body, [c + cells, n, adders + sum(under)])
         return self._realigns[key]
 
     def _far_swap(self, flag, U, V, lo, hi):
@@ -1031,29 +1102,15 @@ class DialogMultiplier:
                 if far and far[2] == far[1] - 1:
                     front, c = far[:2]
                     cells = V[front - 2 * c:len(V) - self._top_free(plan, i - c + 1)]
-                    adders, under = self._lag_counts(2 * c)
+                    digits = c.bit_length() * self._thermo([plan[i - c + 1 + e][5] for e in range(c + 1)], front, c)
+                    adders, under = self._lag_counts(2 * c, digits)
                     scratch = (available + junk[used:])[:adders + sum(under)]
                     assert len(scratch) == adders + sum(under)
-                    # The lag: a counted strip, and a tick that leaves the flag off. The flag tick e
-                    # leaves is the one tick e + 1 finds: a drop keeps it on its old wire, and a same
-                    # tick's is the flag it leaves plus its g0 * flag, which are never both set.
-                    left = list(self.C.alloc(c))
-                    for e in range(c):
-                        j = e + 1
-                        while j < c and after[j][0] == "same":
-                            self.C.cx(after[j][1], left[e])
-                            j += 1
-                        self.C.cx(after[j][1] if j < c else flag[0], left[e])
-                        self.C.x(left[e])
-                    self.C.apply(self._realign(2 * c, len(cells) - 2 * c), [cells, strips + left, scratch])
-                    for e in range(c):
-                        j = e + 1
-                        self.C.x(left[e])
-                        while j < c and after[j][0] == "same":
-                            self.C.cx(after[j][1], left[e])
-                            j += 1
-                        self.C.cx(after[j][1] if j < c else flag[0], left[e])
-                    self.C.free(left)
+                    tally = list(self.C.alloc(digits or c))
+                    self._lag_tally(after, flag[0], digits, tally)
+                    self.C.apply(self._realign(2 * c, len(cells) - 2 * c, digits), [cells, strips + tally, scratch])
+                    self._lag_tally(after, flag[0], digits, tally)
+                    self.C.free(tally)
                     strips, after, whole = [], [], False
                 if not whole:
                     # V's extra wire stays above the next width; the run's last tick leaves it clear,

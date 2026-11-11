@@ -17,8 +17,9 @@ The lag blocks must be runs of c lazy ticks, none the lazy run's first or last, 
 (F, c, e, size) with one front F and size the block's first width plus one. F must keep the holes clear of
 the cells a lazy tick reads, F - 2 e >= cut_e + 2 (cut_e + 1 at the block's last tick, whose holes are
 closed before the next tick reads), be at most the width after the block and at least 2 c. A block whose
-realign leaves X's top cell out must have its lazy word below 2^w by the potential bound. On the
-recurrence, with lag the count so far of ticks that left the flag off and of strips counted
+realign leaves X's top cell out must have its lazy word below 2^w by the potential bound. A block whose flag-off
+bits are counted as a thermometer must keep V's word under the front less that count wherever they are not 0s
+then 1s. On the recurrence, with lag the count so far of ticks that left the flag off and of strips counted
 (two AND NOT flag): F - lag >= cut + 2 at every tick but the last, cut + 1 there; under the flag U is below
 2^(F - lag) when lag > 0 and V is below 2^kappa; and on the lazy word's physical V, a word X0 that the far
 cells hold when the block starts is, after every tick, either U's bits from F up, or V's physical bits
@@ -233,6 +234,34 @@ def top_free_ok(q, plan):
     return True
 
 
+def thermo_ok(q, plan):
+    """A block whose flag-off bits are counted as a thermometer (digits j = XOR of left_(c-m) over the m where
+    m - 1 and m differ in bit j) must have, for every pattern of those bits that is not 0s then 1s, V's word
+    under front - k'. Such a pattern has X = 0. With j the last tick whose flag comes back on, V is below
+    2^K_c if the flag is still on at the end, else below 2^max(K_es, K_j + 1 - (c - 1 - es)), es the tick
+    after j that turns it off; k' is the thermometer value plus every strip that can count."""
+    m = DialogMultiplier(Circuit(), Mod(q))
+    for t, c, front in lag_blocks(plan) or []:
+        K = [plan[t + e][5] for e in range(c + 1)]
+        if not m._thermo(K, front, c):
+            continue
+        if c < 3 or (c + 1) & c:
+            return False
+        for bits in range(1 << c):
+            left = [bits >> e & 1 for e in range(c)]
+            if left == sorted(left):
+                continue
+            j = max(e for e in range(1, c) if left[e - 1] > left[e])
+            ones = [e for e in range(j, c) if left[e]]
+            bound = max(K[ones[0]], K[j] + 1 - (c - 1 - ones[0])) if ones else K[c]
+            value = 0
+            for d in range(c.bit_length()):
+                value |= (sum(left[c - n] for n in range(1, c + 1) if (n >> d) % 2 != ((n - 1) >> d) % 2) % 2) << d
+            if front - value - 1 - sum(left[:-1]) < bound:
+                return False
+    return True
+
+
 def lag_states_ok(q, plan, xs):
     blocks = lag_blocks(plan)
     if not blocks:
@@ -304,7 +333,7 @@ def schedule_ok(q, xs, lag=None):
     plan = plan_of(q, lag)
     return (thresholds_ok(q, plan) and states_ok(q, plan, xs)
             and lazy_fields_ok(q, plan) and lazy_states_ok(q, plan, xs)
-            and lag_fields_ok(q, plan) and top_free_ok(q, plan) and lag_states_ok(q, plan, xs))
+            and lag_fields_ok(q, plan) and top_free_ok(q, plan) and thermo_ok(q, plan) and lag_states_ok(q, plan, xs))
 
 
 def main():
