@@ -21,12 +21,13 @@ class DialogMultiplier:
     RAW_TAPE = True
     # Chain carries the forward pass leaves as junk for the inverse pass. Each is held through the
     # Bezout pass and saves one CCX in each Euclid pass, so this is the one knob that trades wires
-    # for CCX; 1,146 puts the climb stack at 4,096 wires at n = 256.
-    CARRY_JUNK = 1146
+    # for CCX; 1,149 puts the climb stack at 4,096 wires at n = 256.
+    CARRY_JUNK = 1149
     # A tick whose registers reach this many bits above its joint threshold runs those bits as one
-    # high word, 3 CCX a bit, on a flag that says which register holds it. 6 is 148 CCX cheaper at
-    # n = 256; 2 keeps the high word in every toy prime of 8 bits or more.
-    HIGH_MIN = 2
+    # high word, 3 CCX a bit, on a flag that says which register holds it. At n = 256 a word of 2 bits
+    # costs more whole than plain, and 4 or more loses the lazy run, which starts at a word of 3. 3 keeps
+    # the high word in every toy prime of 10 bits or more (2 does from 8).
+    HIGH_MIN = 3
     # A high word longer than this is lazy: its lowest LAZY_WINDOW bits keep the borrow chain, and
     # the bits above only move from U to V. One pending borrow wire is enough from 2 up: see
     # _lazy_plan.
