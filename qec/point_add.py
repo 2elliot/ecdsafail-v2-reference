@@ -21,8 +21,8 @@ class DialogMultiplier:
     RAW_TAPE = True
     # Chain carries the forward pass leaves as junk for the inverse pass. Each is held through the
     # Bezout pass and saves one CCX in each Euclid pass, so this is the one knob that trades wires
-    # for CCX; 1,239 puts the climb stack at 4,096 wires at n = 256.
-    CARRY_JUNK = 1239
+    # for CCX; 1,201 puts the climb stack at 4,096 wires at n = 256.
+    CARRY_JUNK = 1201
     # A tick whose registers reach this many bits above its joint threshold runs those bits as one
     # high word, 3 CCX a bit, on a flag that says which register holds it. 6 is 148 CCX cheaper at
     # n = 256; 2 keeps the high word in every toy prime of 8 bits or more.
@@ -31,11 +31,11 @@ class DialogMultiplier:
     # the bits above only move from U to V. One pending borrow wire is enough from 2 up: see
     # _lazy_plan.
     LAZY_WINDOW = 2
-    # Lazy ticks run in blocks whose second strip stops below a far front: the cells from the front
-    # up lag by one place for each strip, and one shift after the block's last tick brings them
-    # down by the count. These are the block lengths the plan chooses from; () turns it off. A
-    # block is planned where it saves at least LAG_MIN_SAVING CCX; None plans the first length
-    # that has a far cell at every tick, for toy sizes.
+    # Lazy ticks run in blocks with a far front: the cells from the front up are one register for
+    # U's word and V's, which stays put through the block and lags behind V's shifts; one shift
+    # after the block's last tick brings it down by the count. These are the block lengths the
+    # plan chooses from; () turns it off. A run of blocks is planned where it saves at least
+    # LAG_MIN_SAVING CCX; None plans the first length that fits at every tick, for toy sizes.
     LAG_BLOCK = (15, 7, 3)
     LAG_MIN_SAVING = 1
 
@@ -393,13 +393,14 @@ class DialogMultiplier:
         init: the flag is made here, from U.
         lazy: (raw, m_in, m_out, leave) for a high word longer than LAZY_WINDOW; see _lazy_plan.
             V then has one more wire on top, and lz holds the pending borrow p and the counter.
-        far: (front, c, last) for a lazy tick of a lag block; see _lag_plan. V then has c more
-            wires on top, the second strip stops below the front, and a junk wire takes
-            x = two AND NOT flag, the strips that _realign counts."""
+        far: (front, c, e, size) for tick e of a lag block of c; see _lag_plan. V then has the
+            block's size wires, of which the step relabels only those under the front; the second
+            strip and the move of U's word stop under the front; and a junk wire takes
+            x = two AND NOT flag, which _realign counts."""
         if last:
             top_clear = narrow = False
             carry = 0
-        assert not far or (lazy and not init and not lazy[3])
+        assert not far or (lazy and not init and not lazy[3] and fmode in ("same", "drop") and far[0] <= w)
         key = (w, top_clear, narrow, last, carry, kappa, high, fmode, init, lazy, far)
         if key not in self._euclid_steps:
             C = self.C
@@ -477,7 +478,7 @@ class DialogMultiplier:
                 # A lazy V is below 2^(w + 1), or 2^w with top_clear: one more bit than the true one.
                 # In a lag block the strip leaves the far cells where they are: V[1], which is 0 on
                 # b, goes to the cell under the front, a hole. Off the flag every cell the strip
-                # moves or leaves lies in V's word; on it V is below 2^kappa and the cells are 0.
+                # moves lies in V's word; on it V is below 2^kappa and the cells it moves are 0.
                 for i in range(1, far[0] - 1 if far else w - 2 + bool(lazy) if top_clear else w - 1 + bool(lazy)):
                     cswap(C, b, [V[i]], [V[i + 1]])
                 if far:
@@ -509,7 +510,9 @@ class DialogMultiplier:
                     # pi = 0 is rho's sign. Above the window the word only moves from U to V.
                     self._shared_difference(U[:cut], V[:cut], g0, g1, None, junk[:-1], self.LAZY_WINDOW,
                                             (flag[0], zg), scratch, (cnt[m_out - 1], lz[0]))
-                    cswap(C, zg, U[cut:w], V[cut:w])
+                    # In a lag block the far cells hold the word of whichever register has one, so
+                    # only the cells under the front change sides.
+                    cswap(C, zg, U[cut:far[0] if far else w], V[cut:far[0] if far else w])
                 elif high:
                     self._shared_difference(U[:w], V[:w], g0, g1, None, junk[:-1], w - kappa,
                                             (flag[0], zg), scratch)
@@ -542,9 +545,10 @@ class DialogMultiplier:
                         C.x(r)
                     C.cx(lz[0], V[cut])
                     C.ccx(lz[0], V[cut], V[w])
-                V[:] = V[1:] + V[:1]
+                # The far cells stay: the 0 that leaves V's low end comes back in under the front.
+                V[:] = V[1:far[0]] + V[:1] + V[far[0]:] if far else V[1:] + V[:1]
 
-            sizes = [w, w + bool(lazy) + (far[1] if far else 0), 1, 2, 0 if last else 1 + carry, 1 if fmode else 0,
+            sizes = [w, far[3] if far else w + bool(lazy), 1, 2, 0 if last else 1 + carry, 1 if fmode else 0,
                      1 if fmode in ("same", "drop") else 0, self._step_scratch(key),
                      1 + max(lazy[1:3]) if lazy else 0, lazy[0] + 1 + bool(far) if lazy else 0]
             self._euclid_steps[key] = C.record_shape(step, sizes)
@@ -743,26 +747,31 @@ class DialogMultiplier:
         return adders, [min((1 << j) - 1, c - (1 << j)) if j == J - 1 else (1 << j) - 1 for j in range(J)]
 
     def _lag_cost(self, c, cells):
-        """CCX of _realign on a block of c ticks with this many cells from the front up."""
+        """CCX of _realign on c count wires with this many cells from the front up."""
         adders, under = self._lag_counts(c)
         return 2 * (adders + sum(under)) + sum(under) + c.bit_length() * cells
 
     def _lag_plan(self, plan):
         """Mark the lag blocks: runs of lazy ticks, none the lazy run's first or last, of a length
-        from LAG_BLOCK. At tick e of a block of c the far front is F - e, F the block's own: the
-        second strip moves only the cells below it, so each strip that counts, x = two AND NOT flag,
-        leaves one more hole (a 0) under the front, and a cell i at or above the front holds V's bit
-        i - k after k of them. _realign closes the holes after the last tick. F is the least front
-        with F - 2 e >= cut_e + 2 for every tick e but the last, so that with at most e holes, and
-        one more after a strip, the cells the next tick reads, up to cut, are V's own; the last
-        tick needs only its own, F - 2 e >= cut_e + 1, its holes being closed before the next
-        reads; and F - (c - 1) - e >= kappa_(e-1) for e >= 1, so that a U whose flag came on at
-        tick e, which is below 2^kappa_(e-1), ends below the at most e holes counted by then: the
-        move of U's word to V on a subtract lands under them. The front of every tick is at most
-        the wires its V has, w + 1 + c. A strip on a flag lane is not
-        counted: V is below 2^kappa there and it moves zeros, and if U's word then goes to V it
-        finds the far cells at their own places, with no hole counted since before the flag came
-        on. Each tick gets (front, c, last). The blocks are the choice that saves the most."""
+        from LAG_BLOCK. Through a block of c ticks with front F the cells from F up are one
+        register X for U's word and V's (the joint domain leaves at most one of them a bit there),
+        and no gate of the block's ticks touches it. Under the front V shifts as ever: the relabel
+        brings a 0 in under the front each tick, and so does each second strip that counts,
+        x = two AND NOT flag. While U holds the word (the flag is set when the tick ends) X holds
+        U's bits from F up, U's own wires being 0 there, and a 0 under the front is a 0 of V, which
+        is below 2^kappa. A subtract that takes U's word to V moves only the cells under the
+        front, and from then on X is V's and lags: after lag = sum of (NOT flag left by the tick)
+        + sum of x, a cell i >= F holds V's bit i - lag and the cells [F - lag, F) are 0. _realign
+        closes them after the last tick. F is the least front with F - 2 e >= cut_e + 2 for every
+        tick e but the last, so that with at most 2 e holes before the tick, and one more after
+        its strip, the cells it reads and the one its strip brings down, up to cut + 1, are V's
+        own; the last tick needs only what it reads, F - 2 e >= cut_e + 1. That also
+        keeps a U whose flag came on at tick e, which is below 2^kappa_(e-1), under the at most
+        2 e holes counted by then, so the move lands under them. F is at most the width after the
+        block. A run of blocks starts and ends by swapping the far cells of U and V on the flag;
+        between two blocks the cells between their fronts are swapped on it. Each tick gets
+        (front, c, e, size), size the wires V has when the block starts. The run is the choice
+        that saves the most."""
         lengths = self.LAG_BLOCK if isinstance(self.LAG_BLOCK, tuple) else (self.LAG_BLOCK,)
         R, W, T = self.LAZY_WINDOW, self.widths, len(plan)
 
@@ -775,42 +784,50 @@ class DialogMultiplier:
             if not c or not all(inner(t) for t in ticks):
                 return None
             kappa = [plan[t][5] for t in ticks]
-            front = max([kappa[e] + R + 2 * e + 2 - (e == c - 1) for e in range(c)]
-                        + [kappa[e - 1] + e + c - 1 for e in range(1, c)])
-            cells = W[i + c] + c - (front - c) + 1
-            if cells < 1 or front - 2 * c < 0:
+            front = max(kappa[e] + R + 2 * e + 2 - (e == c - 1) for e in range(c))
+            if front > W[i + c] or front < 2 * c:
                 return None
-            # Tick e's strip reaches the cell under its front, which must be one of V's w + 1 + c.
-            if any(front - e > W[i + e] + 1 + c for e in range(c)):
-                return None
-            eager = sum(plan[t][0] - 1 - plan[t][1] for t in ticks)
-            return eager - sum(front - e - 2 for e in range(c)) - 2 * c - self._lag_cost(c, cells), front
+            eager = sum(2 * plan[t][0] - 1 - plan[t][1] - plan[t][5] - R for t in ticks)
+            mine = sum(2 * front - 2 - kappa[e] - R for e in range(c)) + 3 * c + self._lag_cost(2 * c, W[i] + 1 - front)
+            return eager - mine, front
 
-        best, choice = [0] * (T + 1), [None] * T
-        for i in reversed(range(T)):
-            best[i] = best[i + 1]
-            for c in lengths:
-                found = block(i, c)
-                if found is None:
-                    continue
-                if self.LAG_MIN_SAVING is None:
-                    choice[i] = (c, found[1])
-                    break
-                if found[0] >= self.LAG_MIN_SAVING and found[0] + best[i + c] > best[i]:
-                    best[i], choice[i] = found[0] + best[i + c], (c, found[1])
-        i = 0
-        while i < T:
-            if choice[i] is None:
-                i += 1
-                continue
-            c, front = choice[i]
-            for e in range(c):
-                plan[i + e][10] = (front - e, c, e == c - 1)
-            i += c
+        choice = [None] * T
+        if self.LAG_MIN_SAVING is None:
+            i = 0
+            while i < T:
+                found = next(((c, block(i, c)) for c in lengths if block(i, c)), None)
+                if found:
+                    choice[i] = (found[0], found[1][1])
+                i += found[0] if found else 1
+        else:
+            # best[i]: the most a run that ends before tick i saves, its entry swap paid.
+            best, back = [None] * (T + 1), [None] * (T + 1)
+            for i in range(T):
+                for c in lengths:
+                    found = block(i, c)
+                    if found is None:
+                        continue
+                    saved, front = found
+                    start, prev = -(W[i] - front), None
+                    if best[i] is not None and best[i] - abs(back[i][2] - front) > start:
+                        start, prev = best[i] - abs(back[i][2] - front), i
+                    if best[i + c] is None or start + saved > best[i + c]:
+                        best[i + c], back[i + c] = start + saved, (i, c, front, prev)
+            ends = [(best[i] - (W[i] - back[i][2]), i) for i in range(T + 1) if best[i] is not None]
+            if ends and max(ends)[0] >= self.LAG_MIN_SAVING:
+                i = max(ends)[1]
+                while i is not None:
+                    start, c, front, i = back[i]
+                    choice[start] = (c, front)
+        for i, found in enumerate(choice):
+            if found:
+                c, front = found
+                for e in range(c):
+                    plan[i + e][10] = (front, c, e, W[i] + 1)
 
     def _realign(self, c, cells):
         """Close a lag block's holes. V is the cells from c below the front up, xs the block's c
-        strip bits, k their sum: the cells [front - k, front) are 0, and every cell from the front up
+        count bits, k their sum: the cells [front - k, front) are 0, and every cell from the front up
         moves down k places, zeros coming in on top. The count is made by adders on scratch, and
         the shift goes low bit first: at stage j the cells from front - r up, r = k mod 2^j, move
         down 2^j, so the swaps of the 2^j - 1 cells under the front wait on k_j AND [r >= m], which
@@ -876,6 +893,11 @@ class DialogMultiplier:
             self._realigns[key] = C.record_shape(body, [c + cells, c, adders + sum(under)])
         return self._realigns[key]
 
+    def _far_swap(self, flag, U, V, lo, hi):
+        """On the flag, U's cells [lo, hi) change places with V's, which are 0 there."""
+        for j in range(lo, hi):
+            cswap(self.C, flag, [U[j]], [V[j]])
+
     def _lazy_width(self, plan):
         """The widest the lazy counter gets."""
         return max((key[9][2] for key in plan if key and key[9]), default=0)
@@ -884,8 +906,8 @@ class DialogMultiplier:
         """Junk wires each tick leaves for the inverse pass: its carries, the flag it makes, the
         wire its flag update leaves, a lazy tick's, and the retired offset. A lazy tick leaves
         the wire that held p if the tick is raw, its counted strip if it is in a lag block, and
-        b * p; the first one brings V's extra wire, p and the counter, which the last one clears
-        but for p."""
+        b * p; the first one brings V's extra wire, p and the counter, which
+        the last one clears but for p."""
         plan = self._tick_plan()
         m = self._lazy_width(plan)
 
@@ -911,11 +933,11 @@ class DialogMultiplier:
         E = junk[:1]
         plan, sizes, used, flag = self._tick_plan(), self._junk_sizes(), 1, []
         counter, ext, pending = self._lazy_width(plan), None, []
-        lag, strips = [], []
+        strips, after, whole = [], [], False
         assert len(junk) == 1 + sum(sizes)
         for i in range(self.iters):
             w = self.widths[i]
-            assert len(V) == w and len(available) >= 2
+            assert (whole or len(V) == w) and len(available) >= 2
             cell, available = available[:2], available[2:]
             if plan[i] is None:
                 self.C.apply(self._euclid_tick0(), [U, V, E, cell])
@@ -936,13 +958,17 @@ class DialogMultiplier:
                         count = extra[2:2 + counter]
                         V.append(extra[0])
                         del extra[:2 + counter]
-                    else:
+                    elif not whole:
                         V.append(spare)
                     lz = pending + count[:max(key[9][1:3])]
                 if key[10]:
-                    # The block's far cells lag into these wires, which its realign leaves 0.
-                    lag = lag or self.C.alloc(key[10][1])
-                    V.extend(lag)
+                    front, c, e, size = key[10]
+                    if e == 0:
+                        assert len(V) == size
+                        if not (plan[i - 1] and plan[i - 1][10]):
+                            self._far_swap(held[0], U, V, front, w)
+                        # V keeps every wire it has to the block's end.
+                        whole = True
                     strips.append(extra[-2])
                 scratch = (available + junk[used:])[:self._step_scratch(key)]
                 assert len(scratch) == self._step_scratch(key)
@@ -951,32 +977,58 @@ class DialogMultiplier:
                               lz, extra if key[9] else []])
                 if key[7]:
                     flag = held
+                if key[10]:
+                    # What the flag update left: g0 * flag on a same tick, the flag it found on a drop.
+                    after.append((key[7], slot[0]))
                 if key[9]:
                     pending = lz[:1]
             G.extend(cell)
             next_width = self.widths[i + 1] if i + 1 < self.iters else self.pass_tail_width
             assert w - 1 <= next_width <= w
             if plan[i] is not None and plan[i][9]:
-                # V's extra wire stays above the next width; the run's last tick leaves it clear,
-                # and it takes the place in the junk that the first one's came from.
-                spare = V.pop(next_width)
-                if plan[i][10]:
-                    front, c, close = plan[i][10]
-                    lag = V[next_width:next_width + c]
-                    del V[next_width:next_width + c]
-                    if close:
-                        cells = (V[:next_width] + [spare] + lag)[front - 1 - c:]
-                        adders, under = self._lag_counts(c)
-                        scratch = (available + junk[used:])[:adders + sum(under)]
-                        assert len(scratch) == adders + sum(under)
-                        self.C.apply(self._realign(c, len(cells) - c), [cells, strips, scratch])
-                        strips = []
-                        self.C.free(lag)
-                        lag = []
-                if plan[i][9][3]:
-                    junk[ext] = spare
-            available.extend(V[next_width:])
-            V[:] = V[:next_width]
+                far = plan[i][10]
+                if far and far[2] == far[1] - 1:
+                    front, c = far[:2]
+                    cells = V[front - 2 * c:]
+                    adders, under = self._lag_counts(2 * c)
+                    scratch = (available + junk[used:])[:adders + sum(under)]
+                    assert len(scratch) == adders + sum(under)
+                    # The lag: a counted strip, and a tick that leaves the flag off. The flag tick e
+                    # leaves is the one tick e + 1 finds: a drop keeps it on its old wire, and a same
+                    # tick's is the flag it leaves plus its g0 * flag, which are never both set.
+                    left = list(self.C.alloc(c))
+                    for e in range(c):
+                        j = e + 1
+                        while j < c and after[j][0] == "same":
+                            self.C.cx(after[j][1], left[e])
+                            j += 1
+                        self.C.cx(after[j][1] if j < c else flag[0], left[e])
+                        self.C.x(left[e])
+                    self.C.apply(self._realign(2 * c, len(cells) - 2 * c), [cells, strips + left, scratch])
+                    for e in range(c):
+                        j = e + 1
+                        self.C.x(left[e])
+                        while j < c and after[j][0] == "same":
+                            self.C.cx(after[j][1], left[e])
+                            j += 1
+                        self.C.cx(after[j][1] if j < c else flag[0], left[e])
+                    self.C.free(left)
+                    strips, after, whole = [], [], False
+                if not whole:
+                    # V's extra wire stays above the next width; the run's last tick leaves it clear,
+                    # and it takes the place in the junk that the first one's came from.
+                    spare = V.pop(next_width)
+                    if plan[i][9][3]:
+                        junk[ext] = spare
+                    if far:
+                        # U's word under the next front, or all of it after the run's last block,
+                        # goes back to U's own cells.
+                        nxt = plan[i + 1] and plan[i + 1][10]
+                        lo, hi = sorted((front, nxt[0])) if nxt else (front, next_width)
+                        self._far_swap(flag[0], U, V, lo, hi)
+            if not whole:
+                available.extend(V[next_width:])
+                V[:] = V[:next_width]
             # By L6, u < 2**next_width from here on, and later steps touch only U[:w] for
             # w <= next_width, so U's wires from next_width up are zero for the rest of the pass.
             available.extend(reversed([u for u in U[next_width:w] if u in lend]))

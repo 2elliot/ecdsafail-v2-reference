@@ -13,13 +13,15 @@ window is all ones under p once the tick's crossing bits have met it, p is never
 word, physical V fits w + 1 bits, and the last tick's top bit and extra wire are what its exit
 assumes.
 
-The lag blocks must be runs of c lazy ticks, none the lazy run's first or last, with fronts F, F - 1, ..
-and the last one marked; F must keep the holes clear of the cells a lazy tick reads, F - 2 e >= cut_e + 2
-(cut_e + 1 at the block's last tick, whose holes are closed before the next tick reads),
-and above a U whose flag came on inside the block, F - (c - 1) - e >= kappa_(e-1) for e >= 1, leave
-a cell at or above the front after the block, and stay inside V's wires at every tick, F - e <= w_e + 1 + c. On the recurrence, with k the strips counted so far
-(two AND NOT flag): F - e - k >= cut + 2 at every tick but the last, cut + 1 there; under the flag U is below 2^(F - e - k) when
-k > 0 and V is below 2^kappa.
+The lag blocks must be runs of c lazy ticks, none the lazy run's first or last, each tick marked
+(F, c, e, size) with one front F and size the block's first width plus one. F must keep the holes clear of
+the cells a lazy tick reads, F - 2 e >= cut_e + 2 (cut_e + 1 at the block's last tick, whose holes are
+closed before the next tick reads), be at most the width after the block and at least 2 c. On the
+recurrence, with lag the count so far of ticks that left the flag off and of strips counted
+(two AND NOT flag): F - lag >= cut + 2 at every tick but the last, cut + 1 there; under the flag U is below
+2^(F - lag) when lag > 0 and V is below 2^kappa; and on the lazy word's physical V, a word X0 that the far
+cells hold when the block starts is, after every tick, either U's bits from F up, or V's physical bits
+from F - lag up with U below 2^F; with no such word V stays below 2^(F - lag) and U below 2^F.
 
     python3 -I -B scripts/schedule_check.py     # toy primes, every x; secp256k1, sampled x
 """
@@ -179,10 +181,10 @@ def lag_blocks(plan):
         if not far:
             t += 1
             continue
-        front, c, _ = far
+        front, c, _, size = far
         for e in range(c):
             key = plan[t + e] if t + e < len(plan) else None
-            if not (key and key[10] == (front - e, c, e == c - 1)):
+            if not (key and key[10] == (front, c, e, plan[t][0] + 1)):
                 return None
         blocks.append((t, c, front))
         t += c
@@ -201,11 +203,7 @@ def lag_fields_ok(q, plan):
         K = [joint_threshold(q, s) for s in ticks]
         if any(front - 2 * e < K[e] + WINDOW + 2 - (e == c - 1) for e in range(c)):
             return False
-        if any(front - (c - 1) - e < K[e - 1] for e in range(1, c)):
-            return False
-        if plan[t + c] is None or plan[t + c][0] + c < front - c or front - 2 * c < 0:
-            return False
-        if any(front - e > plan[t + e][0] + 1 + c for e in range(c)):
+        if plan[t + c] is None or front > plan[t + c][0] or front < 2 * c:
             return False
     return True
 
@@ -215,28 +213,54 @@ def lag_states_ok(q, plan, xs):
     if not blocks:
         return blocks is not None
     start = {t: (c, front) for t, c, front in blocks}
+    lazy = [t for t, key in enumerate(plan) if key and key[9]]
+    mask = (1 << WINDOW) - 1
     for x in xs:
         u, v, e = q, x, 0
-        left = 0
+        left, p, phys = 0, 0, None
         for t, key in enumerate(plan):
-            if t in start:
-                left, front = start[t]
-                k = 0
             odd, two = v & 1, int(v % 4 == 0)
-            if left:
-                kappa = key[5]
-                z = u >> kappa != 0
-                if front - k < kappa + WINDOW + 2 - (left == 1) or (z and k and u >> (front - k)):
-                    return False
-                if z and (v - e) >> kappa:
-                    return False
-                k += (1 - odd) & two & (1 - z)
-                front -= 1
-                left -= 1
             if odd:
-                u, v, e = min(u, v), abs(u - v) // 2, int(u > v)
+                un, vn, en = min(u, v), abs(u - v) // 2, int(u > v)
             else:
-                v //= 4 if two else 2
+                un, vn, en = u, v // (4 if two else 2), e
+            if key and key[9]:
+                # the lazy word's physical V, as lazy_states_ok follows it
+                k, raw = key[5], key[9][0]
+                cut = k + WINDOW
+                if t == lazy[0]:
+                    phys, p = v - e, 0
+                z = u >> k != 0
+                if t in start:
+                    left, front = start[t]
+                    lag, word = 0, (u if z else phys) >> front
+                if left and (front - lag < cut + 2 - (left == 1) or (z and lag and u >> (front - lag)) or (z and (v - e) >> k)):
+                    return False
+                if raw:
+                    r = phys >> (cut - 1) & 1
+                    phys ^= p << (cut - 1)
+                    p &= 1 - r
+                hi = phys >> k
+                if not odd and two:
+                    hi >>= 1
+                    r = hi >> (WINDOW - 1) & 1
+                    hi ^= p << (WINDOW - 1)
+                    p &= 1 - r
+                if odd:
+                    top = u >> k if z else hi
+                    borrow = en if top == 0 else (top if z else top - (p << WINDOW)) - ((vn - en) >> (k - 1))
+                    if borrow and top & mask == 0 and (hi >> WINDOW or u >> cut):
+                        p = 1
+                phys = (vn - en) + (p << (cut - 1))
+                if left:
+                    lag += (1 - int(un >> plan[t + 1][5] != 0)) + ((1 - odd) & two & (1 - z))
+                    left -= 1
+                    if word:
+                        if not (un >> front == word or (phys >> (front - lag) == word and un >> front == 0)):
+                            return False
+                    elif phys >> (front - lag) or un >> front:
+                        return False
+            u, v, e = un, vn, en
     return True
 
 
@@ -268,7 +292,7 @@ def main():
             if ticks:
                 rows.append({"q": q, "lag_block": lag, "lag_ticks": ticks, "schedule_ok": schedule_ok(q, range(1, q), lag)})
     xs = secp_inputs()
-    for lag in (7, 15):
+    for lag in (1, 3, 7, 15):
         rows.append({"q": "secp256k1", "lag_block": lag, "lag_ticks": sum(1 for key in plan_of(SECP, lag) if key and key[10]),
                      "inputs": len(xs), "schedule_ok": schedule_ok(SECP, xs, lag)})
     rows.append({"q": "secp256k1", "high_ticks": sum(1 for key in plan_of(SECP) if key and key[6]),
