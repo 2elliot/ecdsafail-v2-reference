@@ -404,11 +404,17 @@ class RankOne:
         for x in N:
             C.cx(sigma, x)
         inc(C, N, sigma)
+        small = self._below(C, U)
         for i in range(w - 1, -1, -1):
-            # Q[i] = [N >> i >= U]; when it is 1, U < 2^(w - i)
-            greater(C, U, N[i:], Q[i])
-            C.x(Q[i])
+            # Q[i] = [N >> i >= U] = small[i]*[N >> i >= U mod 2^(w - i)], small[i] = [U < 2^(w - i)]
+            if i:
+                greater(C, U[:w - i], N[i:], Q[i], ctl=small[i])
+                C.cx(small[i], Q[i])
+            else:
+                greater(C, U, N, Q[i])
+                C.x(Q[i])
             sub(C, U[:w - i], N[i:], ctl=Q[i])
+        self._below(C, U, small)
         (ctl,) = C.alloc(1)
         nz = self._nonzero(C, N)
         C.ccx(sigma, nz, ctl)
@@ -421,6 +427,28 @@ class RankOne:
         C.ccx(sigma, nz, ctl)
         self._nonzero(C, N, nz)
         C.free([ctl])
+
+    @staticmethod
+    def _below(C, U, small=None):
+        """small[i] = [U < 2^(w - i)] for 1 <= i < w, the AND of U's top i bits complemented, on fresh
+        wires; with small given, its clear."""
+        w = len(U)
+        top = U[::-1]
+        for x in top[:w - 1]:
+            C.x(x)
+        if small is None:
+            small = [None] + C.alloc(w - 1)
+            C.cx(top[0], small[1])
+            for i in range(2, w):
+                C.ccx(small[i - 1], top[i - 1], small[i])
+        else:
+            for i in reversed(range(2, w)):
+                C.ccx(small[i - 1], top[i - 1], small[i])
+            C.cx(top[0], small[1])
+            C.free(small[1:])
+        for x in top[:w - 1]:
+            C.x(x)
+        return small
 
     def _nonzero(self, C, x, nz=None):
         """A fresh wire holding [x != 0], or with nz given, its clear."""
