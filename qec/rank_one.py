@@ -17,7 +17,7 @@ no Prefix, low chains, compare or k machinery. One conversion after cell J reduc
 The middle cells use the tree's add-or-shift and held offset on wider words. The last cell is
 semantic (a B1 doubles, adding nothing), so the reduced tick after it starts with no held lane.
 docs/rank-one.md states the premises and the checks."""
-from .arith import _maj, _uma, cswap
+from .arith import _maj, _uma, add_const, cswap
 from .two_bit import Prefix, TwoBitMod
 
 
@@ -334,12 +334,16 @@ class RankOne:
             C.cx(c1, e)
         carry_into(C, prod, lo[:W], c1)
         C.free([c1])
-        # off e, m = hi - 1: the product follows
-        times(inverse=True)
+        # off e, m = hi - 1 and the product loses lo_c on its own wires (it was lo_c*(m + 1) there)
         C.x(e)
         dec(C, hi, e)
+        if low:
+            for x in low:
+                C.x(x)
+            add_const(C, low, lo_c, ctrl=e)
+            for x in low:
+                C.x(x)
         C.x(e)
-        times()
         a, b = list(prod), lo[:W]
         (c0,) = C.alloc(1)
         carry = [c0] + a[:-1]
