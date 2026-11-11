@@ -481,11 +481,8 @@ class RankOne:
         greater(C, U, s, beta)
         C.x(beta)
         sub(C, U, s, ctl=beta)
-        (t,) = C.alloc(1)
-        greater(C, r, s, t)
-        C.ccx(ctl, t, beta)
-        greater(C, r, s, t)
-        C.free([t, beta])
+        greater(C, r, s, beta, ctl=ctl)
+        C.free([beta])
 
     def small_pass(self, C, cells, U, r, s):
         """(z, 0) -> (U*z mod U, V*z mod U) = (0, V*z mod U): the cells' semantic tick mod U."""
