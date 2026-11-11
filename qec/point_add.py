@@ -817,8 +817,9 @@ class DialogMultiplier:
         Otherwise X is 0 and only V's word must lie under front - k'. If the flag is on at the end, V is
         below 2^K_c (Jp). Else it went off at es by a subtract that swapped, u < 2^K_j since tick j:
         after es u < 2^K_es, and v < 2^(K_j - 1) halves each tick while v >= u, where alone a pending
-        borrow can be (it needs v >= 3 2^kappa > u), and the physical word is below 4 v."""
-        if c < 3 or c & (c + 1):
+        borrow can be (it needs v >= 3 2^kappa > u), and the physical word is below 4 v. Blocks over
+        15 ticks keep the plain count: the check walks 2^c patterns."""
+        if not 3 <= c <= 15 or c & (c + 1):
             return 0
         for (j, es), count in self._thermo_cases(c).items():
             bound = K[c] if es is None else max(K[es], K[j] + 1 - (c - 1 - es))
