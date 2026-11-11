@@ -16,10 +16,12 @@ The tick after it is a first tick (no previous cell), so it reads no held flag.
 
 ## Premises
 
-**P1. The width.** Before Bézout cell T − j, the cofactor pair is the Euclid pair (u, v) before Euclid tick T − j.
-So U, V < 2^w with w = `tick_widths(q, T)[T − j]`, the bound the Euclid pass already uses for its own registers.
-The identity holds because each Bézout cell inverts the Euclid tick that wrote it (`out/bezglue-w3/z3/rank_one_z3.py`, "Bezout cell inverts the Euclid tick").
-The bound is the stack's existing width premise; nothing new is assumed about it.
+**P1. The width.** After j reverse cells, U, V < 2^w with w = `tick_widths(q, T)[T − j]`, the bound the Euclid pass already uses for its own registers.
+On the unswept tape the pair after j reverse cells is the Euclid pair (u, v) before Euclid tick T − j, because each Bézout cell inverts the Euclid tick that wrote it (`out/bezglue-w3/z3/rank_one_z3.py`, "Bezout cell inverts the Euclid tick").
+The cells run on the swept tape, where that identity is false inside a shift run: the B1 sweep moves a run's single short tick, so at an interior boundary the swept pair is (u, 2v) where the Euclid pair is (u, v).
+The two pairs agree at every run boundary.
+At an interior boundary the forward tick before it was a double shift from (u, 4v), whose potential bounds max(u, 2v)² by the same B_t as the Euclid pair (`out/review-rankone/REVIEW.md`, "Exact premises and the width proof").
+So the swept cofactors meet the same width; nothing beyond the stack's width premise is assumed.
 On a held lane the stored word is H − R0 with H = S + R, so the words hold n + w + 1 bits, and two more wires are the add-or-shift's top.
 
 **P2. The fold.** For X = hi·2ⁿ + lo < 2^w·q with (2^w + 2)·f ≤ 2ⁿ, m = hi + e with e = [lo + (hi + 1)f ≥ 2ⁿ] is ⌊X/q⌋, and lo + m·f mod 2ⁿ is X − m·q.
@@ -31,7 +33,7 @@ On a held lane the stored word is H − R0 with H = S + R, so the words hold n +
 
 1. Fold R and S (P2): (r, mR) and (s, mS), mR = ⌊U·y/q⌋, mS = ⌊V·y/q⌋.
 2. (U, V) from the cells on w-bit registers.
-3. D = (U·s − V·r)/q is an integer in (−V, U), since r, s < q. As |D| < 2^w, D is (U·s − V·r)·q⁻¹ mod 2^(w+1) read as a signed number, from the low w + 1 bits of r and s.
+3. D = (U·s − V·r)/q is an integer, in (−V, U) when V > 0 since r, s < q, and 0 when V = 0 (then U = 1 by coprimality). As |D| < 2^w, D is (U·s − V·r)·q⁻¹ mod 2^(w+1) read as a signed number, from the low w + 1 bits of r and s.
 4. V·mR − U·mS = D, so mS → U·mS mod 2^w in place (U is odd), then − V·mR + D, ends at 0.
 5. D mod U from |D| by restoring division, then U − rem on a negative D with rem ≠ 0.
 6. The cells' tick mod U maps (mR, 0) in place to (U·mR mod U, V·mR mod U) = (0, D mod U), which the value of step 5 clears.

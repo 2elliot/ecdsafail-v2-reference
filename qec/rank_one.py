@@ -8,7 +8,8 @@ no Prefix, low chains, compare or k machinery. One conversion after cell J reduc
   fold      X = hi*2^n + lo -> (X mod q, m = floor(X/q)), for q = 2^n - f with (2^w + 2)f <= 2^n:
             m = hi + e, e = [lo + (hi + 1)f >= 2^n], X mod q = lo + m*f mod 2^n
   cofactors (U, V) from the cells, on w-bit registers
-  D         D = (U*s - V*r)/q, an integer in (-V, U), is (U*s - V*r)*q^-1 mod 2^(w + 1)
+  D         D = (U*s - V*r)/q, an integer in (-V, U) when V > 0 and 0 when V = 0, so |D| < 2^w,
+            is (U*s - V*r)*q^-1 mod 2^(w + 1) read signed
   mS        V*mR - U*mS = D, so U*mS - V*mR + D = 0 and mS -> U*mS mod 2^w in place ends at 0
   mR        the cells' tick mod U maps (mR, 0) to (0, V*mR mod U) = (0, D mod U) in place
   undo      D mod U, D and the cofactors
