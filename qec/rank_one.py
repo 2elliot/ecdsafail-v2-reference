@@ -124,21 +124,6 @@ def dec(C, x, ctl):
     C.free([one])
 
 
-def const_reg(C, k, value):
-    r = C.alloc(k)
-    for i in range(k):
-        if value >> i & 1:
-            C.x(r[i])
-    return r
-
-
-def free_const(C, r, value):
-    for i in range(len(r)):
-        if value >> i & 1:
-            C.x(r[i])
-    C.free(r)
-
-
 def mul_acc(C, a, b, acc, sign=1):
     """acc += a*b (sign -1: acc -= a*b) mod 2^len(acc), row i on acc[i:]."""
     if sign < 0:
@@ -162,15 +147,12 @@ def mul_odd(C, u, x):
 
 
 def mul_odd_const(C, x, c):
-    """x = c*x mod 2^len(x) in place, c an odd constant."""
+    """x = c*x mod 2^len(x) in place, c an odd constant: x[i + 1:] += x_i*(c >> 1), i from the top down."""
     k = len(x)
-    half = c >> 1 & ((1 << max(k - 1, 0)) - 1)
-    if not half:
-        return
-    reg = const_reg(C, k - 1, half)
     for i in range(k - 2, -1, -1):
-        add(C, reg[:k - i - 1], x[i + 1:], ctl=x[i])
-    free_const(C, reg, half)
+        part = c >> 1 & ((1 << (k - i - 1)) - 1)
+        if part:
+            add_const(C, x[i + 1:], part, ctrl=x[i])
 
 
 def _csd(c):
