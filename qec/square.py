@@ -305,8 +305,7 @@ class SquareFold:
     def offset(self):
         """The o with compute's J[:n] = (Y^2 - o) mod q: the inexact Karatsuba's constant, when it
         lies below 2^n, so that hi = floor(Q / 2^n) stays at most Y; else 0 from an exact one."""
-        o = karatsuba_offset(self.n, self.thr, "R", False)
-        return o if o is not None and 0 <= o < 1 << self.n else 0
+        return self._offset(self.thr)
 
     def absorb(self, c):
         """(cins, kappa) with compute(C, Y, J, kappa, cins) leaving J[:n] = (Y^2 - c) mod q, or None.
