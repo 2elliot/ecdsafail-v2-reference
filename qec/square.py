@@ -16,9 +16,14 @@ from .two_bit import Prefix
 
 
 def _keep_add(C, a, b, cout, K):
-    """b += a, cout ^= carry out, each inner carry left on a junk wire popped from K."""
+    """b += a, cout ^= carry out if given, each inner carry left on a junk wire popped from K."""
     c = None
     for k, (x, y) in enumerate(zip(a, b)):
+        if k == len(a) - 1 and cout is None:
+            C.cx(x, y)
+            if c is not None:
+                C.cx(c, y)
+            break
         t = cout if k == len(a) - 1 else K.pop(0)
         if c is None:
             C.ccx(x, y, t)
@@ -36,21 +41,26 @@ def _keep_add(C, a, b, cout, K):
 
 
 def _rows(C, Y, Q, copy=True, K=None):
-    """Q = Y*(2^w - Y) on 2w clean wires, w = len(Y), or Y*(2^w - 1 - Y) without the copy.
-    After row i, Q < 2^(w + i + 1), so each carry lands on a wire no earlier row reached; the
-    uncopied sums are smaller. Y's wires walk through their Gray code. K, if given, is a list
-    of junk wires, and a row whose inner carries fit there keeps them, at one CCX a bit."""
-    n = len(Y)
+    """Q = Y*(2^w - Y) mod 2^len(Q) on len(Q) <= 2w clean wires, w = len(Y), or Y*(2^w - 1 - Y)
+    without the copy. After row i, Q < 2^(w + i + 1), so each carry lands on a wire no earlier row
+    reached; the uncopied sums are smaller. Y's wires walk through their Gray code. K, if given, is
+    a list of junk wires, and a row whose inner carries fit there keeps them, at one CCX a bit."""
+    n, L = len(Y), len(Q)
     if copy:
         for y, q in zip(Y, Q):
             C.cx(y, q)
     for i in range(n - 1):
         for w in Y[i + 1:]:
             C.cx(Y[i], w)
-        if K is not None and len(K) >= n - 2 - i:
-            _keep_add(C, Y[i + 1:], Q[2 * i + 1:n + i], Q[n + i], K)
+        width = min(n - 1 - i, L - 2 * i - 1)
+        if width <= 0:
+            continue
+        a, b = Y[i + 1:i + 1 + width], Q[2 * i + 1:2 * i + 1 + width]
+        cout = Q[n + i] if n + i < L else None
+        if K is not None and len(K) >= width - 1:
+            _keep_add(C, a, b, cout, K)
         else:
-            add(C, Y[i + 1:], Q[2 * i + 1:n + i], cout=Q[n + i])
+            add(C, a, b, cout=cout)
     for i in range(1, n):
         C.cx(Y[i - 1], Y[i])
 
@@ -112,13 +122,36 @@ class _Lend:
             stack.remove(w)
 
 
-def karatsuba_junk(w, thr):
-    """Junk wires _karatsuba takes for width w with leaves of width at most thr."""
-    if w <= thr:
-        return 0
+def _value_bits(w, kind, o=0):
+    """Bits of the largest kind(Y) + o over w-bit Y: R(Y) <= 2^(2w - 2), T(Y) < 2^(2w - 2). A
+    negative o wraps mod 2^(2w), so then all 2w."""
+    if o < 0:
+        return 2 * w
+    top = 1 << (2 * w - 2) if kind == "R" else ((1 << w) - 1) ** 2 // 4
+    return (top + o).bit_length()
+
+
+def _widths(w, thr, kind, exact, L):
+    """(V's width, W's width) at a node of width w over len(Q) = L. V = A*~B + B*~A (+ B for R)
+    lies in [0, 2^w), so an exact R node's V fits w bits; T nodes and inexact R nodes carry a
+    constant on V and keep w + 1. Q is only needed mod 2^L, so V is only needed mod 2^(L - h).
+    The S child's Q must hold its B child's T exactly, which takes 2ws - 2 bits."""
     h = (w + 1) // 2
     ws = h + 1
-    return karatsuba_junk(h, thr) + karatsuba_junk(w - h, thr) + 3 * ws + karatsuba_junk(ws, thr)
+    lv = min(w + (kind == "T" or not exact), L - h)
+    return lv, min(2 * ws, max(lv, 2 * ws - 2 if ws > thr else 0))
+
+
+def karatsuba_junk(w, thr, kind="R", exact=True, L=None):
+    """Junk wires _karatsuba takes for width w with leaves of width at most thr, over L wires of Q."""
+    if w <= thr:
+        return 0
+    L = 2 * w if L is None else L
+    h = (w + 1) // 2
+    inner = exact or kind == "T"
+    lv, lw = _widths(w, thr, kind, inner, L)
+    return (karatsuba_junk(h, thr, kind, inner, min(2 * h, L)) + karatsuba_junk(w - h, thr, "T", True, L - 2 * h)
+            + h + 1 + lw + karatsuba_junk(h + 1, thr, "R" if kind == "T" else "T", inner, lw))
 
 
 def karatsuba_offset(w, thr, kind="R", exact=True, cins=frozenset(), path=""):
@@ -155,26 +188,30 @@ def karatsuba_offset(w, thr, kind="R", exact=True, cins=frozenset(), path=""):
 
 
 def _karatsuba(C, Y, Q, J, thr, kind="R", K=None, exact=True, cins=frozenset(), path=""):
-    """Q = R(Y) = Y*(2^w - Y) (kind R) or T(Y) = Y*(2^w - 1 - Y) (kind T) on 2w clean wires, plus
-    karatsuba_offset(w, thr, kind, exact, cins, path).
+    """Q = R(Y) = Y*(2^w - Y) (kind R) or T(Y) = Y*(2^w - 1 - Y) (kind T), plus
+    karatsuba_offset(w, thr, kind, exact, cins, path), mod 2^len(Q), on len(Q) <= 2w clean wires.
 
     Y = A + 2^h*B with h = ceil(w/2), m = w - h, and S = A + B on ws = h + 1 bits. Then
         R(Y) = R(A) + 2^(2h)*T(B) + 2^h*V,   V = T(S) - R(A) - T(B) - [h != m]*2^m*S
         T(Y) = T(A) + 2^(2h)*T(B) + 2^h*V,   V = R(~S) - T(A) - T(B) - [h != m]*2^m*S
                                                   - (2^ws - 1)
-    where ~S = 2^ws - 1 - S, so R(~S) = T(S) - S + 2^ws - 1. V is A*~B + B*~A, plus B for R,
-    so 0 <= V < 2^(w + 1), and V is formed mod 2^(w + 1). R(A) and T(B) go straight onto Q's
-    halves; S and the S child's output take wires from J, a list of clean junk wires, and
-    keep values fixed by Y. Leaves of width at most thr are the XOR rows."""
-    w = len(Y)
+    where ~S = 2^ws - 1 - S, so R(~S) = T(S) - S + 2^ws - 1. V is formed mod 2^len(V) (_widths).
+    R(A) and T(B) go straight onto Q's halves; S and the S child's output take wires from J, a
+    list of clean junk wires, and keep values fixed by Y. Leaves of width at most thr are the XOR
+    rows. Bits of Q above the value's top (_value_bits) stay 0 and are not touched."""
+    w, L = len(Y), len(Q)
+    top = min(L, _value_bits(w, kind, karatsuba_offset(w, thr, kind, exact, cins, path)))
     if w <= thr:
-        _rows(C, Y, Q, kind == "R", K)
+        _rows(C, Y, Q[:top], kind == "R", K)
         return
     h = (w + 1) // 2
     m = w - h
     inner = exact or kind == "T"
+    lv, lw = _widths(w, thr, kind, inner, L)
+    # Q mod 2^top needs T(B) mod 2^(top - h), and Q[2h:] holds T(B) mod 2^(L - 2h).
+    assert _value_bits(m, "T") <= L - 2 * h or top - h <= L - 2 * h
     A, B = Y[:h], Y[h:]
-    _karatsuba(C, A, Q[:2 * h], J, thr, kind, K, inner, cins, path + "A")
+    _karatsuba(C, A, Q[:min(2 * h, L)], J, thr, kind, K, inner, cins, path + "A")
     _karatsuba(C, B, Q[2 * h:], J, thr, "T", K)
     ws = h + 1
     S = [J.pop(0) for _ in range(ws)]
@@ -183,7 +220,7 @@ def _karatsuba(C, Y, Q, J, thr, kind="R", K=None, exact=True, cins=frozenset(), 
     pad = C.alloc(h - m)
     add(C, B + pad, S[:h], cout=S[h])
     C.free(pad)
-    W = [J.pop(0) for _ in range(2 * ws)]
+    W = [J.pop(0) for _ in range(lw)]
     if kind == "T":
         for x in S:
             C.x(x)
@@ -191,31 +228,33 @@ def _karatsuba(C, Y, Q, J, thr, kind="R", K=None, exact=True, cins=frozenset(), 
     if kind == "T":
         for x in S:
             C.x(x)
-    V = W[:w + 1]
-    _change(C, Q[:2 * h], V, -1)
-    _change(C, Q[2 * h:], V, -1)
-    if h != m:
-        _change(C, S, V[m:], -1)
+    V = W[:lv]
+    _change(C, Q[:min(2 * h, lv)], V, -1)
+    _change(C, Q[2 * h:L][:lv], V, -1)
+    if h != m and lv > m:
+        _change(C, S[:lv - m], V[m:], -1)
+    out = V[:top - h]
     if kind == "R":
         delta = (karatsuba_offset(ws, thr, "T", inner, cins, path + "S")
                  - karatsuba_offset(h, thr, "R", inner, cins, path + "A"))
         one = C.alloc(1) if path in cins else [None]
         if one[0] is not None:
             C.x(one[0])
-        _change(C, V, Q[h:], cin=one[0], signed=delta < 0)
+        _change(C, out, Q[h:top], cin=one[0], signed=delta < 0)
         if one[0] is not None:
             C.x(one[0])
             C.free(one)
         return
     if not exact:
-        _change(C, V, Q[h:])
+        _change(C, out, Q[h:top])
         return
     # V holds the cross term plus 2^ws - 1. Take 2^ws off its top bits, which leaves at
     # least -1 on w + 1 bits, then add it sign-extended with a carry in of 1.
-    add_const(C, V[ws:], (1 << (w + 1 - ws)) - 1)
+    if lv > ws:
+        add_const(C, V[ws:], (1 << (lv - ws)) - 1)
     (one,) = C.alloc(1)
     C.x(one)
-    _change(C, V, Q[h:], cin=one, signed=True)
+    _change(C, out, Q[h:top], cin=one, signed=True)
     C.x(one)
     C.free([one])
 
@@ -234,9 +273,9 @@ def signed_digits(v):
 
 
 class SquareFold:
-    # Kept row carries: each junk wire saves one CCX each way. 867 fills the 4,096-wire cap at
+    # Kept row carries: each junk wire saves one CCX each way. 886 fills the 4,096-wire cap at
     # n = 256, where the square's own peak is 3,229 wires and M's peak lies outside it.
-    KEEP = 867
+    KEEP = 886
     # The last fold ladder's low carries stay on junk wires through the modadd, one CCX saved each
     # way per wire. The modadd's 41 scratch wires and these 181 fit in the 222 that ladder itself
     # peaks at, n = 256, so they cost no row carries.
@@ -252,7 +291,15 @@ class SquareFold:
         self.thr = max(3, mod.n // 6)
         self.lkeep = min(self.LADDER_KEEP, max(0, mod.n - self.b - 1))
         self.fixed_junk = 2 * mod.n + self.b + self.m + 3 + self.lkeep
-        self.junk = self.fixed_junk + karatsuba_junk(mod.n, self.thr) + self.KEEP
+        self.junk = self.fixed_junk + self.karatsuba_junk(self.thr) + self.KEEP
+
+    def karatsuba_junk(self, thr):
+        exact = karatsuba_offset(self.n, thr, "R", False) != self._offset(thr)
+        return karatsuba_junk(self.n, thr, "R", exact)
+
+    def _offset(self, thr):
+        o = karatsuba_offset(self.n, thr, "R", False)
+        return o if o is not None and 0 <= o < 1 << self.n else 0
 
     @property
     def offset(self):
