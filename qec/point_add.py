@@ -758,7 +758,8 @@ class DialogMultiplier:
         tick needs only its own, F - 2 e >= cut_e + 1, its holes being closed before the next
         reads; and F - (c - 1) - e >= kappa_(e-1) for e >= 1, so that a U whose flag came on at
         tick e, which is below 2^kappa_(e-1), ends below the at most e holes counted by then: the
-        move of U's word to V on a subtract lands under them. A strip on a flag lane is not
+        move of U's word to V on a subtract lands under them. The front of every tick is at most
+        the wires its V has, w + 1 + c. A strip on a flag lane is not
         counted: V is below 2^kappa there and it moves zeros, and if U's word then goes to V it
         finds the far cells at their own places, with no hole counted since before the flag came
         on. Each tick gets (front, c, last). The blocks are the choice that saves the most."""
@@ -778,6 +779,9 @@ class DialogMultiplier:
                         + [kappa[e - 1] + e + c - 1 for e in range(1, c)])
             cells = W[i + c] + c - (front - c) + 1
             if cells < 1 or front - 2 * c < 0:
+                return None
+            # Tick e's strip reaches the cell under its front, which must be one of V's w + 1 + c.
+            if any(front - e > W[i + e] + 1 + c for e in range(c)):
                 return None
             eager = sum(plan[t][0] - 1 - plan[t][1] for t in ticks)
             return eager - sum(front - e - 2 for e in range(c)) - 2 * c - self._lag_cost(c, cells), front

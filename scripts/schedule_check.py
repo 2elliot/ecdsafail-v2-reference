@@ -16,8 +16,8 @@ assumes.
 The lag blocks must be runs of c lazy ticks, none the lazy run's first or last, with fronts F, F - 1, ..
 and the last one marked; F must keep the holes clear of the cells a lazy tick reads, F - 2 e >= cut_e + 2
 (cut_e + 1 at the block's last tick, whose holes are closed before the next tick reads),
-and above a U whose flag came on inside the block, F - (c - 1) - e >= kappa_(e-1) for e >= 1, and leave
-a cell at or above the front after the block. On the recurrence, with k the strips counted so far
+and above a U whose flag came on inside the block, F - (c - 1) - e >= kappa_(e-1) for e >= 1, leave
+a cell at or above the front after the block, and stay inside V's wires at every tick, F - e <= w_e + 1 + c. On the recurrence, with k the strips counted so far
 (two AND NOT flag): F - e - k >= cut + 2 at every tick but the last, cut + 1 there; under the flag U is below 2^(F - e - k) when
 k > 0 and V is below 2^kappa.
 
@@ -205,6 +205,8 @@ def lag_fields_ok(q, plan):
             return False
         if plan[t + c] is None or plan[t + c][0] + c < front - c or front - 2 * c < 0:
             return False
+        if any(front - e > plan[t + e][0] + 1 + c for e in range(c)):
+            return False
     return True
 
 
@@ -260,12 +262,15 @@ def main():
     rows = [{"q": q, "high_ticks": sum(1 for key in plan_of(q) if key and key[6]),
              "lazy_ticks": sum(1 for key in plan_of(q) if key and key[9]),
              "schedule_ok": schedule_ok(q, range(1, q))} for q in TOY]
-    for lag in (1, 2, 3):
-        for q in TOY:
+    for lag in (1, 2, 3, 7):
+        for q in TOY + [15361, 16381]:
             ticks = sum(1 for key in plan_of(q, lag) if key and key[10])
             if ticks:
                 rows.append({"q": q, "lag_block": lag, "lag_ticks": ticks, "schedule_ok": schedule_ok(q, range(1, q), lag)})
     xs = secp_inputs()
+    for lag in (7, 15):
+        rows.append({"q": "secp256k1", "lag_block": lag, "lag_ticks": sum(1 for key in plan_of(SECP, lag) if key and key[10]),
+                     "inputs": len(xs), "schedule_ok": schedule_ok(SECP, xs, lag)})
     rows.append({"q": "secp256k1", "high_ticks": sum(1 for key in plan_of(SECP) if key and key[6]),
                  "lazy_ticks": sum(1 for key in plan_of(SECP) if key and key[9]),
                  "lag_ticks": sum(1 for key in plan_of(SECP) if key and key[10]), "inputs": len(xs), "schedule_ok": schedule_ok(SECP, xs)})
