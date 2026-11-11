@@ -8,7 +8,7 @@ from .square import SquareFold
 from .zero_prefix import ZeroPrefix
 from .two_bit import TwoBitMod
 from .model import tick_bound, tick_joint, tick_widths
-from . import block0_code, tail_code, tape_block, two_bit
+from . import block0_code, rank_one, tail_code, tape_block, two_bit
 from .tape_block import FREE, TICKS
 
 
@@ -21,8 +21,8 @@ class DialogMultiplier:
     RAW_TAPE = True
     # Chain carries the forward pass leaves as junk for the inverse pass. Each is held through the
     # Bezout pass and saves one CCX in each Euclid pass, so this is the one knob that trades wires
-    # for CCX; 1,201 puts the climb stack at 4,096 wires at n = 256.
-    CARRY_JUNK = 1201
+    # for CCX; 1,157 puts the climb stack at 4,096 wires at n = 256.
+    CARRY_JUNK = 1157
     # A tick whose registers reach this many bits above its joint threshold runs those bits as one
     # high word, 3 CCX a bit, on a flag that says which register holds it. 6 is 148 CCX cheaper at
     # n = 256; 2 keeps the high word in every toy prime of 8 bits or more.
@@ -38,6 +38,9 @@ class DialogMultiplier:
     # LAG_MIN_SAVING CCX; None plans the first length that fits at every tick, for toy sizes.
     LAG_BLOCK = (15, 7, 3)
     LAG_MIN_SAVING = 1
+    # The Bezout pass's first cells run on unreduced integers, up to this many, then one conversion
+    # (rank_one.py); 0 turns it off.
+    RANK_J = 10
 
     def __init__(self, C, mod):
         self.C, self.mod = C, mod
@@ -1149,7 +1152,10 @@ class DialogMultiplier:
         lo = 2 * (T - tail_code.CELLS)
         tail_encoded = False
         flag = []
-        for i in reversed(range(T)):
+        J = self._rank_j(lend_tail, tail)
+        if J:
+            self._rank_start(G, Yr, S, J)
+        for i in reversed(range(T - J)):
             nxt_block = i // TICKS - 1
             if i % TICKS == 0 and 0 <= nxt_block < self.blocks:
                 self._decode(G, nxt_block,
@@ -1161,14 +1167,14 @@ class DialogMultiplier:
             if i == 1 and self.blocks:
                 G[1] = C.alloc(1)[0]
                 block0_code.hold(C, self._block_wires(G, 0, swept), inverse=True)
-            no_prev = lend_tail and i == T - 2
+            no_prev = lend_tail and i == T - 2 and not J
             if no_prev:
                 # The terminal cell is never B1; release b before its last reader.
                 C.cx(G[-2], G[-1])
                 C.x(G[-1])
                 C.free([G[-1]])
                 G[-1] = None
-            first, last = i == T - 1 or no_prev, i == 0
+            first, last = i == T - 1 or no_prev or (J and i == T - J - 1), i == 0
             edge = any(i in (j * TICKS, j * TICKS - 1) for j in range(1, self.blocks))
             pebble = edge or (tail and self.blocks > 0 and i == self.blocks * TICKS)
             pebble = pebble or (self.blocks > 0 and i in (0, 1))
@@ -1212,6 +1218,34 @@ class DialogMultiplier:
             G[-1] = C.alloc(1)[0]
             C.x(G[-1])
             C.cx(G[-2], G[-1])
+
+    def _rank_j(self, lend_tail, tail):
+        if not (self.RANK_J and self.RAW_TAPE and lend_tail and not tail and not self.blocks):
+            return 0
+        return rank_one.plan(self.mod.q, self.iters, self.widths, self.RANK_J)
+
+    def _rank_start(self, G, Yr, S, J):
+        """Cells T - 1 down to T - J on unreduced integers, then one conversion. The tick after it
+        is a first tick: the last cell here is semantic, so no lane is held."""
+        C, T, n = self.C, self.iters, self.mod.n
+        ro = rank_one.RankOne(self.mod.q, J, self.widths[T - J])
+        R, Sw = Yr + C.alloc(ro.L - n), S + C.alloc(ro.L - n)
+        term = G[2 * T - 2]
+        for r, s in zip(Yr, S):
+            C.ccx(term, r, s)
+        # The terminal cell is never B1; release b before its last reader.
+        C.cx(G[-2], G[-1])
+        C.x(G[-1])
+        C.free([G[-1]])
+        G[-1] = None
+        p = None
+        for i in range(T - 2, T - J, -1):
+            p = ro.tick(C, G[2 * i:2 * i + 2], G[2 * i + 2:2 * i + 4], p, R, Sw)
+        i = T - J
+        ro.last_tick(C, G[2 * i:2 * i + 2], G[2 * i + 2:2 * i + 4], p, R, Sw)
+        cells = [G[2 * k:2 * k + 2] for k in range(T - 2, T - J - 1, -1)]
+        ro.convert(C, term, cells, R, Sw)
+        Yr[:], S[:] = R, Sw
 
     def _body(self, Xr, Yr):
         C, q, n, T = self.C, self.mod.q, self.mod.n, self.iters
