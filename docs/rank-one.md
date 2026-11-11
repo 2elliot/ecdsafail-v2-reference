@@ -34,11 +34,11 @@ On a held lane the stored word is H − R0 with H = S + R, so the words hold n +
 
 1. Fold R and S (P2): (r, mR) and (s, mS), mR = ⌊U·y/q⌋, mS = ⌊V·y/q⌋.
 2. (U, V) from the cells on w-bit registers.
-3. D = (U·s − V·r)/q is an integer, in (−V, U) when V > 0 since r, s < q, and 0 when V = 0 (then U = 1 by coprimality). As |D| < 2^w, D is (U·s − V·r)·q⁻¹ mod 2^(w+1) read as a signed number, from the low w + 1 bits of r and s.
-4. V·mR − U·mS = D, so mS → U·mS mod 2^w in place (U is odd), then − V·mR + D, ends at 0.
+3. D = (U·s − V·r)/q is an integer, in (−V, U) when V > 0 since r, s < q, and 0 when V = 0 (then U = 1 by coprimality), so |D| < 2^w and w + 1 wires hold it in two's complement.
+4. V·mR − U·mS = D, so mS becomes D in place on its own wires and one more: mS → U·mS mod 2^(w+1) (U is odd), complemented, plus V·mR, plus 1.
 5. D mod U from |D| by restoring division, then U − rem on a negative D with rem ≠ 0.
 6. The cells' tick mod U maps (mR, 0) in place to (U·mR mod U, V·mR mod U) = (0, D mod U), which the value of step 5 clears.
-7. Steps 5, 3 and 2 are undone.
+7. Step 5 is undone. D·q = U·s − V·r, so D → D·q mod 2^(w+1), minus U·s, plus V·r, on the low w + 1 bits of r and s, ends at 0. Step 2 is undone.
 
 ## Checks
 

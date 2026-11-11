@@ -8,11 +8,11 @@ no Prefix, low chains, compare or k machinery. One conversion after cell J reduc
   fold      X = hi*2^n + lo -> (X mod q, m = floor(X/q)), for q = 2^n - f with (2^w + 2)f <= 2^n:
             m = hi + e, e = [lo + (hi + 1)f >= 2^n], X mod q = lo + m*f mod 2^n
   cofactors (U, V) from the cells, on w-bit registers
-  D         D = (U*s - V*r)/q, an integer in (-V, U) when V > 0 and 0 when V = 0, so |D| < 2^w,
-            is (U*s - V*r)*q^-1 mod 2^(w + 1) read signed
-  mS        V*mR - U*mS = D, so U*mS - V*mR + D = 0 and mS -> U*mS mod 2^w in place ends at 0
+  D         V*mR - U*mS = D = (U*s - V*r)/q, in (-V, U) when V > 0 and 0 when V = 0, so |D| < 2^w:
+            mS -> D in place on w + 1 wires, mod 2^(w + 1)
   mR        the cells' tick mod U maps (mR, 0) to (0, V*mR mod U) = (0, D mod U) in place
-  undo      D mod U, D and the cofactors
+  undo      D mod U; then D*q - U*s + V*r = 0 mod 2^(w + 1) clears D from r's and s's low bits;
+            the cofactors
 
 The middle cells use the tree's add-or-shift and held offset on wider words. The last cell is
 semantic (a B1 doubles, adding nothing), so the reduced tick after it starts with no held lane.
@@ -396,13 +396,6 @@ class RankOne:
         C.ccx(g0, b, sw)
         C.free([sw])
 
-    def diff(self, C, U, V, r, s, D):
-        """D (w + 1 wires, 0 before) = (U*s - V*r)/q, two's complement."""
-        k = self.w + 1
-        mul_acc(C, U, s[:k], D)
-        mul_acc(C, V, r[:k], D, sign=-1)
-        mul_odd_const(C, D, pow(self.q, -1, 1 << k))
-
     def residue(self, C, U, D, Q):
         """D (w + 1 wires, two's complement) -> D mod U on D[:w] in place, its sign kept on D[w];
         Q (w wires, 0 before) takes the quotient bits of |D| by U."""
@@ -521,19 +514,25 @@ class RankOne:
         self.fold(C, S)
         r, mR, s, mS = R[:n], R[n:n + w], S[:n], S[n:n + w]
         flat = [term] + [x for c in cells for x in c]
-        U, V, D = C.alloc(w), C.alloc(w), C.alloc(w + 1)
+        U, V = C.alloc(w), C.alloc(w)
 
-        def first(flat, r, s, U, V, D):
+        def first(flat, U, V):
             cs = [flat[:1] + [None]] + [flat[k:k + 2] for k in range(1, len(flat), 2)]
             self.cofactors(C, cs, U, V)
-            self.diff(C, U, V, r, s, D)
 
-        regs1 = [flat, r[:w + 1], s[:w + 1], U, V, D]
+        regs1 = [flat, U, V]
         b1 = C.run(first, regs1)
-        mul_odd(C, U, mS)
-        mul_acc(C, V, mR, mS, sign=-1)
-        add(C, D[:w], mS)
-        C.free(mS)
+        # D = V*mR - U*mS on mS's wires and one more: ~(U*mS) + V*mR + 1
+        D = mS + C.alloc(1)
+        mul_odd(C, U, D)
+        for x in D:
+            C.x(x)
+        mul_acc(C, V, mR, D)
+        (one,) = C.alloc(1)
+        C.x(one)
+        add(C, [one], D)
+        C.x(one)
+        C.free([one])
         del S[n:]
         Q = C.alloc(w)
         regs2 = [U, D, Q]
@@ -545,6 +544,11 @@ class RankOne:
         C.free(sp)
         C.apply(b2, regs2, inverse=True)
         C.free(Q)
+        # D*q = U*s - V*r, so D*q - U*s + V*r is 0 mod 2^(w + 1)
+        k = w + 1
+        mul_odd_const(C, D, self.q % (1 << k))
+        mul_acc(C, U, s[:k], D, sign=-1)
+        mul_acc(C, V, r[:k], D)
         C.apply(b1, regs1, inverse=True)
         C.free(U + V + D + mR)
         del R[n:]
