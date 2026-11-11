@@ -21,8 +21,8 @@ class DialogMultiplier:
     RAW_TAPE = True
     # Chain carries the forward pass leaves as junk for the inverse pass. Each is held through the
     # Bezout pass and saves one CCX in each Euclid pass, so this is the one knob that trades wires
-    # for CCX; 1,157 puts the climb stack at 4,096 wires at n = 256.
-    CARRY_JUNK = 1157
+    # for CCX; 1,154 puts the climb stack at 4,096 wires at n = 256.
+    CARRY_JUNK = 1154
     # A tick whose registers reach this many bits above its joint threshold runs those bits as one
     # high word, 3 CCX a bit, on a flag that says which register holds it. 6 is 148 CCX cheaper at
     # n = 256; 2 keeps the high word in every toy prime of 8 bits or more.
@@ -40,7 +40,7 @@ class DialogMultiplier:
     LAG_MIN_SAVING = 1
     # The Bezout pass's first cells run on unreduced integers, up to this many, then one conversion
     # (rank_one.py); 0 turns it off.
-    RANK_J = 10
+    RANK_J = 11
 
     def __init__(self, C, mod):
         self.C, self.mod = C, mod
@@ -1228,7 +1228,7 @@ class DialogMultiplier:
         """Cells T - 1 down to T - J on unreduced integers, then one conversion. The tick after it
         is a first tick: the last cell here is semantic, so no lane is held."""
         C, T, n = self.C, self.iters, self.mod.n
-        ro = rank_one.RankOne(self.mod.q, J, self.widths[T - J])
+        ro = rank_one.RankOne(self.mod.q, J, self.widths[T - J], [1] + [self.widths[T - k] for k in range(1, J + 1)])
         R, Sw = Yr + C.alloc(ro.L - n), S + C.alloc(ro.L - n)
         term = G[2 * T - 2]
         for r, s in zip(Yr, S):
@@ -1240,7 +1240,11 @@ class DialogMultiplier:
         G[-1] = None
         p = None
         for i in range(T - 2, T - J, -1):
-            p = ro.tick(C, G[2 * i:2 * i + 2], G[2 * i + 2:2 * i + 4], p, R, Sw)
+            # After cell i the cofactors are below 2^widths[i]: the tick needs no wider words.
+            k = n + self.widths[i] + 3
+            Rk, Sk = R[:k], Sw[:k]
+            p = ro.tick(C, G[2 * i:2 * i + 2], G[2 * i + 2:2 * i + 4], p, Rk, Sk)
+            R[:k], Sw[:k] = Rk, Sk
         i = T - J
         ro.last_tick(C, G[2 * i:2 * i + 2], G[2 * i + 2:2 * i + 4], p, R, Sw)
         cells = [G[2 * k:2 * k + 2] for k in range(T - 2, T - J - 1, -1)]

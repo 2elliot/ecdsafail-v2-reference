@@ -213,8 +213,10 @@ def split(c, k):
 
 
 class RankOne:
-    def __init__(self, q, J, w):
+    def __init__(self, q, J, w, steps=None):
+        """steps[k] bounds the cofactors' bits after k cells, steps[J] = w."""
         self.q, self.J, self.w = q, J, w
+        self.steps = steps or [w] * (J + 1)
         self.n = n = q.bit_length()
         self.f = (1 << n) - q
         self.W = ((2 ** w) * self.f).bit_length()
@@ -359,26 +361,35 @@ class RankOne:
         B1: V = 2V. The first cell is the terminal one, A0 or J, where V = g0."""
         C.x(U[0])
         C.cx(cells[0][0], V[0])
-        for g0, b in cells[1:]:
-            V[:] = V[-1:] + V[:-1]
-            add(C, U, V, ctl=g0)
-            (j,) = C.alloc(1)
-            C.x(g0)
-            C.ccx(g0, b, j)
-            C.x(g0)
-            for i in range(len(V) - 1, 0, -1):
-                C.cx(V[i - 1], V[i])
-                C.ccx(j, V[i], V[i - 1])
-                C.cx(V[i - 1], V[i])
-            C.x(g0)
-            C.ccx(g0, b, j)
-            C.x(g0)
-            C.free([j])
-            (sw,) = C.alloc(1)
-            C.ccx(g0, b, sw)
-            cswap(C, sw, U, V)
-            C.ccx(g0, b, sw)
-            C.free([sw])
+        for k, (g0, b) in enumerate(cells[1:], 2):
+            u, v = self._narrow(U, V, k)
+            self._cof_cell(C, g0, b, u, v)
+            U[:len(u)], V[:len(v)] = u, v
+
+    def _narrow(self, U, V, k):
+        m = min(len(U), self.steps[k])
+        return U[:m], V[:m]
+
+    def _cof_cell(self, C, g0, b, U, V):
+        V[:] = V[-1:] + V[:-1]
+        add(C, U, V, ctl=g0)
+        (j,) = C.alloc(1)
+        C.x(g0)
+        C.ccx(g0, b, j)
+        C.x(g0)
+        for i in range(len(V) - 1, 0, -1):
+            C.cx(V[i - 1], V[i])
+            C.ccx(j, V[i], V[i - 1])
+            C.cx(V[i - 1], V[i])
+        C.x(g0)
+        C.ccx(g0, b, j)
+        C.x(g0)
+        C.free([j])
+        (sw,) = C.alloc(1)
+        C.ccx(g0, b, sw)
+        cswap(C, sw, U, V)
+        C.ccx(g0, b, sw)
+        C.free([sw])
 
     def diff(self, C, U, V, r, s, D):
         """D (w + 1 wires, 0 before) = (U*s - V*r)/q, two's complement."""
