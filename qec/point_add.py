@@ -23,8 +23,8 @@ class DialogMultiplier:
     RAW_TAPE = True
     # Chain carries the forward pass leaves as junk for the inverse pass. Each is held through the
     # Bezout pass and saves one CCX in each Euclid pass, so this is the one knob that trades wires
-    # for CCX; 1,167 puts the climb stack at 4,096 wires at n = 256.
-    CARRY_JUNK = 1167
+    # for CCX; 1,161 puts the climb stack at 4,096 wires at n = 256.
+    CARRY_JUNK = 1161
     # A tick whose registers reach this many bits above its joint threshold runs those bits as one
     # high word, 3 CCX a bit, on a flag that says which register holds it. At n = 256 a word of 2 bits
     # costs more whole than plain, and 4 or more loses the lazy run, which starts at a word of 3. 3 keeps
@@ -46,7 +46,7 @@ class DialogMultiplier:
     LAG_MIN_SAVING = 1
     # The Bezout pass's first cells run on unreduced integers, up to this many, then one conversion
     # (rank_one.py); 0 turns it off.
-    RANK_J = 12
+    RANK_J = 14
     # (first, last): blocks only on these ticks. No real input still has U's word above the front where
     # the default run ends, so the exit swap's gate moves the run's ends to where built inputs do.
     LAG_SPAN = None
