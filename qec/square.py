@@ -277,9 +277,9 @@ class SquareFold:
     # n = 256, where the square's own peak is 3,229 wires and M's peak lies outside it.
     KEEP = 886
     # The last fold ladder's low carries stay on junk wires through the modadd, one CCX saved each
-    # way per wire. The modadd's 41 scratch wires and these 181 fit in the 222 that ladder itself
+    # way per wire. The modadd's 24 scratch wires and these 198 fit in the 222 that ladder itself
     # peaks at, n = 256, so they cost no row carries.
-    LADDER_KEEP = 181
+    LADDER_KEEP = 198
     def __init__(self, mod):
         self.mod, self.n = mod, mod.n
         self.f = f = (1 << mod.n) - mod.q
@@ -348,18 +348,52 @@ class SquareFold:
 
     def modadd(self, C, a, b, ctrl):
         """Mod.modadd with _reduce's carries above f's window held by a Prefix, so it runs
-        beside the wires compute leaves live. The same flag, the same write, the same CCX."""
+        beside the wires compute leaves live. The same flag and the same write. Inside the window,
+        f's longest run of 0 bits only passes the carry on, so a Prefix holds that run's carries too."""
         f, w = self.f, self.b
+        r0, r1 = self.run
         top, t = C.alloc(2)
         add(C, a, b, top, ctrl)
-        cs = _carries(C, b[:w + 1], f)
+        cs = _carries(C, b[:r0 + 1], f)
+        run = Prefix(C, b[r0:r1])
+
+        def into(x):
+            # x ^= the carry into bit r1, the carry into r0 passed through the run's AND.
+            if cs[r0] is None:
+                return
+            if run.top is None:
+                C.cx(cs[r0], x)
+            else:
+                C.ccx(cs[r0], run.top, x)
+
+        (cr,) = C.alloc(1)
+        into(cr)
+        hs = [cr]
+        for i in range(r1, w):
+            (x,) = C.alloc(1)
+            _carry_into(C, b[i], f >> i & 1, hs[-1], x)
+            hs.append(x)
+        cw = hs[-1]
         carry = Prefix(C, b[w:])
         # s's top bit and the carry into it are never both 1, so their XOR is the flag.
-        C.ccx(cs[w], carry.top, top)
-        C.ccx(top, cs[w], t)
+        C.ccx(cw, carry.top, top)
+        C.ccx(top, cw, t)
         carry.write(t)
-        C.ccx(top, cs[w], t)
-        for i in reversed(range(w)):
+        C.ccx(top, cw, t)
+        for i in reversed(range(r1, w)):
+            _carry_into(C, b[i], f >> i & 1, hs[i - r1], hs[i - r1 + 1])
+            C.free([hs[i - r1 + 1]])
+            C.ccx(top, hs[i - r1], b[i])
+            if f >> i & 1:
+                C.cx(top, b[i])
+        into(cr)
+        C.free([cr])
+        if cs[r0] is not None:
+            C.ccx(top, cs[r0], t)
+        run.write(t)
+        if cs[r0] is not None:
+            C.ccx(top, cs[r0], t)
+        for i in reversed(range(r0)):
             _uncarry(C, b, f, cs, i + 1)
             if cs[i] is not None:
                 C.ccx(top, cs[i], b[i])
@@ -367,6 +401,19 @@ class SquareFold:
                 C.cx(top, b[i])
         gt_into(C, a, b, top, ctrl)
         C.free([top, t])
+
+    @property
+    def run(self):
+        """(r0, r1): f's longest run of 0 bits inside its window, bits r0 to r1 - 1, r0 >= 1."""
+        best, i = (1, 1), 1
+        while i < self.b:
+            j = i
+            while j < self.b and not self.f >> j & 1:
+                j += 1
+            if j - i > best[1] - best[0]:
+                best = (i, j)
+            i = j + 1
+        return best
 
     def _multiple(self, C, a, T, a_max, t_max=0, cin=None):
         """T += f*a mod 2^len(T), plus 1 if cin holds 1, for a <= a_max and T <= t_max on entry.
