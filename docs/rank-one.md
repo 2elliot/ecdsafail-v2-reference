@@ -22,6 +22,7 @@ The cells run on the swept tape, where that identity is false inside a shift run
 The two pairs agree at every run boundary.
 At an interior boundary the forward tick before it was a double shift from (u, 4v), whose potential bounds max(u, 2v)² by the same B_t as the Euclid pair (`out/review-rankone/REVIEW.md`, "Exact premises and the width proof").
 So the swept cofactors meet the same width; nothing beyond the stack's width premise is assumed.
+At J = 12 the bound gives isqrt(B_372) = 5,792 < 2^13 after twelve cells, and the fold's premises hold at w = 13 (`out/bezglue-w3/toy/width-j12.txt`; the gate's `width_j.py` rechecks every k ≤ J from the generator).
 On a held lane the stored word is H − R0 with H = S + R, so the words hold n + w + 1 bits, and two more wires are the add-or-shift's top.
 
 **P2. The fold.** For X = hi·2ⁿ + lo < 2^w·q with (2^w + 2)·f ≤ 2ⁿ, m = hi + e with e = [lo + (hi + 1)f ≥ 2ⁿ] is ⌊X/q⌋, and lo + m·f mod 2ⁿ is X − m·q.
