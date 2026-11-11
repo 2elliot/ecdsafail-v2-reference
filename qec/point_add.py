@@ -41,6 +41,9 @@ class DialogMultiplier:
     # The Bezout pass's first cells run on unreduced integers, up to this many, then one conversion
     # (rank_one.py); 0 turns it off.
     RANK_J = 11
+    # (first, last): blocks only on these ticks. No real input still has U's word above the front where
+    # the default run ends, so the exit swap's gate moves the run's ends to where built inputs do.
+    LAG_SPAN = None
 
     def __init__(self, C, mod):
         self.C, self.mod = C, mod
@@ -778,8 +781,10 @@ class DialogMultiplier:
         lengths = self.LAG_BLOCK if isinstance(self.LAG_BLOCK, tuple) else (self.LAG_BLOCK,)
         R, W, T = self.LAZY_WINDOW, self.widths, len(plan)
 
+        lo, hi = self.LAG_SPAN or (0, T)
+
         def inner(i):
-            return 0 <= i < T and plan[i] and plan[i][9] and plan[i][9][1] != 0 and not plan[i][9][3]
+            return lo <= i <= hi and 0 <= i < T and plan[i] and plan[i][9] and plan[i][9][1] != 0 and not plan[i][9][3]
 
         def block(i, c):
             """(CCX saved, front) of a block of c ticks from tick i, or None."""
