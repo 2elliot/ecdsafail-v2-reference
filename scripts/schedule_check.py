@@ -16,7 +16,8 @@ assumes.
 The lag blocks must be runs of c lazy ticks, none the lazy run's first or last, each tick marked
 (F, c, e, size) with one front F and size the block's first width plus one. F must keep the holes clear of
 the cells a lazy tick reads, F - 2 e >= cut_e + 2 (cut_e + 1 at the block's last tick, whose holes are
-closed before the next tick reads), be at most the width after the block and at least 2 c. On the
+closed before the next tick reads), be at most the width after the block and at least 2 c. A block whose
+realign leaves X's top cell out must have its lazy word below 2^w by the potential bound. On the
 recurrence, with lag the count so far of ticks that left the flag off and of strips counted
 (two AND NOT flag): F - lag >= cut + 2 at every tick but the last, cut + 1 there; under the flag U is below
 2^(F - lag) when lag > 0 and V is below 2^kappa; and on the lazy word's physical V, a word X0 that the far
@@ -28,6 +29,7 @@ from F - lag up with U below 2^F; with no such word V stays below 2^(F - lag) an
 import json
 import random
 import sys
+from math import isqrt
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -208,6 +210,21 @@ def lag_fields_ok(q, plan):
     return True
 
 
+def top_free_ok(q, plan):
+    """A block whose realign leaves X's top cell out must have the lazy word below 2^w on entry, the
+    word's top cell being w. Under the flag U < 2^w by the width promise. Otherwise P = Y + p 2^cut with
+    Y <= v: on a top_clear tick Y < 2^(w - 1); else u < 2^kappa, and v < u or v^2 <= u v^2 <= Psi <= B_t."""
+    m = DialogMultiplier(Circuit(), Mod(q))
+    for t, c, front in lag_blocks(plan) or []:
+        if not m._top_free(plan, t):
+            continue
+        w, k = plan[t][0], plan[t][5]
+        y = (1 << (w - 1)) - 1 if plan[t][1] else max((1 << k) - 1, isqrt((2 * q * q * (q - 1)) >> 2 * t))
+        if y + (1 << (k + WINDOW)) >> w:
+            return False
+    return True
+
+
 def lag_states_ok(q, plan, xs):
     blocks = lag_blocks(plan)
     if not blocks:
@@ -279,7 +296,7 @@ def schedule_ok(q, xs, lag=None):
     plan = plan_of(q, lag)
     return (thresholds_ok(q, plan) and states_ok(q, plan, xs)
             and lazy_fields_ok(q, plan) and lazy_states_ok(q, plan, xs)
-            and lag_fields_ok(q, plan) and lag_states_ok(q, plan, xs))
+            and lag_fields_ok(q, plan) and top_free_ok(q, plan) and lag_states_ok(q, plan, xs))
 
 
 def main():
@@ -287,7 +304,7 @@ def main():
              "lazy_ticks": sum(1 for key in plan_of(q) if key and key[9]),
              "schedule_ok": schedule_ok(q, range(1, q))} for q in TOY]
     for lag in (1, 2, 3, 7):
-        for q in TOY + [15361, 16381]:
+        for q in TOY + [15361, 16381, 32749]:
             ticks = sum(1 for key in plan_of(q, lag) if key and key[10])
             if ticks:
                 rows.append({"q": q, "lag_block": lag, "lag_ticks": ticks, "schedule_ok": schedule_ok(q, range(1, q), lag)})

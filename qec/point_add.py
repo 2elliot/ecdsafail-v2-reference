@@ -21,8 +21,8 @@ class DialogMultiplier:
     RAW_TAPE = True
     # Chain carries the forward pass leaves as junk for the inverse pass. Each is held through the
     # Bezout pass and saves one CCX in each Euclid pass, so this is the one knob that trades wires
-    # for CCX; 1,149 puts the climb stack at 4,096 wires at n = 256.
-    CARRY_JUNK = 1149
+    # for CCX; 1,146 puts the climb stack at 4,096 wires at n = 256.
+    CARRY_JUNK = 1146
     # A tick whose registers reach this many bits above its joint threshold runs those bits as one
     # high word, 3 CCX a bit, on a flag that says which register holds it. At n = 256 a word of 2 bits
     # costs more whole than plain, and 4 or more loses the lazy run, which starts at a word of 3. 3 keeps
@@ -797,7 +797,7 @@ class DialogMultiplier:
             if front > W[i + c] or front < 2 * c:
                 return None
             eager = sum(2 * plan[t][0] - 1 - plan[t][1] - plan[t][5] - R for t in ticks)
-            mine = sum(2 * front - 2 - kappa[e] - R for e in range(c)) + 3 * c + self._lag_cost(2 * c, W[i] + 1 - front)
+            mine = sum(2 * front - 2 - kappa[e] - R for e in range(c)) + 3 * c + self._lag_cost(2 * c, W[i] + 1 - front - self._top_free(plan, i))
             return eager - mine, front
 
         choice = [None] * T
@@ -833,6 +833,17 @@ class DialogMultiplier:
                 c, front = found
                 for e in range(c):
                     plan[i + e][10] = (front, c, e, W[i] + 1)
+
+    def _top_free(self, plan, i):
+        """1 when X's top cell, V's extra wire w, is 0 through a lag block that starts at tick i, so
+        _realign leaves it out: X is never written in the block, U is below 2^w, and so is the lazy V
+        on entry. P = Y + p 2^cut. With p = 0, P = Y < 2^w. On a top_clear tick Y < 2^(w - 1) and
+        cut < w. Otherwise, while p is pending v >= 3 * 2^kappa > u, so v^2 <= u v^2 <= Psi_t <= B_t;
+        when B_t < 2^(2w - 1) that is Y <= v < 2^(w - 1/2), and P < 2^w for 2^cut <= 2^(w - 2)."""
+        q = self.mod.q
+        w, kappa = plan[i][0], plan[i][5]
+        bound = (2 * q * q * (q - 1)) >> 2 * i
+        return int(bool(plan[i][1]) or (bound.bit_length() < 2 * w and w - kappa >= 4))
 
     def _realign(self, c, cells):
         """Close a lag block's holes. V is the cells from c below the front up, xs the block's c
@@ -998,7 +1009,7 @@ class DialogMultiplier:
                 far = plan[i][10]
                 if far and far[2] == far[1] - 1:
                     front, c = far[:2]
-                    cells = V[front - 2 * c:]
+                    cells = V[front - 2 * c:len(V) - self._top_free(plan, i - c + 1)]
                     adders, under = self._lag_counts(2 * c)
                     scratch = (available + junk[used:])[:adders + sum(under)]
                     assert len(scratch) == adders + sum(under)
