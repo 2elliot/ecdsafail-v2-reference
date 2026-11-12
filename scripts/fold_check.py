@@ -7,7 +7,8 @@ absorb takes, and once with no absorbed constant, builds compute(C, Y, J, kappa,
 J[:n] must hold (Y^2 - c) mod q after compute, Y must be as it was, and every wire of J must be 0
 after the reverse. At secp256k1 it samples Y, with the edges, for c = 3a and two random c. It counts the builds whose second fold loads a nonzero constant (klo), which is
 the path where _multiple copies E and adds klo as a constant. Controls, each of which must fail on
-some build: that add one bit short, and the constant's lowest set bit dropped.
+some build: that add one bit short, the constant's lowest set bit dropped, and a digit add that
+takes its target as clean one bit below where the bound says.
 """
 import sys
 from pathlib import Path
@@ -96,12 +97,16 @@ def main():
     def dropped(C, reg, value):
         plain(C, reg, value & (value - 1))
 
-    for name, fn in (("constant add one bit short", short), ("constant's lowest set bit dropped", dropped)):
-        square._add_loaded = fn
+    clean = square._clean_from
+    for name, attr, fn in (("constant add one bit short", "_add_loaded", short),
+                           ("constant's lowest set bit dropped", "_add_loaded", dropped),
+                           ("a digit's target taken as clean one bit early", "_clean_from", lambda v: max(1, clean(v) - 1))):
+        saved = getattr(square, attr)
+        setattr(square, attr, fn)
         try:
             _, _, missed = sweep(min(bits, 8))
         finally:
-            square._add_loaded = plain
+            setattr(square, attr, saved)
         print(f"control, {name}: {missed} failures", flush=True)
         ok &= missed > 0
     print("PASS" if ok else "FAIL")

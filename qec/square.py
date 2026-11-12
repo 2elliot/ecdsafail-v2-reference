@@ -182,6 +182,11 @@ def _add_loaded(C, reg, value):
     add_const(C, reg, value)
 
 
+def _clean_from(values):
+    """The first bit from which a register holding one of these values, all at least 0, is 0."""
+    return max(values).bit_length()
+
+
 class _Lend:
     """Lends clean wires to the allocator for a stretch of the build and takes the same wires
     back. Every allocation in the stretch is returned clean before it ends, so the lent wires
@@ -497,6 +502,10 @@ class SquareFold:
         moves, so the digit adds below bit i only. Otherwise bit i takes the carry out and the
         bits above copy it. A digit onto a T that is 0, with no carry in, copies a.
 
+        A digit added onto a value that is at least 0 meets a target that is 0 from some bit z up
+        (_clean_from). Below z it ripples in place, with its carry out on target[z]; from z up the
+        carry into each next bit is written onto that clean wire and left there, one CCX a bit.
+
         With load, T is clean on entry and the call also adds the constant t_max: the first digit
         copies a and adds t_max as a constant, whose chain skips the 0 bits below its first 1."""
         inc, done, d = int(cin is not None), 0, 0
@@ -534,9 +543,20 @@ class SquareFold:
                 C.x(w)
             for w in above:
                 C.cx(target[top], w)
-            pad = C.alloc(max(0, top - len(a)))
-            add(C, a[:top] + pad, target[:top], cout=target[top] if carry else None, cin=cin)
-            C.free(pad)
+            # Before a digit that adds onto a value known to be at least 0, the target is 0 from
+            # bit z up. There the sum is out of place: the carry into bit p + 1, a_p AND c_p, is
+            # written onto the clean target[p + 1] and stays as part of the sum.
+            z = _clean_from(ends[:len(before)]) if sign > 0 and min(before) >= 0 else top
+            if not carry and 1 <= z <= len(a) and z < top:
+                add(C, a[:z], target[:z], cout=target[z], cin=cin)
+                for p in range(z, min(top, len(a))):
+                    if p + 1 < top:
+                        C.ccx(a[p], target[p], target[p + 1])
+                    C.cx(a[p], target[p])
+            else:
+                pad = C.alloc(max(0, top - len(a)))
+                add(C, a[:top] + pad, target[:top], cout=target[top] if carry else None, cin=cin)
+                C.free(pad)
             for w in above:
                 C.cx(target[top], w)
             for w in flips:

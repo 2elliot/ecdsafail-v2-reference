@@ -547,3 +547,15 @@ Leaves of fewer than 3 wires and copied leaves are as they were: a copied leaf's
 `scripts/fold_check.py` and the toy curves run the leaves inside the fold on every input.
 
 At G: 2,957,012 -> 2,955,952 CCX (-1,060), 4,096 wires.
+
+## Fold digits onto a target that is 0 from some bit up
+
+`_multiple` bounds the accumulator before each digit. Where that value is at least 0 and the digit adds, the target is 0 from bit z = bitlen(the largest bound) up, and the digit's ripple ran over those wires at 2 CCX a bit all the same.
+Now the digit ripples in place below z only, with its carry out on target[z], which is clean. From z up the sum is out of place: the carry into bit p + 1 is a_p ∧ c_p, written onto the clean target[p+1] while target[p] holds c_p, and then target[p] takes a_p. That is one CCX a bit, and the last carry is dropped where the old bound already said the sum fits.
+Past the digit's top wire the carry just stays where it landed. Digits that subtract, or that meet a value that may be negative, are as they were.
+The first fold's low digit also takes this path with z at the digit's own top: its carry out lands on E[0] as a carry out, not through a padded ripple bit.
+
+At G the first fold's digits at 2^0, 2^4 and 2^32 have 1, 4 and 23 such bits and the second fold's at 2^4 and 2^32 have 3 and 22.
+`scripts/fold_check.py` has a third control: taking the target as clean one bit below the bound fails 5,966 lanes.
+
+At G: 2,955,952 -> 2,955,844 CCX (-108), 4,096 wires.
