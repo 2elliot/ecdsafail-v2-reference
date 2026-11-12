@@ -46,10 +46,29 @@ def _rows(C, Y, Q, copy=True, K=None):
     reached; the uncopied sums are smaller. Y's wires walk through their Gray code. K, if given, is
     a list of junk wires, and a row whose inner carries fit there keeps them, at one CCX a bit."""
     n, L = len(Y), len(Q)
+    if n == 1:
+        if copy and L:
+            C.cx(Y[0], Q[0])
+        return
+    # Row 0 writes Q without an adder (ported from 2elliot's square branch, 6b1f34d). After the
+    # Gray step Y[j] holds y_j ^ y_0. Uncopied, Q is 0, so the row is a copy onto Q[1:n].
+    # Copied, Y + 2*(row 0) is 2Y when y_0 = 0 and 2^w - 1 when y_0 = 1: Q[0] = Q[1] = y_0,
+    # Q[k] = y_0 | y_(k-1) for 1 < k < w, and Q[w] = NOT y_0 AND y_(w-1), where
+    # NOT y_0 AND y_(k-1) = NOT y_0 AND (y_(k-1) ^ y_0) is read off the Gray wire. Bits at L
+    # and above are dropped, as the adder's would be mod 2^L.
+    for w in Y[1:]:
+        C.cx(Y[0], w)
     if copy:
-        for y, q in zip(Y, Q):
+        C.x(Y[0])
+        for k in range(2, min(n, L - 1) + 1):
+            C.ccx(Y[0], Y[k - 1], Q[k])
+        C.x(Y[0])
+        for q in Q[:min(n, L)]:
+            C.cx(Y[0], q)
+    else:
+        for y, q in zip(Y[1:], Q[1:n]):
             C.cx(y, q)
-    for i in range(n - 1):
+    for i in range(1, n - 1):
         for w in Y[i + 1:]:
             C.cx(Y[i], w)
         width = min(n - 1 - i, L - 2 * i - 1)

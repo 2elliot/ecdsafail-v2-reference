@@ -493,3 +493,15 @@ After the initial flag CX gates, the c = 0 words are 0000, 0110 and 0101.
 None has f0 = 0 and f1 = 1, so f0 XOR f1 equals f0 AND NOT f1 on that domain.
 The recode toggles gen with NOT c AND (f0 XOR f1), temporarily forming and restoring the XOR.
 This uses one CCX without a temporary, saving eight CCX across the four recodes.
+
+## Square leaves write row 0 without an adder
+
+Ported from 2elliot's square branch (6b1f34d, on Mike's lowt-depth). In `_rows`, after row 0's Gray step Y[j] holds y_j XOR y_0 for j >= 1, and row 0 adds those bits onto Q[1:].
+
+- Uncopied (T leaves), Q is still 0 there, so the add is a copy: Q[1:n] ^= Y[1:n], and there's no carry.
+- Copied (R leaves), Q holds Y, and Y + 2*(row 0) is 2Y when y_0 = 0 and 2^w - 1 when y_0 = 1. So Q[0] = Q[1] = y_0, Q[k] = y_0 OR y_(k-1) for 1 < k < w, and Q[w] = NOT y_0 AND y_(k-1). Each NOT y_0 AND y_(k-1) equals NOT y_0 AND (y_(k-1) XOR y_0), which is one CCX from the Gray wire under X(y_0), and the ORs follow by CX from y_0. Bits at len(Q) and above are dropped, as the adder's would be mod 2^len(Q).
+- So row 0 costs w - 1 CCX copied and 0 uncopied, in place of an adder of w - 1 bits. A leaf of width 1 is a copy or nothing.
+
+Check: `scripts/rows_check.py . 11` builds `_rows` for every leaf width 1 to 11, every output length 1 to 2w, copied and uncopied, with and without a kept-carry list. On every Y it checks Q = Y(2^w - Y) or Y(2^w - 1 - Y) mod 2^len(Q) and that Y comes back: 528 configurations, 0 failing. Without kept carries, its outputs equal 0f5514b's bit for bit on every input.
+
+At G: 2,961,008 -> 2,958,220 CCX (-2,788), at 4,096 wires.
