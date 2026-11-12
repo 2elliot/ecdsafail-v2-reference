@@ -55,6 +55,9 @@ class DialogMultiplier:
     # The lazy window runs as one cell of 6 CCX, found by search, in place of its ladder's 8; see
     # _high_word. Gates over the window's wires U0 U1 V0 V1, cw, g0, g1, z, zg and the lazy s and p.
     LAZY_CELL = True
+    # A lazy tick keeps b * (the bit its second strip brings to the window's top) as its junk wire, in
+    # place of b * p: the wire it counts that bit from is never taken back.
+    STRIP_BIT_JUNK = True
     _LAZY_CELL = (
         "cx cw U0; cx z U0; x U0; x g0; ccx U0 g0 g1; x g0; x U0; cx z U0; cx cw U0; cx U0 U1; cx U0 V0; cx "
         "U0 V1; cx g0 cw; cx g1 cw; cx z cw; cx zg cw; cx z V0; cx zg V0; ccx cw V0 U0; cx zg V0; cx z V0; cx "
@@ -560,7 +563,7 @@ class DialogMultiplier:
                     raw, m_in, m_out, leave = lazy
                     cut = kappa + self.LAZY_WINDOW
                     cnt = lz[1:]
-                    spare = scratch[len(cnt) - 1]
+                    spare = lzj[-1] if self.STRIP_BIT_JUNK else scratch[len(cnt) - 1]
                 offset = E[0]
                 if last:
                     # The input is (1, 0, 0), (1, 1, 0) or (1, 0, 1), and the swept cell is
@@ -638,12 +641,20 @@ class DialogMultiplier:
                     # The second strip brought one more bit to the window's top, and the pending
                     # borrow, now one place lower, moves back up through it.
                     bit, t = V[cut - 1], lzj[-1]
-                    C.ccx(b, bit, spare)
-                    C.ccx(b, lz[0], t)
-                    C.cx(t, bit)
-                    C.x(bit)
-                    C.ccx(t, bit, lz[0])
-                    C.x(bit)
+                    if self.STRIP_BIT_JUNK:
+                        # spare = b r, r the bit the strip brought here, stays on the junk wire. The bit
+                        # takes b p, and p loses p r = b r AND NOT (r ^ p), read off the new bit.
+                        C.ccx(b, lz[0], bit)
+                        C.x(bit)
+                        C.ccx(spare, bit, lz[0])
+                        C.x(bit)
+                    else:
+                        C.ccx(b, bit, spare)
+                        C.ccx(b, lz[0], t)
+                        C.cx(t, bit)
+                        C.x(bit)
+                        C.ccx(t, bit, lz[0])
+                        C.x(bit)
                     for r in cnt[m_out:]:
                         C.cx(cnt[m_out - 1], r)
                 # g1 lands on the junk wire, then goes to b, where the swept tape wants a subtract's

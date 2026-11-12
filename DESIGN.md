@@ -694,3 +694,18 @@ The domain as the gates see it: M with a marker in front of each lazy window, ev
 M and its inverse as gates on the same 16 builds as before, with the cell, with the direct ladder and with both off: 0 bad lanes. Controls: the cell without each one of its CCX fails wherever some x sets p (one of the six only acts where a borrow stays pending, and fails nowhere else), and the three ladder controls fail as before.
 secp256k1 with the plan as built, 519 inputs: 0 bad lanes, and the cell without its first CCX fails.
 `lag_check.py`, `schedule_check.py`, `model_check.py`, `pair_check.py` and the full `accept.py` pass.
+
+### A lazy tick's junk is the bit its second strip brought
+
+A lazy tick made spare = b r on a scratch wire, r = V[cut] the bit its second strip brings to the window's top, counted with it, and took it back after the strip against the bit's new place. Then it made t = b p on its junk wire, gave the bit t, and took t AND NOT (the new bit) off p. That is 4 CCX and a junk wire holding b p.
+With `STRIP_BIT_JUNK` the spare is made on the junk wire and never taken back. The bit takes b p with one CCX from b and p, and p loses (b r) AND NOT (the new bit) with one more: 3 CCX, and the junk wire holds b r.
+
+The map on V and p is the same. The bit takes b p either way. Off b nothing happens in either. On b the new bit is r ^ p, and p lost p AND NOT (r ^ p) = p r before; now it loses r AND NOT (r ^ p) = r p.
+The junk only has to make the meeting reversible, and the inverse pass, the same gates backwards, is its only reader: (r, p) -> (r ^ p, p AND NOT r) sends (0, 0) and (1, 1) to (0, 0), and r tells them apart as well as p does.
+The counting between is unchanged, the same wire values on another wire. No condition on the inputs is used.
+
+At G: one CCX less in each of the 349 lazy ticks of a pass: 2,946,372 -> 2,944,976 CCX (-1,396), 4,096 wires; `CARRY_JUNK` stays 1279. `STRIP_BIT_JUNK = False` restores the old gates.
+
+**Checks.** `model_check.py`'s junk model has b r on that wire (`_lazy_pending` hands it the bit) and its pass rows compare every junk wire; but no x sets b r at the primes it runs the pass on, so `scripts/window_check.py` runs the same comparison, the pass alone as gates against the model's U, tape and junk, on every x at q = 4099, 8209, 16411, 32771 and 65537: 0 bad bits, 137 inputs with b r set, and the model with b p on that wire fails at all five.
+Its M rows run with the switch on and off, 0 bad lanes, and two more controls, the CCX onto the bit dropped and the CCX onto p dropped, fail on all 8 builds where some x strips twice under a pending p (129 inputs; they only act there).
+`lag_check.py`, `schedule_check.py`, `pair_check.py` and the full `accept.py` pass.
