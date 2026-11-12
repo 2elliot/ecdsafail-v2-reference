@@ -49,3 +49,27 @@ for n in range(1, nmax + 1):
                 h = hashlib.sha256(repr((qv, yback, kvals)).encode()).hexdigest()[:16]
                 print(f"n={n} L={L} copy={int(copy)} K={kn} ccx={ccx} ok={int(ok)} digest={h}")
 print(f"configs failing the contract: {bad}")
+
+# Controls: in the uncopied leaf, every CCX dropped, or turned into a CX from either control, must
+# break the contract on some Y (widths 3 to 7, full output length, no kept carries).
+from qec import sim  # noqa: E402
+mutants = missed = 0
+for n in range(3, min(nmax, 7) + 1):
+    C = builder.Circuit()
+    Y, Q = C.alloc(n), C.alloc(2 * n - 2)
+    square._rows(C, Y, Q, False, None)
+    ops = C.prims
+    ys = list(range(1 << n))
+    want = [(y, y * ((1 << n) - 1 - y)) for y in ys]
+    for p in range(0, len(ops), 4):
+        if ops[p] != builder.CCX:
+            continue
+        _, x, c, t = ops[p:p + 4]
+        for repl in ([], [builder.CX, x, t, t], [builder.CX, c, t, t]):
+            mut = ops[:p] + type(ops)("i", repl) + ops[p + 4:]
+            state = sim.run(mut, C.num_wires, sim.pack(ys, Y), len(ys))
+            got = list(zip(sim.unpack(state, Y, len(ys)), sim.unpack(state, Q, len(ys))))
+            mutants += 1
+            missed += got == want
+print(f"controls: {mutants} single-CCX mutants of uncopied leaves, {missed} unnoticed")
+sys.exit(1 if bad or missed else 0)

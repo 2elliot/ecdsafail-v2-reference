@@ -532,3 +532,18 @@ Above B's top the carry is a_i ∧ c_i, still one CCX. That is h CCX, A and B ar
 At G the 13 nodes save h - 1 each, both ways: 2,958,212 -> 2,957,012 CCX (-1,200), 4,096 wires.
 
 The same holds for any sum written onto clean wires: a copy and an in-place add cost two CCX a bit, an out-of-place sum one.
+
+## Rows 0 and 1 of an uncopied leaf as one out-of-place sum
+
+An uncopied leaf copied row 0 onto its clean Q and then rippled row 1 onto it in place: 2w - 5 CCX for a leaf of w wires, or w - 2 with w - 3 kept-carry wires.
+Q is clean when both rows arrive, so Q = 2 r_0 + 8 r_1 is an out-of-place sum, like S above: places 1 and 2 take r_0's bits alone, and from place 3 up the carry into place p + 1 is written onto Q[p+1] while Q[p] still holds the carry into p, then Q[p] takes its two bits. Place w has r_1's top bit and the carry only, and the carry out lands on Q[w+1].
+That is w - 2 CCX and no kept wire.
+
+Both rows' bits must be on wires at once. After the Gray steps of rows 0 and 1, Y[j] holds r_1's bit y_j ⊕ y_1 for j ≥ 2 and Y[1] holds y_1 ⊕ y_0, which is r_0's bit 1. r_0's bit j is y_j ⊕ y_0 = Y[j] ⊕ Y[1], so a CX from Y[1] puts it on Y[j] for the one step that reads it and a second CX takes it off; the step's other operand is Y[p-1], a different wire.
+Writes at or above len(Q) are dropped, as the adder's were mod 2^len(Q). Q after the two rows is the number it was, so rows 2 on, their bounds and their kept carries are unchanged; KEEP's wires that row 1 used go to later rows at the same 1 CCX each way.
+Leaves of fewer than 3 wires and copied leaves are as they were: a copied leaf's row 0 is not linear in Y, so it cannot be an operand of such a sum.
+
+`scripts/rows_check.py . 11` checks `_rows` against Y (2^w - 1 - Y) mod 2^len(Q) on every Y for every width to 11, every output length, with and without kept wires, and now ends with controls: each of the 120 single-CCX mutants of the uncopied leaves of 3 to 7 wires breaks the contract.
+`scripts/fold_check.py` and the toy curves run the leaves inside the fold on every input.
+
+At G: 2,957,012 -> 2,955,952 CCX (-1,060), 4,096 wires.

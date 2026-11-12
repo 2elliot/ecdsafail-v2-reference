@@ -94,10 +94,34 @@ def _rows(C, Y, Q, copy=True, K=None):
         C.x(Y[0])
         for q in Q[:min(n, L)]:
             C.cx(Y[0], q)
+    elif n > 2:
+        # Uncopied, rows 0 and 1 land on a clean Q together: Q = 2*r_0 + 8*r_1 as an out-of-place
+        # sum, the carry into place p + 1 written onto Q[p + 1] while Q[p] holds the carry into p.
+        # After row 1's Gray step Y[j] holds r_1's bit y_j ^ y_1 for j >= 2 and Y[1] holds
+        # y_1 ^ y_0, so r_0's bit y_j ^ y_0 is Y[j] ^ Y[1], put on Y[j] by a CX for its one step.
+        for w in Y[2:]:
+            C.cx(Y[1], w)
+        for p in range(1, min(n + 1, L)):
+            a = Y[p] if p < n else None
+            b = Y[p - 1] if p >= 3 else None
+            if a is not None and p >= 2:
+                C.cx(Y[1], a)
+            if p + 1 < L and p >= 3:
+                c = Q[p] if p > 3 else None
+                if a is None:
+                    if c is not None:
+                        C.ccx(b, c, Q[p + 1])
+                else:
+                    _maj_onto(C, a, b, c, Q[p + 1])
+            for x in (a, b):
+                if x is not None:
+                    C.cx(x, Q[p])
+            if a is not None and p >= 2:
+                C.cx(Y[1], a)
     else:
         for y, q in zip(Y[1:], Q[1:n]):
             C.cx(y, q)
-    for i in range(1, n - 1):
+    for i in range(1 if copy or n <= 2 else 2, n - 1):
         for w in Y[i + 1:]:
             C.cx(Y[i], w)
         width = min(n - 1 - i, L - 2 * i - 1)
