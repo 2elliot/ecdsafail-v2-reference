@@ -25,6 +25,9 @@ class DialogMultiplier:
     # Bezout pass and saves one CCX in each Euclid pass, so this is the one knob that trades wires
     # for CCX; 1,161 puts the climb stack at 4,096 wires at n = 256.
     CARRY_JUNK = 1161
+    # A junk wire takes two chain bits where the chain has them (_pair_up, _pair_down); False keeps
+    # one bit a wire.
+    JUNK_PAIRS = True
     # A tick whose registers reach this many bits above its joint threshold runs those bits as one
     # high word, 3 CCX a bit, on a flag that says which register holds it. At n = 256 a word of 2 bits
     # costs more whole than plain, and 4 or more loses the lazy run, which starts at a word of 3. 3 keeps
@@ -165,18 +168,103 @@ class DialogMultiplier:
                      [self._block_wires(G, j, swept)], inverse=True)
 
 
+    @staticmethod
+    def _pair_up(C, A0, B0, A1, B1, Cw, J):
+        """Two chain bits on one junk wire, 6 CCX with _pair_down. A0, B0 and A1, B1 hold a, b of
+        the lower and the upper bit, Cw the carry c into the lower, J is 0. Leaves J = c_2, the
+        carry out of the upper bit, A1 = a_1 ^ k and B1 = b_1 ^ k with k = a_0 ^ p,
+        p = (a_0 ^ c)(b_0 ^ c ^ a_1 ^ b_1), and A0, B0, Cw as found. k is the carry c_1 unless
+        a_0 != c and a_1 = b_1, where MAJ(a_1, b_1, .) does not read it."""
+        C.cx(Cw, A0)
+        C.cx(Cw, B0)
+        C.cx(A1, B0)
+        C.cx(B1, B0)
+        C.ccx(A0, B0, J)
+        C.cx(B1, B0)
+        C.cx(A1, B0)
+        C.cx(Cw, B0)
+        C.cx(Cw, A0)
+        C.cx(A0, J)
+        C.cx(J, A1)
+        C.cx(J, B1)
+        C.ccx(A1, B1, J)
+
+    @staticmethod
+    def _pair_down(C, A0, B0, A1, B1, Cw, J, g0, g1):
+        """The descent of _pair_up's two bits, for g1 implies g0: A_i takes a_i ^ g1*(a_i ^ b_i ^ 1)
+        and B_i takes b_i ^ g0*(a_i ^ c_i), as the single bits' descents leave them, Cw keeps c,
+        and J is left holding a function of the step's input for the inverse pass."""
+        e0 = A0
+        C.cx(B0, A1)
+        C.cx(B0, B1)
+        C.cx(Cw, e0)
+        # B0 = b_0 ^ e_0 ^ g0*e_0, e_0 = a_0 ^ c.
+        C.ccx(g0, e0, B0)
+        C.cx(e0, B0)
+        # J ^= (a_1 ^ k ^ g0*e_0)(a_1 ^ b_1 ^ g0), which is (a_1 ^ c_1)(a_1 ^ b_1 ^ g0): c_2 becomes
+        # b_1 ^ g0*(a_1 ^ c_1) ^ a_1 ^ b_1.
+        C.cx(A1, B1)
+        C.cx(B0, A1)
+        C.cx(e0, A1)
+        C.cx(g0, B1)
+        C.ccx(A1, B1, J)
+        C.cx(g0, B1)
+        C.cx(B1, J)
+        C.cx(e0, A1)
+        C.cx(B0, A1)
+        C.cx(A1, B1)
+        C.cx(e0, B0)
+        # B0 is done. A1 ^= (g1 ^ e_0)(g1 ^ a_0 ^ B0 ^ a_1 ^ b_1); B1, which held the second
+        # factor, is the wire the cell leaves as junk.
+        for wire in (A1, B0, e0, Cw, g1):
+            C.cx(wire, B1)
+        C.cx(g1, e0)
+        C.ccx(e0, B1, A1)
+        C.cx(g1, e0)
+        C.cx(Cw, A0)
+        C.cx(B0, A1)
+        C.cx(Cw, A1)
+        C.cx(A0, A1)
+        # A0 ^= g1*(B0 ^ c ^ 1): on g1, B0 ^ c = a_0 ^ b_0.
+        C.cx(Cw, B0)
+        C.ccx(g1, B0, A0)
+        C.cx(g1, A0)
+        C.cx(Cw, B0)
+        C.cx(A0, A1)
+        C.cx(g1, A1)
+        # The upper bit's B sits on J: it goes to B1, and J keeps the junk XOR it.
+        C.cx(B1, J)
+        C.cx(J, B1)
+
+    @staticmethod
+    def _junk_split(m, bits):
+        """(singles, pairs) for m junk wires over a chain's bits 1 .. bits: a pair of bits on one
+        wire costs 6 CCX, a single bit on one wire 3, a bit in place 4. Pairs come first; wires
+        beyond bits // 2 turn pairs back into singles."""
+        assert m <= bits
+        pairs = min(m, bits - m) if DialogMultiplier.JUNK_PAIRS else 0
+        return m - pairs, pairs
+
     def _shared_difference(self, U, V, g0, g1, top=None, junk=None, high=0, held=None, scratch=None,
                            lazy=None):
         """Compare and form the even difference using one majority chain. With top set, bit w - 1
-        is done by _top_bit on the domain that mode names. With junk, bits 1 .. len(junk) make
-        their carries c_2 .. on those wires and leave them for the inverse pass, at 3 CCX a bit.
+        is done by _top_bit on the domain that mode names. With junk, the bits from 1 up use those
+        wires and leave them for the inverse pass: first _junk_split's singles, which make their
+        carries c_2 .. on them at 3 CCX a bit, then its pairs, two bits to a wire at 6 CCX.
         With high, the top `high` bits are done by _high_word."""
         C = self.C
         (cin,) = C.alloc(1)
         chain = len(U) - high if high else len(U) if top is None else len(U) - 1
         m = len(junk) if junk else 0
         assert m <= max(chain - 1, 0)
-        carries = [cin, U[0]] + list(junk or []) + U[m + 1:]
+        singles, pairs = self._junk_split(m, max(chain - 1, 0))
+        m, low = singles, singles + 2 * pairs
+        # carries[i] is the wire with the carry into bit i; a pair's upper bit has none.
+        carries = [cin, U[0]] + list(junk or [])[:m]
+        for k in range(pairs):
+            carries += [None, junk[m + k]]
+        carries += U[low + 1:]
+        lower = {m + 1 + 2 * k: junk[m + k] for k in range(pairs)}
         for wire in V:
             C.x(wire)
         for i in range(chain):
@@ -184,6 +272,10 @@ class DialogMultiplier:
                 C.cx(U[i], V[i])
                 C.cx(U[i], carries[i])
                 C.cx(V[i], U[i])
+            elif i in lower:
+                self._pair_up(C, U[i], V[i], U[i + 1], V[i + 1], carries[i], lower[i])
+            elif m < i <= low:
+                continue
             elif i > m:
                 _maj(C, carries[i], V[i], U[i])
             else:
@@ -199,6 +291,11 @@ class DialogMultiplier:
         else:
             self._top_bit(C, top, g0, U[-1], V[-1], carries[chain], g1)
         for i in reversed(range(chain)):
+            if i in lower:
+                self._pair_down(C, U[i], V[i], U[i + 1], V[i + 1], carries[i], lower[i], g0, g1)
+                continue
+            if m < i <= low:
+                continue
             if 1 <= i <= m:
                 # a ^ c and b ^ c: select b ^ g0*(a ^ c); on g1 (so g0) b ^ c ^ (a ^ c) = NOT v ^ a.
                 C.ccx(g0, U[i], V[i])
@@ -705,14 +802,18 @@ class DialogMultiplier:
         for i, key in enumerate(plan):
             if key and not key[7]:
                 key[5] = None
+        # Wires go to pairs first, from the last tick back, each saving 2 CCX; what is left then
+        # goes to the bits no pair took, 1 CCX a wire.
         budget = self.carry_junk
-        for key in reversed(plan):
-            if key is None or key[3]:
-                continue
-            key[4] = min(budget, self._carry_junk(key[0], key[1], key[2], key[5] if key[6] else None))
-            budget -= key[4]
-            if not budget:
-                break
+        for share in (2, 1) if self.JUNK_PAIRS else (1,):
+            for key in reversed(plan):
+                if key is None or key[3] or not budget:
+                    continue
+                bits = self._carry_junk(key[0], key[1], key[2], key[5] if key[6] else None)
+                more = min(budget, bits // 2 - key[4] if share == 2 else bits - 2 * key[4] if key[4] == bits // 2 else 0)
+                more = max(more, 0)
+                key[4] += more
+                budget -= more
         return [None if key is None else tuple(key) for key in plan]
 
     def _lazy_plan(self, plan):

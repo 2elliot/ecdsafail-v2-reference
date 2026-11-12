@@ -559,3 +559,47 @@ At G the first fold's digits at 2^0, 2^4 and 2^32 have 1, 4 and 23 such bits and
 `scripts/fold_check.py` has a third control: taking the target as clean one bit below the bound fails 5,966 lanes.
 
 At G: 2,955,952 -> 2,955,844 CCX (-108), 4,096 wires.
+
+## Two chain bits on one junk wire
+
+A junk wire of the Euclid chain now takes two bits at 6 CCX, where it took one at 3 and the bit beside it ran in place at 4.
+So each carry-junk wire saves 2 CCX a pass instead of 1, and a junk wire in M is worth 8 CCX instead of 4.
+Nothing here depends on q; the cell is exact on every input of its domain, which is the single cells' domain: the junk wire 0 on entry, and g1 implies g0 on the way down.
+
+**The cell.** `_pair_up` and `_pair_down` in `qec/point_add.py`, on wires A_0, B_0 (the lower bit's U and V), A_1, B_1 (the upper bit's), Cw (the carry into the lower bit, which the cell only reads) and J (the junk wire).
+Write a_i, b_i for the bits (b is NOT vhat, as everywhere in the chain), c for the carry in, e_0 = a_0 ^ c, f_0 = b_0 ^ c, x_i = a_i ^ b_i, c_1 = MAJ(a_0, b_0, c) = c ^ e_0 f_0 and c_2 = MAJ(a_1, b_1, c_1).
+
+**P1: the way up, 2 CCX.**
+J takes p = e_0 (f_0 ^ x_1), then a_0, so J = k with k = a_0 ^ p = c ^ e_0 ^ e_0 f_0 ^ e_0 x_1 = c_1 ^ e_0 (1 ^ x_1).
+So k is c_1 unless e_0 = 1 and a_1 = b_1, and MAJ(a_1, b_1, .) does not read its third input when a_1 = b_1.
+A_1 and B_1 take k, and J ^= A_1 B_1 gives k ^ (a_1 ^ k)(b_1 ^ k) = MAJ(a_1, b_1, k) = c_2.
+The lower bit's wires and Cw are as found, J holds the carry out for the bits above, and c_1 is on no wire.
+
+**P2: the way down, 4 CCX.** Write P = g0 e_0.
+- A_1 and B_1 take b_0; then B_0 ^= g0 e_0 ^ e_0, so B_0 = b_0 ^ e_0 ^ P.
+- W = A_1 ^ B_0 ^ e_0 = a_1 ^ k ^ P = (a_1 ^ c_1) ^ e_0 (1 ^ x_1 ^ g0), and (x_1 ^ g0) W = (x_1 ^ g0)(a_1 ^ c_1), because y (1 ^ y) = 0 for y = x_1 ^ g0.
+  J ^= (x_1 ^ g0) W turns c_2 = a_1 ^ x_1 (a_1 ^ c_1) into a_1 ^ g0 (a_1 ^ c_1), and J ^= x_1 makes it b_1 ^ g0 (a_1 ^ c_1), the upper bit's B output.
+  This one product is the upper bit's unwind and its g0 select together.
+- B_0 ^= e_0 leaves b_0 ^ g0 e_0, the lower bit's B output, written V_0 below.
+- B_1 takes G = x_1 ^ V_0 ^ a_0 ^ g1, and A_1 ^= (e_0 ^ g1) G.
+  With e_0 P = P and g1 P = g1 e_0 (g1 implies g0), (e_0 ^ g1) G = e_0 x_1 ^ e_0 x_0 ^ P ^ g1 x_1 ^ g1 x_0 ^ g1, and p ^ e_0 x_1 ^ e_0 x_0 = e_0.
+  After the CX from B_0, Cw, A_0 (twice, around the next step) and g1, A_1 = a_1 ^ k ^ b_0 ^ (e_0 ^ g1) G ^ V_0 ^ c ^ g1 x_0 = a_1 ^ g1 (x_1 ^ 1), the upper bit's A output.
+- A_0 ^= g1 (V_0 ^ c ^ 1): on g1, V_0 ^ c = b_0 ^ e_0 ^ c = x_0, so A_0 = a_0 ^ g1 (x_0 ^ 1), the lower bit's A output.
+- Two CX leave B_1 = b_1 ^ g0 (a_1 ^ c_1) and J = B_1 ^ G, a function of the step's input, which the inverse pass, the same gates reversed, clears like any other junk.
+
+So the four outputs are those of `_shared_difference`'s single cells, Cw, g0 and g1 are untouched, and the cell is 6 CCX.
+
+**Layout and plan.** `_junk_split` gives a tick's m junk wires to its chain's bits from 1 up: singles first, then pairs, each pair's wire being the carry wire of the bit above it.
+`_tick_plan` gives wires to pairs first, from the last tick back, and only then to the bit a tick of odd length has left; at n = 256 all 1,161 wires hold pairs, 2,322 bits.
+`CARRY_JUNK` stays 1161: the pass's junk width and M's peak do not move. `JUNK_PAIRS = False` restores one bit a wire.
+
+**How it was found, and what the search closes.**
+`cell.c` and its variants (in the work directory, not the tree) search every circuit of a given CCX count on a cell's wires, with CX and X free: the state is the affine span of the wire functions on the cell's domain, and a CCX replaces one direction t by t ^ xy for x, y in a hyperplane that misses t.
+It finds the single cells' known costs (in place 4, junk 3) and proves, for two bits: in place there is no 7-CCX cell with 2 or 3 CCX before g1 is known (S2's 2+5 and 3+4 splits), also with one clean wire borrowed and returned for 2+5; with one junk wire 6 CCX exists and 5 does not with two.
+A plain adder gets nothing from the same idea: two bits on one junk wire cost 3, not 2.
+
+At G: 2,961,008 -> 2,956,364 CCX (-4,644), T 20,727,056 -> 20,694,548, 4,096 wires.
+
+**Checks.** `scripts/pair_check.py`: the cell on all 96 inputs (c_2 at the top, the four outputs, Cw, g0 and g1 restored, the reversed halves restoring the input); 61 mutants, each gate dropped and each CCX turned into a CX from either control, all caught; then M and its inverse as gates on every x at every odd prime from 11 to 257 and every junk budget from 0 to the full plan, 919 builds with 0 bad lanes, 868 with a pair, 133 with a single beside pairs, 764 with a pair under an in-place bit; `JUNK_PAIRS = False` agrees; dropping `_pair_down`'s last CCX gives 162 bad lanes.
+`scripts/model_check.py`'s junk model now computes a pair's wire, b_0 ^ a_0 ^ a_1 ^ g1 ^ g0 (a_0 ^ c_0 ^ a_1 ^ c_1), independently of the gates, and its pass rows match it on every x at its primes and on the secp256k1 rows.
+`schedule_check.py` and the full `accept.py` pass: 13 pass, 0 fail, 1 pending.

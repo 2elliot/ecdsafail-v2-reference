@@ -110,9 +110,10 @@ def _lazy_pending(m, plan, states, cells):
 
 
 def _junk_value(m, q, x):
-    """The pass's junk register: E as the last tick found it, then per tick its chain's lowest carries
-    c_2 .. c_(carry+1) of U + NOT(V') on its width, V' being V ^ E at bit 0 with a no-subtract
-    tick's second strip already done on V[1:]; then the flag wire the tick makes, and the wire its
+    """The pass's junk register: E as the last tick found it, then per tick its chain's junk wires for
+    U + NOT(V') on its width, V' being V ^ E at bit 0 with a no-subtract tick's second strip already
+    done on V[1:]: the carries c_2 .. of the single bits, then one wire for each pair of bits (DESIGN.md,
+    "Two chain bits on one junk wire"); then the flag wire the tick makes, and the wire its
     flag update leaves; then a lazy tick's wires; then add AND E, the offset a subtract retires. The
     flag before a tick is [U >= 2^kappa]. A wire that carries it holds the flag of the tick that last
     wrote it. The first lazy tick brings V's extra wire and the counter, which end 0, and the wire for
@@ -140,10 +141,17 @@ def _junk_value(m, q, x):
                 vv = sum(b << i for i, b in enumerate(vb))
             nb = ~vv & ((1 << w) - 1)
             c = nb & 1
-            for i in range(1, carry + 1):
+            singles, pairs = m._junk_split(carry, m._carry_junk(w, top_clear, narrow, kappa if high else None))
+            for i in range(1, singles + 1):
                 a, b = U >> i & 1, nb >> i & 1
                 c = a & b | a & c | b & c
                 bits.append(c)
+            for i in range(singles + 1, singles + 2 * pairs, 2):
+                # A pair's wire: b_0 ^ a_0 ^ a_1 ^ g1 ^ g0 * (a_0 ^ c_0 ^ a_1 ^ c_1), g1 the swap.
+                a0, b0, a1, b1 = U >> i & 1, nb >> i & 1, U >> (i + 1) & 1, nb >> (i + 1) & 1
+                c1 = a0 & b0 | a0 & c | b0 & c
+                bits.append(b0 ^ a0 ^ a1 ^ (add & bit) ^ (add & (a0 ^ c ^ a1 ^ c1)))
+                c = a1 & b1 | a1 & c1 | b1 & c1
         if init:
             holder = len(bits)
             bits.append(flags[t])
