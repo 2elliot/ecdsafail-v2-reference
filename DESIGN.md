@@ -709,3 +709,16 @@ At G: one CCX less in each of the 349 lazy ticks of a pass: 2,946,372 -> 2,944,9
 **Checks.** `model_check.py`'s junk model has b r on that wire (`_lazy_pending` hands it the bit) and its pass rows compare every junk wire; but no x sets b r at the primes it runs the pass on, so `scripts/window_check.py` runs the same comparison, the pass alone as gates against the model's U, tape and junk, on every x at q = 4099, 8209, 16411, 32771 and 65537: 0 bad bits, 137 inputs with b r set, and the model with b p on that wire fails at all five.
 Its M rows run with the switch on and off, 0 bad lanes, and two more controls, the CCX onto the bit dropped and the CCX onto p dropped, fail on all 8 builds where some x strips twice under a pending p (129 inputs; they only act there).
 `lag_check.py`, `schedule_check.py`, `pair_check.py` and the full `accept.py` pass.
+
+### The lazy counter's step: last carry straight onto the top bit, two bits by a majority
+
+`_count` adds a bit to the lazy counter through a ladder of carries on scratch, a_(i+1) = a_i reg_i, XORs each carry into its bit from the top down and takes each one back: 2 (n - 1) CCX on n bits.
+With `COUNT_SHORT` the last carry, the one into the top bit, is written onto that bit by the CCX that would have made it: reg_(n-1) ^= a_(n-2) reg_(n-2). Nothing else reads that carry, the CCX's controls are not its target, and the rest of the ladder is as before, so the map is the same in 2 n - 3 CCX.
+
+A raw tick steps the counter down by two bits at once, the bit at cut - 1 and the spare b r. It made both = bit AND spare on scratch (one CCX), counted with ctl = bit ^ spare and both XORed into the carry out of bit 0, and took both back (one more).
+That carry, ctl reg_0 ^ both, is the majority of bit, spare and reg_0. `_count` now takes the second bit as `also` and makes the carry as bit ^ (bit ^ spare)(bit ^ reg_0), one CCX between CX pairs that restore spare and reg_0; bit 0 then takes bit ^ spare as before. The same carry, without the wire for both and its two CCX.
+
+At G: 349 counter steps a pass lose one CCX and the 116 raw ones two more: 2,944,976 -> 2,942,652 CCX (-2,324), 4,096 wires; `CARRY_JUNK` stays 1279. `COUNT_SHORT = False` restores the old gates.
+
+**Checks.** `scripts/window_check.py` runs `_count` alone as gates on 1 to 8 bits, up and down, with one bit and with two: all 6,104 pairs of a register value and a step give the sum with the step bits kept and the scratch clean, each counter has 2 n - 3 CCX, and up to 6 bits no gate can be dropped without a wrong case.
+Its M rows run every build with the switch on and off: 0 bad lanes. `lag_check.py`, whose lazy-run rows end the run with the counter in every state, `schedule_check.py`, `model_check.py`, `pair_check.py` and the full `accept.py` pass.

@@ -58,6 +58,9 @@ class DialogMultiplier:
     # A lazy tick keeps b * (the bit its second strip brings to the window's top) as its junk wire, in
     # place of b * p: the wire it counts that bit from is never taken back.
     STRIP_BIT_JUNK = True
+    # The lazy counter's ladder writes its last carry straight onto the top bit, and a raw tick's
+    # step of two bits takes the carry out of bit 0 as their majority with it; see _count.
+    COUNT_SHORT = True
     _LAZY_CELL = (
         "cx cw U0; cx z U0; x U0; x g0; ccx U0 g0 g1; x g0; x U0; cx z U0; cx cw U0; cx U0 U1; cx U0 V0; cx "
         "U0 V1; cx g0 cw; cx g1 cw; cx z cw; cx zg cw; cx z V0; cx zg V0; ccx cw V0 U0; cx zg V0; cx z V0; cx "
@@ -421,26 +424,47 @@ class DialogMultiplier:
             C.x(v)
             C.cx(zg, v)
 
-    def _count(self, ctl, reg, scratch, down=False, twice=None):
+    def _count(self, ctl, reg, scratch, down=False, twice=None, also=None):
         """reg += ctl, or reg -= ctl with down, on a two's complement register, low bit first.
         With twice the step is ctl + 2 * twice, for a twice that is never set beside ctl: it and
-        the carry out of bit 0 are then never both set, and their XOR is the carry into bit 1."""
+        the carry out of bit 0 are then never both set, and their XOR is the carry into bit 1.
+        With also, a second bit, the step is ctl + also: the carry into bit 1 is the majority of
+        ctl, also and reg[0], ctl ^ (ctl ^ also)(ctl ^ reg[0]), one CCX.
+        With COUNT_SHORT the last carry, the one into the top bit, is written straight onto that
+        bit: it is read nowhere else, so it needs no wire of its own and is not taken back."""
         C = self.C
-        assert twice is None or len(reg) >= 2
+        n = len(reg)
+        assert (twice is None and also is None) or n >= 2
         if down:
             for r in reg:
                 C.x(r)
-        a = [ctl] + list(scratch[:len(reg) - 1])
-        for i in range(len(reg) - 1):
-            C.ccx(a[i], reg[i], a[i + 1])
+        a = [ctl] + list(scratch[:n - 1])
+
+        def carry(i, target):
+            # target ^= the carry out of bit i. reg[i] and the carries below it are as found.
+            if i == 0 and also is not None:
+                C.cx(ctl, target)
+                C.cx(ctl, also)
+                C.cx(ctl, reg[0])
+                C.ccx(also, reg[0], target)
+                C.cx(ctl, reg[0])
+                C.cx(ctl, also)
+                return
+            C.ccx(a[i], reg[i], target)
             if i == 0 and twice is not None:
-                C.cx(twice, a[1])
-        for i in range(len(reg) - 1, 0, -1):
+                C.cx(twice, target)
+
+        direct = n - 2 if self.COUNT_SHORT and n >= 2 else None
+        for i in range(n - 1):
+            carry(i, reg[i + 1] if i == direct else a[i + 1])
+        for i in range(n - 1, 0, -1):
+            if i - 1 == direct:
+                continue
             C.cx(a[i], reg[i])
-            if i == 1 and twice is not None:
-                C.cx(twice, a[1])
-            C.ccx(a[i - 1], reg[i - 1], a[i])
+            carry(i - 1, a[i])
         C.cx(ctl, reg[0])
+        if also is not None:
+            C.cx(also, reg[0])
         if down:
             for r in reg:
                 C.x(r)
@@ -605,11 +629,14 @@ class DialogMultiplier:
                     C.ccx(b, V[cut], spare)
                     if raw:
                         bit, new, both = V[cut - 1], lzj[0], scratch[len(cnt)]
-                        C.ccx(bit, spare, both)
-                        C.cx(bit, spare)
-                        self._count(spare, cnt, scratch, down=True, twice=both)
-                        C.cx(bit, spare)
-                        C.ccx(bit, spare, both)
+                        if self.COUNT_SHORT:
+                            self._count(bit, cnt, scratch, down=True, also=spare)
+                        else:
+                            C.ccx(bit, spare, both)
+                            C.cx(bit, spare)
+                            self._count(spare, cnt, scratch, down=True, twice=both)
+                            C.cx(bit, spare)
+                            C.ccx(bit, spare, both)
                         C.x(bit)
                         C.ccx(lz[0], bit, new)
                         C.x(bit)
@@ -1206,8 +1233,8 @@ class DialogMultiplier:
         """Junk wires each tick leaves for the inverse pass: its carries, the flag it makes, the
         wire its flag update leaves, a lazy tick's, and the retired offset. A lazy tick leaves
         the wire that held p if the tick is raw, its counted strip if it is in a lag block and
-        _lag_clear does not clear it, and b * p; the first one brings p and the counter wires that
-        _lazy_kept counts."""
+        _lag_clear does not clear it, and b * r, r the bit its second strip brings to the window's top
+        (b * p without STRIP_BIT_JUNK); the first one brings p and the counter wires that _lazy_kept counts."""
         plan = self._tick_plan()
         kept = self._lazy_kept(plan)
 

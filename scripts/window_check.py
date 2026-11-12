@@ -1,6 +1,6 @@
 """The high word's top borrow written straight onto its target (TOP_BORROW_DIRECT), the lazy
 window as one cell (LAZY_CELL) and the second strip's bit kept as the lazy tick's junk
-(STRIP_BIT_JUNK), as gates.
+(STRIP_BIT_JUNK) and the short counter step (COUNT_SHORT), as gates.
 
     python -I -B scripts/window_check.py
 
@@ -43,8 +43,14 @@ the window's domain:
    alone as gates, every x at the marked primes, must leave exactly the model's U, tape and junk.
    The run counts the inputs whose b r is set at some lazy tick (none at 1021 or 4093, the largest
    primes model_check.py runs the pass on), and the model with b p on that wire must not fit.
+   With COUNT_SHORT the lazy counter's step writes its last carry straight onto the top bit, and a
+   raw tick's step of two bits takes their majority with bit 0 as the carry. The builds must also
+   pass with that switch off.
 4. secp256k1 with the plan as built, on 500 of lag_check's inputs: 0 bad lanes, and the cell without
    its first CCX must fail.
+5. _count alone as gates, on 1 to 8 bits, up and down, with one bit and with two: every register
+   value against every step must give the sum, with the step bits kept and the scratch clean, in
+   2 n - 3 CCX on n >= 2 bits; and up to 6 bits every gate must be needed.
 """
 import argparse
 import itertools
@@ -144,6 +150,40 @@ def cell_rows():
     return len(starts), wrong(cell), wrong(direct), cell[0::4].count(CCX), touched, len(cell) // 4, spare
 
 
+def count_rows():
+    """(cases, wrong ones, counters with the wrong CCX count, gates that no case needs) for _count."""
+    cases = wrong = miscounted = spare = 0
+    for n, down, two in itertools.product(range(1, 9), (False, True), (False, True)):
+        if two and n < 2:
+            continue
+        C = Circuit()
+        m = DialogMultiplier(C, Mod(SECP))
+        reg, (ctl, also), scratch = C.alloc(n), C.alloc(2), C.alloc(n)
+        m._count(ctl, reg, scratch, down=down, also=also if two else None)
+        ops = list(C.prims)
+        miscounted += ops[0::4].count(CCX) != (2 * n - 3 if n >= 2 else 0)
+        starts = [(value, c, y) for value in range(1 << n) for c in range(2) for y in (range(2) if two else (0,))]
+
+        def bad(ops):
+            k = 0
+            for value, c, y in starts:
+                state = [0] * C.num_wires
+                for i in range(n):
+                    state[reg[i]] = value >> i & 1
+                state[ctl], state[also] = c, y
+                run(ops, state)
+                want = (value - c - y if down else value + c + y) % (1 << n)
+                k += (sum(state[reg[i]] << i for i in range(n)) != want or (state[ctl], state[also]) != (c, y)
+                      or any(state[w] for w in scratch))
+            return k
+
+        cases += len(starts)
+        wrong += bad(ops)
+        if n <= 6:
+            spare += sum(1 for j in range(0, len(ops), 4) if bad(ops[:j] + ops[j + 4:]) == 0)
+    return cases, wrong, miscounted, spare
+
+
 def seen(q):
     """(tuples the lazy windows find on the forward pass over every x, those outside the domain, those
     with p set). A marker, five CCX pairs that cancel, names the window's wires in the flat circuit."""
@@ -231,7 +271,7 @@ def pending(q, xs):
 def main():
     argparse.ArgumentParser().parse_args()
     D = DialogMultiplier
-    saved = D.LAZY_END, D.TOP_BORROW_DIRECT, D.LAZY_CELL, D.STRIP_BIT_JUNK
+    saved = D.LAZY_END, D.TOP_BORROW_DIRECT, D.LAZY_CELL, D.STRIP_BIT_JUNK, D.COUNT_SHORT
     real = D._high_word
     real_difference = D._shared_difference
 
@@ -290,6 +330,10 @@ def main():
     print(f"the cell against the ladder: {points} points, {cell_wrong} wrong; the direct ladder: {direct_wrong} wrong; "
           f"the cell has {cell_ccx} CCX in {gates} gates, {touched} on scratch, {spare} that no point needs", flush=True)
     ok = (points, cell_wrong, direct_wrong, cell_ccx, touched, spare) == (68, 0, 0, 6, 0, 0)
+    counted = count_rows()
+    print(f"_count as gates: {counted[0]} cases, {counted[1]} wrong, {counted[2]} counters off 2 n - 3 CCX, "
+          f"{counted[3]} gates that no case needs", flush=True)
+    ok = ok and counted[0] > 0 and counted[1:] == (0, 0, 0)
 
     bad = off_bad = builds = lazy_builds = whole_builds = set_builds = sets = hits = 0
     tuples = outside = set_tuples = 0
@@ -309,7 +353,7 @@ def main():
             xs = inputs(q)
             ys = sorted({1, 2, q - 1, q // 3}) if q < 1 << 15 else [1, q - 1]
             for D.LAZY_END in ends:
-                D.TOP_BORROW_DIRECT, D.LAZY_CELL, D.STRIP_BIT_JUNK = True, True, True
+                D.TOP_BORROW_DIRECT, D.LAZY_CELL, D.STRIP_BIT_JUNK, D.COUNT_SHORT = True, True, True, True
                 lazy, whole, some, hit, strips, kept = pending(q, xs)
                 assert lazy
                 builds += 1
@@ -355,7 +399,7 @@ def main():
                         fails["strip " + which] += n > 0
                         row.append(f"strip {which} {n}")
                 # Each switch off alone, forward, then all four off, both ways.
-                for name in ("STRIP_BIT_JUNK",):
+                for name in ("COUNT_SHORT", "STRIP_BIT_JUNK"):
                     setattr(D, name, False)
                     off_bad += bad_lanes(q, ys, False, xs)
                     setattr(D, name, True)
@@ -366,12 +410,12 @@ def main():
                         n = control(edit, q, ys, xs)
                         fails[name] += n > 0
                         row.append(f"{name} {n}")
-                D.TOP_BORROW_DIRECT = D.STRIP_BIT_JUNK = False
+                D.TOP_BORROW_DIRECT = D.COUNT_SHORT = D.STRIP_BIT_JUNK = False
                 off_bad += bad_lanes(q, ys, False, xs) + bad_lanes(q, ys, True, xs)
                 print(f"q = {q}, LAZY_END {D.LAZY_END}: {lazy} lazy ticks, {whole} whole high words, {len(xs)} x, "
                       f"{some} set p and {hit} reach a high word with it set, {b} bad lanes; {'; '.join(row)}",
                       flush=True)
-        D.LAZY_END, D.TOP_BORROW_DIRECT, D.LAZY_CELL, D.STRIP_BIT_JUNK = saved
+        D.LAZY_END, D.TOP_BORROW_DIRECT, D.LAZY_CELL, D.STRIP_BIT_JUNK, D.COUNT_SHORT = saved
         xs = inputs(SECP)
         xs = xs[::max(1, len(xs) // 500)]
         b = bad_lanes(SECP, [SECP // 3], False, xs) + bad_lanes(SECP, [SECP // 3], True, xs)
@@ -380,7 +424,7 @@ def main():
               flush=True)
         bad += b
     finally:
-        D.LAZY_END, D.TOP_BORROW_DIRECT, D.LAZY_CELL, D.STRIP_BIT_JUNK = saved
+        D.LAZY_END, D.TOP_BORROW_DIRECT, D.LAZY_CELL, D.STRIP_BIT_JUNK, D.COUNT_SHORT = saved
         D._high_word = real
         D._shared_difference = real_difference
     print(f"{builds} builds ({whole_builds} with whole high words, {set_builds} where p is set), {sets} inputs that set "
