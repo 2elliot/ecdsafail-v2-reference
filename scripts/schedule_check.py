@@ -340,7 +340,7 @@ def main():
     rows = [{"q": q, "high_ticks": sum(1 for key in plan_of(q) if key and key[6]),
              "lazy_ticks": sum(1 for key in plan_of(q) if key and key[9]),
              "schedule_ok": schedule_ok(q, range(1, q))} for q in TOY]
-    for lag in (1, 2, 3, 7):
+    for lag in (1, 2, 3, 5, 7):
         for q in TOY + [15361, 16381, 32749]:
             ticks = sum(1 for key in plan_of(q, lag) if key and key[10])
             if ticks:
@@ -355,7 +355,7 @@ def main():
                 rows.append({"q": q, "lazy_end": end, "lazy_ticks": ticks, "schedule_ok": schedule_ok(q, range(1, q))})
     DialogMultiplier.LAZY_END = saved
     xs = secp_inputs()
-    for lag in (1, 3, 7, 15):
+    for lag in (1, 3, 5, 7, 15):
         rows.append({"q": "secp256k1", "lag_block": lag, "lag_ticks": sum(1 for key in plan_of(SECP, lag) if key and key[10]),
                      "inputs": len(xs), "schedule_ok": schedule_ok(SECP, xs, lag)})
     rows.append({"q": "secp256k1", "high_ticks": sum(1 for key in plan_of(SECP) if key and key[6]),

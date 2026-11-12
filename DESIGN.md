@@ -603,3 +603,11 @@ At G: 2,961,008 -> 2,956,364 CCX (-4,644), T 20,727,056 -> 20,694,548, 4,096 wir
 **Checks.** `scripts/pair_check.py`: the cell on all 96 inputs (c_2 at the top, the four outputs, Cw, g0 and g1 restored, the reversed halves restoring the input); 61 mutants, each gate dropped and each CCX turned into a CX from either control, all caught; then M and its inverse as gates on every x at every odd prime from 11 to 257 and every junk budget from 0 to the full plan, 919 builds with 0 bad lanes, 868 with a pair, 133 with a single beside pairs, 764 with a pair under an in-place bit; `JUNK_PAIRS = False` agrees; dropping `_pair_down`'s last CCX gives 162 bad lanes.
 `scripts/model_check.py`'s junk model now computes a pair's wire, b_0 ^ a_0 ^ a_1 ^ g1 ^ g0 (a_0 ^ c_0 ^ a_1 ^ c_1), independently of the gates, and its pass rows match it on every x at its primes and on the secp256k1 rows.
 `schedule_check.py` and the full `accept.py` pass: 13 pass, 0 fail, 1 pending.
+
+### The lazy run and the lag blocks at the new junk price
+
+A lazy or lag tick leaves junk wires, and each is now a carry-junk wire's 2 CCX a pass forgone, not 1.
+Re-run at a fixed junk width of 2,718, `LAZY_END` = 11 (from 9) and `LAG_BLOCK` = (15, 7, 5, 3) (from (15, 7, 3)) give the least pass: 272,459 CCX against 272,481, with `CARRY_JUNK` = 1169 filling the 4,096 wires.
+Other ends (None, 5, 7, 8, 10, 12, 13, 16, 24), `HIGH_MIN` 2, 4 and 5, other length sets (with 2, 4, 6, 9, 11, 13, 31) and shorter `LAG_SPAN`s are no better; a junk term in the lag planner's own cost does not help either.
+Both knobs only choose among plans the tree already builds: `schedule_check.py` now runs its forced-length rows at 5 as well, and it, `model_check.py` and the full `accept.py` pass on the new plan.
+At G: 2,956,364 -> 2,956,276 CCX (-88), 4,096 wires.
