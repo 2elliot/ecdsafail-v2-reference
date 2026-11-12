@@ -118,7 +118,8 @@ def _junk_value(m, q, x):
     flag before a tick is [U >= 2^kappa]. A wire that carries it holds the flag of the tick that last
     wrote it. The first lazy tick brings V's extra wire and the counter, which end 0, and the wire for
     p. A raw tick moves p to a new wire, the old one keeping p as the tick found it, a tick of a lag
-    block leaves two AND NOT flag, and every lazy tick leaves two AND p."""
+    block leaves two AND NOT flag unless it kept its threshold, where _lag_clear clears that wire, and
+    every lazy tick leaves two AND p."""
     states = tick_pass(q, x, m.iters)[0]
     cells = tick_tape(q, x, m.iters)[2]
     plan = m._tick_plan()
@@ -179,7 +180,7 @@ def _junk_value(m, q, x):
                 bits[p_wire] = found
                 p_wire = len(bits)
                 bits.append(0)
-            if key[10]:
+            if key[10] and not (m.LAG_CLEAR and fmode == "same"):
                 bits.append((1 - add) & bit & (1 - flags[t]))
             bits.append((1 - add) & bit & mid)
             bits[p_wire] = left

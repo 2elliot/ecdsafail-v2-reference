@@ -109,8 +109,8 @@ def cell_rows():
     return bad == 0 and ccx == 6 and caught == mutants
 
 
-def bad_lanes(q, ys, inverse):
-    pairs = [(x, y) for x in range(1, q) for y in ys]
+def bad_lanes(q, ys, inverse, xs=None):
+    pairs = [(x, y) for x in (xs or range(1, q)) for y in ys]
     C = Circuit(hierarchical=True)
     mod = Mod(q)
     X, Y = C.alloc(mod.n), C.alloc(mod.n)

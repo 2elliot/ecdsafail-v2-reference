@@ -611,3 +611,22 @@ Re-run at a fixed junk width of 2,718, `LAZY_END` = 11 (from 9) and `LAG_BLOCK` 
 Other ends (None, 5, 7, 8, 10, 12, 13, 16, 24), `HIGH_MIN` 2, 4 and 5, other length sets (with 2, 4, 6, 9, 11, 13, 31) and shorter `LAG_SPAN`s are no better; a junk term in the lag planner's own cost does not help either.
 Both knobs only choose among plans the tree already builds: `schedule_check.py` now runs its forced-length rows at 5 as well, and it, `model_check.py` and the full `accept.py` pass on the new plan.
 At G: 2,956,364 -> 2,956,276 CCX (-88), 4,096 wires.
+
+### Counted strips cleared where the threshold stays
+
+A lag tick used to leave its counted strip x = two AND NOT flag as junk for the block's realign and the inverse pass.
+On a tick that keeps its threshold (fmode same) the wire is now a clean one borrowed to the block's end, where `_lag_clear` clears it with one CCX after the realign; the tick itself and the realign are unchanged.
+
+After such a tick the cell's b holds two ^ g1, and g1 implies g0.
+The flag update left zg = g0 * flag on its junk wire and flag ^ zg = flag AND NOT g0 on the flag's, so NOT g0 AND NOT flag = 1 ^ g0 ^ flag ^ zg = 1 ^ g0 ^ (the flag the tick left).
+The flag a tick left is linear in what the block's end still holds: the XOR of the g0 * flag wires of the same ticks after it up to the next drop tick's kept flag, or the live flag, exactly the chain `_lag_tally` already reads.
+So b AND NOT (g0 ^ flag left) = (two ^ g1) AND NOT g0 AND NOT flag = two AND NOT flag = x, since g1 AND NOT g0 = 0 and two implies NOT g0, and one CCX on a clean wire that takes g0 ^ flag left clears x.
+Nothing between the tick and the block's end writes the cell, the flag wires or the strip.
+On a tick whose threshold drops, g0 * flag is not kept, the same clear would take 2 CCX, and the wire is worth 2 a pass, so those strips stay junk.
+
+At n = 256 this frees 106 junk wires at +106 CCX a pass; `CARRY_JUNK` goes from 1169 to 1275 and the 106 wires take 212 more chain bits as pairs. `LAG_CLEAR = False` restores the junk strips.
+At G: 2,951,112 -> 2,950,688 CCX (-424), 4,096 wires; the Euclid pass borrows at most 15 more clean wires at a time (4,004 against M's 4,093).
+
+**Checks.** `scripts/lag_check.py` runs M and its inverse as gates with forced block lengths, where toy plans have lag ticks that keep their threshold: every x at q = 4093, 8191 and 65521 (blocks of 1 and 2), and powers of two, values near q and q/k and 3,000 random x at 22, 28, 40 and 61 bits (blocks of 3, 5 and 7): 24 cleared strips, 52,958 inputs with a strip set at one of them, 0 bad lanes, and the same with `LAG_CLEAR` off.
+Its controls, the clearing CCX dropped and the flag left out of it, give bad lanes in all 8 builds; at secp256k1 with the plan as built, 500 inputs give 0 bad lanes and the dropped-CCX control fails.
+`model_check.py`'s junk model drops the strip of those ticks; it, `schedule_check.py`, `pair_check.py` and the full `accept.py` pass.

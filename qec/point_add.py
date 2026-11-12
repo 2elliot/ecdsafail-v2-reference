@@ -24,7 +24,7 @@ class DialogMultiplier:
     # Chain carries the forward pass leaves as junk for the inverse pass. Each is held through the
     # Bezout pass and saves one CCX in each Euclid pass, so this is the one knob that trades wires
     # for CCX; 1,161 puts the climb stack at 4,096 wires at n = 256.
-    CARRY_JUNK = 1169
+    CARRY_JUNK = 1275
     # A junk wire takes two chain bits where the chain has them (_pair_up, _pair_down); False keeps
     # one bit a wire.
     JUNK_PAIRS = True
@@ -47,6 +47,9 @@ class DialogMultiplier:
     # plan chooses from; () turns it off. A run of blocks is planned where it saves at least
     # LAG_MIN_SAVING CCX; None plans the first length that fits at every tick, for toy sizes.
     LAG_BLOCK = (15, 7, 5, 3)
+    # A lag tick that keeps its threshold clears its counted strip after the block's realign, with one
+    # CCX, in place of leaving it as junk; see _lag_clear.
+    LAG_CLEAR = True
     LAG_MIN_SAVING = 1
     # The Bezout pass's first cells run on unreduced integers, up to this many, then one conversion
     # (rank_one.py); 0 turns it off.
@@ -1036,6 +1039,30 @@ class DialogMultiplier:
                 self.C.cx(after[k][1] if k < c else flag, wire)
                 self.C.x(wire)
 
+    def _lag_clear(self, after, flag, borrowed):
+        """Clear the counted strips x = two AND NOT flag of a block's ticks that kept their threshold,
+        each (e, wire, cell). After such a tick the cell's b is two XOR g1, and g1 implies g0; the flag
+        update left g0 * flag on its wire and flag AND NOT g0 on the flag's, so
+        NOT g0 AND NOT flag = 1 ^ g0 ^ (the flag the tick left), which is linear in what the block's
+        end still holds, as in _lag_tally. Then x = b AND NOT (g0 ^ flag left), one CCX on a clean
+        wire that takes that XOR, and the strip's wire goes back clean."""
+        C, c = self.C, len(after)
+        for e, wire, (g0, b) in borrowed:
+            (left,) = C.alloc(1)
+            sources, k = [g0], e + 1
+            while k < c and after[k][0] == "same":
+                sources.append(after[k][1])
+                k += 1
+            sources.append(after[k][1] if k < c else flag)
+            for src in sources:
+                C.cx(src, left)
+            C.x(left)
+            C.ccx(b, left, wire)
+            C.x(left)
+            for src in reversed(sources):
+                C.cx(src, left)
+            C.free([left, wire])
+
     def _realign(self, c, cells, digits=0):
         """Close a lag block's holes. V is the cells from c below the front up, xs the block's c
         count bits, k their sum (with digits, c / 2 strips and then the digits, low first, of a
@@ -1120,14 +1147,15 @@ class DialogMultiplier:
     def _junk_sizes(self):
         """Junk wires each tick leaves for the inverse pass: its carries, the flag it makes, the
         wire its flag update leaves, a lazy tick's, and the retired offset. A lazy tick leaves
-        the wire that held p if the tick is raw, its counted strip if it is in a lag block, and
-        b * p; the first one brings V's extra wire, p and the counter, which
-        the last one clears but for p."""
+        the wire that held p if the tick is raw, its counted strip if it is in a lag block and
+        _lag_clear does not clear it, and b * p; the first one brings V's extra wire, p and the
+        counter, which the last one clears but for p."""
         plan = self._tick_plan()
         m = self._lazy_width(plan)
 
         def lazy(key):
-            return (2 + m if key[9][1] == 0 else 0) + key[9][0] + 1 + bool(key[10]) if key[9] else 0
+            strip = bool(key[10]) and not (self.LAG_CLEAR and key[7] == "same")
+            return (2 + m if key[9][1] == 0 else 0) + key[9][0] + 1 + strip if key[9] else 0
 
         return [0 if key is None or key[3] else 1 + key[4] + (key[7] in ("same", "drop")) + key[8] + lazy(key)
                 for key in plan]
@@ -1148,7 +1176,7 @@ class DialogMultiplier:
         E = junk[:1]
         plan, sizes, used, flag = self._tick_plan(), self._junk_sizes(), 1, []
         counter, ext, pending = self._lazy_width(plan), None, []
-        strips, after, whole = [], [], False
+        strips, after, whole, borrowed = [], [], False, []
         assert len(junk) == 1 + sum(sizes)
         for i in range(self.iters):
             w = self.widths[i]
@@ -1184,6 +1212,10 @@ class DialogMultiplier:
                             self._far_swap(held[0], U, V, front, w)
                         # V keeps every wire it has to the block's end.
                         whole = True
+                    if self.LAG_CLEAR and key[7] == "same":
+                        # The strip's wire is borrowed to the block's end, where _lag_clear clears it.
+                        extra.insert(len(extra) - 1, self.C.alloc(1)[0])
+                        borrowed.append((e, extra[-2], cell))
                     strips.append(extra[-2])
                 scratch = (available + junk[used:])[:self._step_scratch(key)]
                 assert len(scratch) == self._step_scratch(key)
@@ -1214,7 +1246,8 @@ class DialogMultiplier:
                     self.C.apply(self._realign(2 * c, len(cells) - 2 * c, digits), [cells, strips + tally, scratch])
                     self._lag_tally(after, flag[0], digits, tally)
                     self.C.free(tally)
-                    strips, after, whole = [], [], False
+                    self._lag_clear(after, flag[0], borrowed)
+                    strips, after, whole, borrowed = [], [], False, []
                 if not whole:
                     # V's extra wire stays above the next width; the run's last tick leaves it clear,
                     # and it takes the place in the junk that the first one's came from.
