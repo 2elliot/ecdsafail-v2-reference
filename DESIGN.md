@@ -735,3 +735,13 @@ It replaces the pair in `_mod_double` (both forms), in `_mod_add`, and in `resid
 
 At G: 2,942,652 -> 2,939,472 CCX (-3,180), 4,096 wires; the Bézout pass goes from 888,721 to 887,131.
 `scripts/m_check.py` runs the multiplier itself, M(x, y) = (x, x·y mod q) with every other wire 0, where the rank-one start is on: every (x, y) at q = 61 (J = 3) and 251 (J = 4), and 40,000 sampled pairs with the edges at 4093 (J = 9) and 8191 (J = 12); a flipped bit after each `sub_if_ge` fails 12,750 lanes.
+
+## The last row of the convert's clearing product as a copy (rank_one.mul_acc)
+
+`convert` ends by clearing D: D·q - U·s + V·r is 0 mod 2^(w+1), as three products added onto D, each row a controlled add at 3 CCX a bit.
+The adds commute, so the subtraction of U·s now comes last, and inside it row 0 comes last. D is 0 after that row, which is the tree's own claim when it frees D, so before it D holds U_0·s: the row is a controlled copy off D, `ccx(U_0, s_i, D_i)`, one CCX a bit. This is the out-of-place rule run backwards: a sum that ends on clean wires needs no carries either.
+`mul_acc(..., sign=-1, clears=True)` does this; without `clears` it is as it was. On every input where the old order left D at 0, the new one leaves the same wires, since each differs from the old only by that last row's form.
+
+`scripts/mulacc_check.py` runs every (a, b) for 1 to 5 wires with acc = a·b: acc ends 0, a and b as found, and all 165 single-CCX mutants fail. `scripts/m_check.py` runs M with the start on.
+
+Changes `rank_one.mul_acc` and the order of two calls in `RankOne.convert`. At G: 2,939,472 -> 2,939,412 CCX (-60), 4,096 wires.

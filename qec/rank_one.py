@@ -153,16 +153,25 @@ def dec(C, x, ctl):
     C.free([one])
 
 
-def mul_acc(C, a, b, acc, sign=1):
-    """acc += a*b (sign -1: acc -= a*b) mod 2^len(acc), row i on acc[i:]."""
+def mul_acc(C, a, b, acc, sign=1, clears=False):
+    """acc += a*b (sign -1: acc -= a*b) mod 2^len(acc), row i on acc[i:].
+
+    clears, with sign -1, is the caller's promise that acc ends 0. Then before row 0, taken last,
+    acc holds a_0*b, and that row is a controlled copy off acc: one CCX a bit, where a controlled
+    subtract is three."""
+    assert not clears or sign < 0
     if sign < 0:
         for w in acc:
             C.x(w)
     for i, ai in enumerate(a[:len(acc)]):
-        add(C, b[:len(acc) - i], acc[i:], ctl=ai)
+        if i or not clears:
+            add(C, b[:len(acc) - i], acc[i:], ctl=ai)
     if sign < 0:
         for w in acc:
             C.x(w)
+    if clears:
+        for x, w in zip(b, acc):
+            C.ccx(a[0], x, w)
 
 
 def mul_odd(C, u, x):
@@ -574,8 +583,8 @@ class RankOne:
         # D*q = U*s - V*r, so D*q - U*s + V*r is 0 mod 2^(w + 1)
         k = w + 1
         mul_odd_const(C, D, self.q % (1 << k))
-        mul_acc(C, U, s[:k], D, sign=-1)
         mul_acc(C, V, r[:k], D)
+        mul_acc(C, U, s[:k], D, sign=-1, clears=True)
         C.apply(b1, regs1, inverse=True)
         C.free(U + V + D + mR)
         del R[n:]
