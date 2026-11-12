@@ -10,6 +10,9 @@ and their neighbours, values near q, q/k and 3,000 seeded random x; each against
 and one more. The run counts the cleared strips and the inputs whose strip was set
 (two AND NOT flag) at such a tick. Controls: with the clearing CCX dropped, and with the flag's
 sources left out of it (two in place of two AND NOT flag), the same builds must give bad lanes.
+Then the wires the lazy run borrows: at q = 1021, 4093 and 8191, every x, with LAZY_END None, 4 and
+5, and on the sampled inputs at 20 and 32 bits, where the run keeps fewer counter wires than the
+counter has, the same must hold, and keeping one counter wire fewer than _lazy_kept says must give bad lanes.
 Last, secp256k1 with the plan as built, on 500 of those inputs, with the dropped-CCX control.
 """
 import argparse
@@ -101,6 +104,35 @@ def main():
                 D._lag_clear = real
                 D.LAG_CLEAR = False
                 off_bad += bad_lanes(q, ys, False, xs) + bad_lanes(q, ys, True, xs)
+        # The lazy run's borrowed wires (V's extra wire, the counter above _lazy_kept): toy primes,
+        # every x, with the run ending at 4 and 5 bits (the counter stays) and at 3 (it is cleared).
+        D.LAG_BLOCK, D.LAG_MIN_SAVING, D.LAG_CLEAR = saved
+        end, kept_real = D.LAZY_END, D._lazy_kept
+        runs = long_runs = lazy_bad = lazy_control = short = 0
+        for q, ends in ((1021, (None, 4, 5)), (4093, (None, 4, 5)), (8191, (None, 4, 5)), (1048573, (4,)),
+                        (4294967291, (6,))):
+            ys = sorted({1, 2, q - 1, q // 3})
+            xs = inputs(q)
+            for D.LAZY_END in ends:
+                probe = D(Circuit(True), Mod(q))
+                plan = probe._tick_plan()
+                if not any(key and key[9] for key in plan):
+                    continue
+                runs += 1
+                lazy_bad += bad_lanes(q, ys, False, xs) + bad_lanes(q, ys, True, xs)
+                if probe._lazy_kept(plan):
+                    # Control: one counter wire too few kept, so a wire that still counts is given back.
+                    long_runs += 1
+                    short += probe._lazy_kept(plan) < probe._lazy_width(plan)
+                    D._lazy_kept = lambda self, plan: kept_real(self, plan) - 1
+                    lazy_control += bad_lanes(q, ys, False, xs) > 0
+                    D._lazy_kept = kept_real
+        D.LAZY_END = end
+        print(f"lazy runs: {runs} builds, {long_runs} that keep counter wires ({short} of them fewer than the "
+              f"counter has), {lazy_bad} bad lanes; "
+              f"control (one wire fewer kept) fails {lazy_control} of {long_runs}", flush=True)
+        bad += lazy_bad
+        dropped += 0 if runs and short and lazy_control == long_runs else -10 ** 6
         # secp256k1, the plan as built: 500 of the inputs above, one y each.
         D.LAG_BLOCK, D.LAG_MIN_SAVING, D.LAG_CLEAR = saved
         q = 2**256 - 2**32 - 977

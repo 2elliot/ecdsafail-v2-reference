@@ -630,3 +630,18 @@ At G: 2,951,112 -> 2,950,688 CCX (-424), 4,096 wires; the Euclid pass borrows at
 **Checks.** `scripts/lag_check.py` runs M and its inverse as gates with forced block lengths, where toy plans have lag ticks that keep their threshold: every x at q = 4093, 8191 and 65521 (blocks of 1 and 2), and powers of two, values near q and q/k and 3,000 random x at 22, 28, 40 and 61 bits (blocks of 3, 5 and 7): 24 cleared strips, 52,958 inputs with a strip set at one of them, 0 bad lanes, and the same with `LAG_CLEAR` off.
 Its controls, the clearing CCX dropped and the flag left out of it, give bad lanes in all 8 builds; at secp256k1 with the plan as built, 500 inputs give 0 bad lanes and the dropped-CCX control fails.
 `model_check.py`'s junk model drops the strip of those ticks; it, `schedule_check.py`, `pair_check.py` and the full `accept.py` pass.
+
+### The lazy run's clean wires are borrowed, not junk
+
+The first lazy tick used to bring V's extra wire, the pending borrow's wire and the whole counter as junk wires.
+V's extra wire is 0 again when the run ends (the last tick clears it), and so is every counter wire above the last tick's width m_out: the counter is sign-extended, and each tick whose width shrinks clears the copies it drops.
+Where the run ends at LAZY_WINDOW + 1 bits the last tick clears the whole counter.
+So the pass now takes V's extra wire and the counter's wires above `_lazy_kept` from the allocator at the first lazy tick and frees them after the last; only p's wire and the `_lazy_kept` counter wires that still hold rho stay in the junk register.
+No gate changes: the same wires are 0 at the same point, they just stop being held through the Bezout pass.
+
+At n = 256 the counter is 8 wide and ends 5 wide, so 4 wires leave the junk register and `CARRY_JUNK` goes from 1275 to 1279.
+At G: 2,950,688 -> 2,950,656 CCX (-32), 4,096 wires.
+
+**Checks.** `model_check.py`'s junk model no longer lists those wires, and its gate rows require every wire outside the registers to end 0, which covers a borrowed wire given back dirty.
+`scripts/lag_check.py` adds rows for the run: every x at q = 1021, 4093 and 8191 with `LAZY_END` None, 4 and 5, and sampled x at 20 and 32 bits where the run keeps fewer counter wires than the counter has: 11 builds, 0 bad lanes; keeping one counter wire fewer than `_lazy_kept` says, the control, fails in all 4 builds that keep any.
+`schedule_check.py` and the full `accept.py` pass.

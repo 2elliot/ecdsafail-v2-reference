@@ -24,7 +24,7 @@ class DialogMultiplier:
     # Chain carries the forward pass leaves as junk for the inverse pass. Each is held through the
     # Bezout pass and saves one CCX in each Euclid pass, so this is the one knob that trades wires
     # for CCX; 1,161 puts the climb stack at 4,096 wires at n = 256.
-    CARRY_JUNK = 1275
+    CARRY_JUNK = 1279
     # A junk wire takes two chain bits where the chain has them (_pair_up, _pair_down); False keeps
     # one bit a wire.
     JUNK_PAIRS = True
@@ -1144,18 +1144,29 @@ class DialogMultiplier:
         """The widest the lazy counter gets."""
         return max((key[9][2] for key in plan if key and key[9]), default=0)
 
+    def _lazy_kept(self, plan):
+        """Counter wires the lazy run leaves as junk: the last tick's m_out when the run ends at a
+        longer word, where the counter stays as it stands, and none when it ends at
+        LAZY_WINDOW + 1 bits, where the last tick clears it. The counter's wires above that are
+        0 again by then, each shrink clearing the sign copies it drops, and so is V's extra wire:
+        the pass borrows those and gives them back."""
+        last = next((key for key in plan if key and key[9] and key[9][3]), None)
+        if last is None:
+            return 0
+        return last[9][2] if last[0] - last[5] > self.LAZY_WINDOW + 1 else 0
+
     def _junk_sizes(self):
         """Junk wires each tick leaves for the inverse pass: its carries, the flag it makes, the
         wire its flag update leaves, a lazy tick's, and the retired offset. A lazy tick leaves
         the wire that held p if the tick is raw, its counted strip if it is in a lag block and
-        _lag_clear does not clear it, and b * p; the first one brings V's extra wire, p and the
-        counter, which the last one clears but for p."""
+        _lag_clear does not clear it, and b * p; the first one brings p and the counter wires that
+        _lazy_kept counts."""
         plan = self._tick_plan()
-        m = self._lazy_width(plan)
+        kept = self._lazy_kept(plan)
 
         def lazy(key):
             strip = bool(key[10]) and not (self.LAG_CLEAR and key[7] == "same")
-            return (2 + m if key[9][1] == 0 else 0) + key[9][0] + 1 + strip if key[9] else 0
+            return (1 + kept if key[9][1] == 0 else 0) + key[9][0] + 1 + strip if key[9] else 0
 
         return [0 if key is None or key[3] else 1 + key[4] + (key[7] in ("same", "drop")) + key[8] + lazy(key)
                 for key in plan]
@@ -1175,7 +1186,7 @@ class DialogMultiplier:
         lend = U[n - self.u_lent:]
         E = junk[:1]
         plan, sizes, used, flag = self._tick_plan(), self._junk_sizes(), 1, []
-        counter, ext, pending = self._lazy_width(plan), None, []
+        counter, lent, pending = self._lazy_width(plan), [], []
         strips, after, whole, borrowed = [], [], False, []
         assert len(junk) == 1 + sum(sizes)
         for i in range(self.iters):
@@ -1197,10 +1208,12 @@ class DialogMultiplier:
                 lz = []
                 if key[9]:
                     if key[9][1] == 0:
-                        ext, pending = junk.index(extra[0]), [extra[1]]
-                        count = extra[2:2 + counter]
-                        V.append(extra[0])
-                        del extra[:2 + counter]
+                        # V's extra wire and the counter's upper wires are borrowed to the run's end.
+                        kept = self._lazy_kept(plan)
+                        pending, lent = [extra[0]], self.C.alloc(counter - kept)
+                        count = extra[1:1 + kept] + lent
+                        V.append(self.C.alloc(1)[0])
+                        del extra[:1 + kept]
                     elif not whole:
                         V.append(spare)
                     lz = pending + count[:max(key[9][1:3])]
@@ -1250,10 +1263,10 @@ class DialogMultiplier:
                     strips, after, whole, borrowed = [], [], False, []
                 if not whole:
                     # V's extra wire stays above the next width; the run's last tick leaves it clear,
-                    # and it takes the place in the junk that the first one's came from.
+                    # and the counter's borrowed wires with it.
                     spare = V.pop(next_width)
                     if plan[i][9][3]:
-                        junk[ext] = spare
+                        self.C.free([spare] + lent)
                     if far:
                         # U's word under the next front, or all of it after the run's last block,
                         # goes back to U's own cells.

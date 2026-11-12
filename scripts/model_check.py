@@ -116,8 +116,8 @@ def _junk_value(m, q, x):
     "Two chain bits on one junk wire"); then the flag wire the tick makes, and the wire its
     flag update leaves; then a lazy tick's wires; then add AND E, the offset a subtract retires. The
     flag before a tick is [U >= 2^kappa]. A wire that carries it holds the flag of the tick that last
-    wrote it. The first lazy tick brings V's extra wire and the counter, which end 0, and the wire for
-    p. A raw tick moves p to a new wire, the old one keeping p as the tick found it, a tick of a lag
+    wrote it. The first lazy tick brings the wire for p and the counter wires the run leaves as junk;
+    V's extra wire and the rest of the counter end 0 and are borrowed. A raw tick moves p to a new wire, the old one keeping p as the tick found it, a tick of a lag
     block leaves two AND NOT flag unless it kept its threshold, where _lag_clear clears that wire, and
     every lazy tick leaves two AND p."""
     states = tick_pass(q, x, m.iters)[0]
@@ -165,16 +165,18 @@ def _junk_value(m, q, x):
         if key[9]:
             found, mid, left = pending[t]
             if key[9][1] == 0:
-                p_wire = len(bits) + 1
+                p_wire = len(bits)
                 count_wire = p_wire + 1
-                bits.extend([0] * (2 + counter))
+                kept = m._lazy_kept(plan)
+                bits.extend([0] * (1 + kept))
             if key[9][3] and key[0] - key[5] > m.LAZY_WINDOW + 1:
                 # A run that ends at a longer word leaves the counter as it stands: rho = pi - 1 on
                 # m_out bits, pi the ones of U and of V's physical word from cut up.
                 cut, Un, Yn = key[5] + m.LAZY_WINDOW, states[t + 1][0], states[t + 1][1]
                 rho = bin(Un >> cut).count("1") + bin((Yn + (left << (cut - 1))) >> (cut - 1)).count("1") - 1
                 rho &= (1 << key[9][2]) - 1
-                for i in range(counter):
+                assert kept == key[9][2]
+                for i in range(kept):
                     bits[count_wire + i] = rho >> i & 1
             if key[9][0]:
                 bits[p_wire] = found
