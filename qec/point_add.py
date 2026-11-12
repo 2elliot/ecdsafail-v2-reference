@@ -50,6 +50,8 @@ class DialogMultiplier:
     # A lag tick that keeps its threshold clears its counted strip after the block's realign, with one
     # CCX, in place of leaving it as junk; see _lag_clear.
     LAG_CLEAR = True
+    # A high word's ladder writes its top borrow straight onto g1, a lazy window's onto p.
+    TOP_BORROW_DIRECT = True
     LAG_MIN_SAVING = 1
     # The Bezout pass's first cells run on unreduced integers, up to this many, then one conversion
     # (rank_one.py); 0 turns it off.
@@ -353,24 +355,33 @@ class DialogMultiplier:
         C.cx(z, cw)
         C.ccx(g0, cw, E[0])
         C.cx(z, cw)
+        # The ladder's last step writes the top borrow E straight onto its target, and there is
+        # nothing to take back: g1 for a whole word, p for a lazy window.
+        direct = len(V) - 1 if self.TOP_BORROW_DIRECT else None
         for i, v in enumerate(V):
             C.x(v)
-            C.ccx(E[i], v, E[i + 1])
+            C.ccx(E[i], v, (lazy[1] if lazy else g1) if i == direct else E[i + 1])
             C.x(v)
         C.cx(zg, g1)
         if lazy:
-            # g1 ^ zg is now the top borrow E s, and p takes the rest of E: E ^ E s.
+            # g1 ^ zg becomes the top borrow E s, and p takes the rest of E: E ^ E s.
             s, p = lazy
-            C.ccx(E[-1], s, g1)
-            C.cx(E[-1], p)
+            if direct is None:
+                C.ccx(E[-1], s, g1)
+                C.cx(E[-1], p)
+            else:
+                # p holds p ^ E here. A pending p means the word has a bit above the window, so
+                # p s = 0 on entry and (p ^ E) s = E s.
+                C.ccx(p, s, g1)
             C.cx(g1, p)
             C.cx(zg, p)
-        else:
+        elif direct is None:
             C.cx(E[-1], g1)
         for i, v in reversed(list(enumerate(V))):
-            C.x(v)
-            C.ccx(E[i], v, E[i + 1])
-            C.x(v)
+            if i != direct:
+                C.x(v)
+                C.ccx(E[i], v, E[i + 1])
+                C.x(v)
             C.cx(E[i], v)
         C.cx(z, cw)
         C.ccx(g0, cw, E[0])

@@ -645,3 +645,23 @@ At G: 2,950,688 -> 2,950,656 CCX (-32), 4,096 wires.
 **Checks.** `model_check.py`'s junk model no longer lists those wires, and its gate rows require every wire outside the registers to end 0, which covers a borrowed wire given back dirty.
 `scripts/lag_check.py` adds rows for the run: every x at q = 1021, 4093 and 8191 with `LAZY_END` None, 4 and 5, and sampled x at 20 and 32 bits where the run keeps fewer counter wires than the counter has: 11 builds, 0 bad lanes; keeping one counter wire fewer than `_lazy_kept` says, the control, fails in all 4 builds that keep any.
 `schedule_check.py` and the full `accept.py` pass.
+
+### The high word's top borrow goes straight to its target
+
+`_high_word` ran its borrow ladder E_0 .. E_R on scratch, copied the top borrow E_R out, and unwound the whole ladder, so E_R cost two CCX and a third in the lazy window, where E_R s goes to g1 and the rest of E_R to p.
+With `TOP_BORROW_DIRECT` the ladder's last CCX writes E_R onto the wire that wants it, and that step is not unwound.
+
+A whole high word (not a lazy window) wants g1 ^= E_R: the last CCX targets g1. Nothing reads g1 between that CCX and the old CX, so the map is the same, one CCX less.
+
+A lazy window wants g1 ^= E_R s and p ^= E_R AND NOT s, with s the sign of rho (no 1 from cut up in U or in physical V) and p the pending borrow.
+The last CCX now targets p, which then holds p ^ E_R, and g1 takes (p ^ E_R) s with one CCX; the two CX that follow are the old ones and leave p ^ E_R ^ E_R s on p.
+(p ^ E_R) s = E_R s because p s = 0 whenever a tick reaches its high word: by then the raw bit and the second strip have met p, so physical V is the true V plus p 2^cut, the invariant `schedule_check.py` follows (`phys - (p << cut) == V`). The true V is not negative, so a set p puts physical V at 2^cut or more, which is a 1 from cut up, rho >= 0 and s = 0.
+If p s were 1 at some tick, g1 would be flipped there, so M as gates is the test of this.
+That is one CCX less a lazy tick, and one less a whole high word.
+
+At G: 24 whole high words and 349 lazy ticks a pass, 373 CCX a pass: 2,950,656 -> 2,949,164 CCX (-1,492), 4,096 wires; `CARRY_JUNK` stays 1279. `TOP_BORROW_DIRECT = False` restores the old gates.
+
+**Checks.** `scripts/window_check.py` runs M and its inverse as gates with `TOP_BORROW_DIRECT` on and off, every x at q = 1021, 4093, 4099, 8209, 16411, 32771, 65537 and 65539 and sampled x at 20, 32 and 61 bits, with `LAZY_END` varied so that whole high words appear: 16 builds, 0 bad lanes either way.
+A pending borrow is rare: no x sets p at the primes just under a power of two (the toy primes of the other checks, and none of 6,861 inputs at secp256k1 did in the junk model), but at a prime just above one hundreds do. At the six such primes here 2,268 inputs set p and 424 reach a later high word with it set, counted from `model_check.py`'s arithmetic model of p.
+Controls: the lazy ladder's last CCX dropped fails in 16 of 16 builds, g1 taking p ^ E_R without s in the 10 of 10 where p is set, and a whole word's last CCX dropped in 7 of 7; at secp256k1 with the plan as built, 519 inputs give 0 bad lanes and the first control 456.
+`lag_check.py`, `schedule_check.py`, `model_check.py` and the full `accept.py` pass.
