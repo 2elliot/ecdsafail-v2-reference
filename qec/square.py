@@ -40,6 +40,35 @@ def _keep_add(C, a, b, cout, K):
         c = t
 
 
+def _maj_onto(C, a, b, c, t):
+    """t ^= MAJ(a, b, c) = c ^ (a ^ c)(b ^ c), with a, b and c left as they were. b or c may be
+    None for a 0."""
+    if b is None or c is None:
+        other = c if b is None else b
+        if other is not None:
+            C.ccx(a, other, t)
+        return
+    C.cx(c, a)
+    C.cx(c, b)
+    C.ccx(a, b, t)
+    C.cx(c, t)
+    C.cx(c, b)
+    C.cx(c, a)
+
+
+def _sum(C, A, B, S):
+    """S = A + B on len(A) + 1 clean wires, len(B) <= len(A). The carry into bit i + 1 is written
+    onto S[i + 1] while S[i] still holds the carry into bit i; then S[i] takes A[i] and B[i]. No
+    carry is ever cleared, so the sum costs one CCX a bit, where a copy and an in-place add cost two."""
+    assert len(S) == len(A) + 1 and len(B) <= len(A)
+    for i, a in enumerate(A):
+        b = B[i] if i < len(B) else None
+        _maj_onto(C, a, b, S[i] if i else None, S[i + 1])
+        C.cx(a, S[i])
+        if b is not None:
+            C.cx(b, S[i])
+
+
 def _rows(C, Y, Q, copy=True, K=None):
     """Q = Y*(2^w - Y) mod 2^len(Q) on len(Q) <= 2w clean wires, w = len(Y), or Y*(2^w - 1 - Y)
     without the copy. After row i, Q < 2^(w + i + 1), so each carry lands on a wire no earlier row
@@ -239,11 +268,7 @@ def _karatsuba(C, Y, Q, J, thr, kind="R", K=None, exact=True, cins=frozenset(), 
     _karatsuba(C, B, Q[2 * h:], J, thr, "T", K)
     ws = h + 1
     S = [J.pop(0) for _ in range(ws)]
-    for x, s in zip(A, S):
-        C.cx(x, s)
-    pad = C.alloc(h - m)
-    add(C, B + pad, S[:h], cout=S[h])
-    C.free(pad)
+    _sum(C, A, B, S)
     W = [J.pop(0) for _ in range(lw)]
     if kind == "T":
         for x in S:

@@ -3,7 +3,7 @@
     python3 -I -B scripts/fold_check.py [max_bits]
 
 For every prime q = 2^n - f with f*f <= q, n = 4 to max_bits (default 11), and every c below q that
-absorb takes, builds compute(C, Y, J, kappa, cins) and its reverse and runs every n-bit Y at once:
+absorb takes, and once with no absorbed constant, builds compute(C, Y, J, kappa, cins) and its reverse and runs every n-bit Y at once:
 J[:n] must hold (Y^2 - c) mod q after compute, Y must be as it was, and every wire of J must be 0
 after the reverse. At secp256k1 it samples Y, with the edges, for c = 3a and two random c. It counts the builds whose second fold loads a nonzero constant (klo), which is
 the path where _multiple copies E and adds klo as a constant. Controls, each of which must fail on
@@ -29,10 +29,14 @@ def run(q, c, ys=None):
     mod = Mod(q)
     n = mod.n
     fold = SquareFold(mod)
-    plan = fold.absorb(c)
-    if plan is None:
-        return None
-    cins, kappa = plan
+    if c is None:
+        # No absorbed constant: compute leaves (Y^2 - offset) mod q.
+        cins, kappa, c = frozenset(), None, fold.offset
+    else:
+        plan = fold.absorb(c)
+        if plan is None:
+            return None
+        cins, kappa = plan
     C = Circuit()
     Y, J = C.alloc(n), C.alloc(fold.junk)
     blk = C.record(lambda y, j: fold.compute(C, y, j, kappa, cins), [Y, J])
@@ -50,7 +54,7 @@ def run(q, c, ys=None):
         if w not in Y:
             dirty |= state[w]
     bad += dirty.bit_count() + sum(1 for y, v in zip(ys, sim.unpack(state, Y, lanes)) if v != y)
-    return bad, bool(fold.split(kappa)[1])
+    return bad, kappa is not None and bool(fold.split(kappa)[1])
 
 
 def sweep(bits, mutate=None):
@@ -60,7 +64,7 @@ def sweep(bits, mutate=None):
             q = (1 << n) - f
             if not is_prime(q) or not SquareFold.applies(q):
                 continue
-            for c in range(q) if n <= 8 else range(0, q, max(1, q // 97)):
+            for c in [None, *(range(q) if n <= 8 else range(0, q, max(1, q // 97)))]:
                 out = run(q, c)
                 if out is None:
                     continue

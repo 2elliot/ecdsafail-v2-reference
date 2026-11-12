@@ -519,3 +519,16 @@ Its controls make the constant's add one bit short, and drop the constant's lowe
 A BDD run of the second fold alone over every E ≤ f + kE at G (33 inputs) finds no CCX left there that never fires or has equal or constant controls; before this change it found exactly the four that the trailing 0 bits of klo account for.
 
 At G: 2,958,220 -> 2,958,212 CCX (-8), 4,096 wires.
+
+## S = A + B out of place
+
+A Karatsuba node copied A onto S's clean wires and rippled B onto the copy, 2h - 1 CCX for halves of h bits, because an in-place adder builds each carry and takes it down again.
+S is clean, so no carry needs taking down. `_sum` walks up from bit 0: while S[i] still holds the carry into bit i, it writes the carry into bit i + 1, MAJ(a_i, b_i, c_i) = c_i ⊕ (a_i ⊕ c_i)(b_i ⊕ c_i), onto S[i+1] with one CCX, and then S[i] takes a_i and b_i by CX and holds the sum bit.
+Above B's top the carry is a_i ∧ c_i, still one CCX. That is h CCX, A and B are as they were, and S holds A + B on the same wires as before, so nothing after it changes; the pad wire the ripple took for an odd width is gone and the peak is where it was.
+
+`scripts/sum_check.py` runs every (A, B) for h = 1 to 8 with B of h and of h - 1 bits, and every CCX dropped or turned into a CX from either control fails: 213 mutants, none unnoticed.
+`scripts/fold_check.py` runs the whole fold on every Y at the small fold primes, where leaves of 3 wires put nodes at every level.
+
+At G the 13 nodes save h - 1 each, both ways: 2,958,212 -> 2,957,012 CCX (-1,200), 4,096 wires.
+
+The same holds for any sum written onto clean wires: a copy and an in-place add cost two CCX a bit, an out-of-place sum one.
