@@ -46,14 +46,18 @@ the window's domain:
    With COUNT_SHORT the lazy counter's step writes its last carry straight onto the top bit, and a
    raw tick's step of two bits takes their majority with bit 0 as the carry. The builds must also
    pass with that switch off.
-4. secp256k1 with the plan as built, on 500 of lag_check's inputs: 0 bad lanes, and the cell without
-   its first CCX must fail.
+4. secp256k1 with the plan as built, on 500 of lag_check's inputs and on inputs that set p there:
+   none of the 500 does, nor any hard case, but x = q - 2^j - r with a small r often does, so the
+   run draws such x from a seed and keeps the ones the model says set p. 0 bad lanes, and on the
+   kept inputs the cell without each of its CCX, the ladder controls no write and no s, and the
+   strip controls must all fail.
 5. _count alone as gates, on 1 to 8 bits, up and down, with one bit and with two: every register
    value against every step must give the sum, with the step bits kept and the scratch clean, in
    2 n - 3 CCX on n >= 2 bits; and up to 6 bits every gate must be needed.
 """
 import argparse
 import itertools
+import random
 import sys
 from pathlib import Path
 
@@ -268,6 +272,27 @@ def pending(q, xs):
     return lazy, whole, sets, hit, strips, kept
 
 
+def secp_pending():
+    """(inputs q - 2^j - r at secp256k1 that set p, how many of them reach a later high word with it
+    set, how many strip twice under it), r seeded."""
+    m = DialogMultiplier(Circuit(True), Mod(SECP))
+    plan = m._tick_plan()
+    rng = random.Random(2026)
+    kept, reach, strips = [], 0, 0
+    for j in range(34, 254):
+        for _ in range(60):
+            x = SECP - (1 << j) - rng.randrange(1, 1 << rng.randrange(2, 34))
+            if x in kept:
+                continue
+            states, cells = tick_pass(SECP, x, m.iters)[0], tick_tape(SECP, x, m.iters)[2]
+            p = _lazy_pending(m, plan, states, cells)
+            if any(after for _, _, after in p.values()):
+                kept.append(x)
+                reach += any((mid if cells[t][0] else after) for t, (_, mid, after) in p.items())
+                strips += any(mid and not cells[t][0] and cells[t][1] for t, (_, mid, _) in p.items())
+    return kept, reach, strips
+
+
 def main():
     argparse.ArgumentParser().parse_args()
     D = DialogMultiplier
@@ -418,10 +443,18 @@ def main():
         D.LAZY_END, D.TOP_BORROW_DIRECT, D.LAZY_CELL, D.STRIP_BIT_JUNK, D.COUNT_SHORT = saved
         xs = inputs(SECP)
         xs = xs[::max(1, len(xs) // 500)]
-        b = bad_lanes(SECP, [SECP // 3], False, xs) + bad_lanes(SECP, [SECP // 3], True, xs)
-        secp = control(cell_without(1), SECP, [SECP // 3], xs)
-        print(f"secp256k1, the built plan: {len(xs)} x, {b} bad lanes; the cell without its first CCX: {secp} bad lanes",
-              flush=True)
+        kept, reach, strips = secp_pending()
+        ys = [SECP // 3]
+        b = bad_lanes(SECP, ys, False, xs + kept) + bad_lanes(SECP, ys, True, xs + kept)
+        secp = [control(cell_without(k), SECP, ys, kept) > 0 for k in range(1, 7)]
+        secp += [strip_control(which, SECP, ys, kept) > 0 for which in ("bit", "p")]
+        D.LAZY_CELL = False
+        secp += [control(edit, SECP, ys, kept) > 0 for edit in (no_write, no_s)]
+        D.LAZY_CELL = True
+        print(f"secp256k1, the built plan: {len(xs)} sampled x and {len(kept)} that set p ({reach} reach a later high "
+              f"word with it set, {strips} strip twice under it), {b} bad lanes; controls on those {len(kept)}: "
+              f"{sum(secp)} of {len(secp)} fail", flush=True)
+        secp = len(kept) >= 30 and reach > 0 and strips > 0 and all(secp)
         bad += b
     finally:
         D.LAZY_END, D.TOP_BORROW_DIRECT, D.LAZY_CELL, D.STRIP_BIT_JUNK, D.COUNT_SHORT = saved
@@ -438,7 +471,7 @@ def main():
     ok = (ok and whole_builds > 0 and set_builds >= 6 and hits > 100 and bad == 0 and off_bad == 0
           and tuples > 0 and outside == 0 and set_tuples > 100
           and fails["cell"] == lazy_builds and fails["no write"] == lazy_builds and fails["no s"] == set_builds
-          and fails["no g1"] == whole_builds and secp > 0
+          and fails["no g1"] == whole_builds and secp
           and strip_builds >= 6 and fails["strip bit"] == strip_builds and fails["strip p"] == strip_builds
           and junk_rows >= 5 and junk_bad == 0 and junk_set > 100 and junk_control == junk_rows)
     print("PASS" if ok else "FAIL")

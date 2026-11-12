@@ -24,7 +24,7 @@ class DialogMultiplier:
     # Chain carries the forward pass leaves as junk for the inverse pass. Each is held through the
     # Bezout pass and saves one CCX in each Euclid pass, so this is the one knob that trades wires
     # for CCX; 1,161 puts the climb stack at 4,096 wires at n = 256.
-    CARRY_JUNK = 1279
+    CARRY_JUNK = 1268
     # A junk wire takes two chain bits where the chain has them (_pair_up, _pair_down); False keeps
     # one bit a wire.
     JUNK_PAIRS = True
@@ -39,8 +39,9 @@ class DialogMultiplier:
     LAZY_WINDOW = 2
     # The lazy run ends at the last tick whose word has this many bits above the threshold, and the
     # ticks after it run their word whole; None ends it at LAZY_WINDOW + 1 bits. With a junk wire at
-    # 2 CCX a pass, 11 is the least pass (9 was at 1).
-    LAZY_END = 11
+    # 2 CCX a pass and the lazy tick at its present cost, 8 is the least pass (11 was before the window
+    # cell and the short counter step, 9 with a junk wire at 1).
+    LAZY_END = 8
     # Lazy ticks run in blocks with a far front: the cells from the front up are one register for
     # U's word and V's, which stays put through the block and lags behind V's shifts; one shift
     # after the block's last tick brings it down by the count. These are the block lengths the
