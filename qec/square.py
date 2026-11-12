@@ -124,6 +124,11 @@ def _add_const_cin(C, reg, value, cin, cout=None, keep=()):
             C.free([cs[i]])
 
 
+def _add_loaded(C, reg, value):
+    """reg += value, for the constant a fold loads beside its first digit."""
+    add_const(C, reg, value)
+
+
 class _Lend:
     """Lends clean wires to the allocator for a stretch of the build and takes the same wires
     back. Every allocation in the stretch is returned clean before it ends, so the lent wires
@@ -433,7 +438,7 @@ class SquareFold:
             i = j + 1
         return best
 
-    def _multiple(self, C, a, T, a_max, t_max=0, cin=None):
+    def _multiple(self, C, a, T, a_max, t_max=0, cin=None, load=False):
         """T += f*a mod 2^len(T), plus 1 if cin holds 1, for a <= a_max and T <= t_max on entry.
 
         Around each digit T holds t + d*a, plus 1 once cin is in, with d the digits so far.
@@ -441,7 +446,10 @@ class SquareFold:
         it bounds -v - 1 instead. Where every bound lies in [-2^i, 2^i) for a bit i at or above
         a's top, the digit's bits from i up all hold the sign. A sign that is always 0 never
         moves, so the digit adds below bit i only. Otherwise bit i takes the carry out and the
-        bits above copy it. A digit onto a T that is 0, with no carry in, copies a."""
+        bits above copy it. A digit onto a T that is 0, with no carry in, copies a.
+
+        With load, T is clean on entry and the call also adds the constant t_max: the first digit
+        copies a and adds t_max as a constant, whose chain skips the 0 bits below its first 1."""
         inc, done, d = int(cin is not None), 0, 0
         for s, sign in self.digits:
             box = [(t, x) for t in (0, t_max) for x in (0, a_max)]
@@ -452,6 +460,16 @@ class SquareFold:
             target = T[s:]
             if not target:
                 continue
+            if load and not done and not d - (sign << s) and cin is None and sign > 0 and not s:
+                # T = a + t_max, below 2^top, so the constant's add carries nothing out.
+                top = (a_max + t_max).bit_length()
+                assert len(a) <= top <= len(T)
+                for x, w in zip(a, T):
+                    C.cx(x, w)
+                _add_loaded(C, T[:top], t_max)
+                load = False
+                continue
+            assert not load
             if not any(before) and cin is None and sign > 0:
                 for x, w in zip(a, target):
                     C.cx(x, w)
@@ -522,8 +540,7 @@ class SquareFold:
         C.free([one])
         if kE:
             add_const(C, E, kE)
-        load_const(C, T, klo)
-        self._multiple(C, E, T, f + kE, klo)
+        self._multiple(C, E, T, f + kE, klo, load=bool(klo))
         high = lo[m:]
         add(C, T, lo[:m], cout=t)
         if high:

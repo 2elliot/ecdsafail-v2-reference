@@ -505,3 +505,17 @@ Ported from 2elliot's square branch (6b1f34d, on Mike's lowt-depth). In `_rows`,
 Check: `scripts/rows_check.py . 11` builds `_rows` for every leaf width 1 to 11, every output length 1 to 2w, copied and uncopied, with and without a kept-carry list. On every Y it checks Q = Y(2^w - Y) or Y(2^w - 1 - Y) mod 2^len(Q) and that Y comes back: 528 configurations, 0 failing. Without kept carries, its outputs equal 0f5514b's bit for bit on every input.
 
 At G: 2,961,008 -> 2,958,220 CCX (-2,788), at 4,096 wires.
+
+## The second fold's loaded constant as a constant add
+
+With 3a absorbed, the second fold starts from T = klo, loaded by X gates, and its first digit added E onto it with the ripple adder: 2 CCX a bit from bit 0, whatever klo's bits are.
+Now `_multiple(..., load=True)` takes T clean, copies E onto it and adds klo with `add_const`: T = E + klo either way, and E + klo ≤ f + kE + klo < 2^top for top = bitlen(f + kE + klo), so the add on T[:top] carries nothing out and the wires above stay 0, as the bound the adder used already said.
+`add_const`'s chain reads the constant, so the 0 bits below klo's lowest 1 cost nothing. At G klo has two of them, which is 4 CCX each way.
+The later digits see the same T, and the chain's wires come from the ladder's lent wires, so the peak stays where it was.
+`load` is only set when klo is nonzero; a fold with no absorbed constant still copies.
+
+`scripts/fold_check.py` builds `compute` with every absorbed constant c at every fold prime of 4 to 8 bits, and 97 of them at 9 to 11 bits, runs every Y, and checks J[:n] = (Y² - c) mod q, Y unchanged, and every junk wire 0 after the reverse; it counts the builds that load a constant. At secp256k1 it samples Y, with the edges, for c = 3a and two random c.
+Its controls make the constant's add one bit short, and drop the constant's lowest set bit; each fails thousands of lanes.
+A BDD run of the second fold alone over every E ≤ f + kE at G (33 inputs) finds no CCX left there that never fires or has equal or constant controls; before this change it found exactly the four that the trailing 0 bits of klo account for.
+
+At G: 2,958,220 -> 2,958,212 CCX (-8), 4,096 wires.
