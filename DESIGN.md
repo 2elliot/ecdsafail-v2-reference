@@ -665,3 +665,32 @@ At G: 24 whole high words and 349 lazy ticks a pass, 373 CCX a pass: 2,950,656 -
 A pending borrow is rare: no x sets p at the primes just under a power of two (the toy primes of the other checks, and none of 6,861 inputs at secp256k1 did in the junk model), but at a prime just above one hundreds do. At the six such primes here 2,268 inputs set p and 424 reach a later high word with it set, counted from `model_check.py`'s arithmetic model of p.
 Controls: the lazy ladder's last CCX dropped fails in 16 of 16 builds, g1 taking p ^ E_R without s in the 10 of 10 where p is set, and a whole word's last CCX dropped in 7 of 7; at secp256k1 with the plan as built, 519 inputs give 0 bad lanes and the first control 456.
 `lag_check.py`, `schedule_check.py`, `model_check.py` and the full `accept.py` pass.
+
+### The lazy window as one cell of 6 CCX
+
+A lazy tick's high word is always the same small map: the two window bits of U and V, the carry in cw, g0, z and zg, g1, and the lazy s and p. As a ladder it took 8 CCX (9 before the top borrow went straight onto p).
+With `LAZY_CELL` it is a fixed gate list, `_LAZY_CELL`, with 6 CCX and no scratch wire, found by an exhaustive search over circuits on the window's domain. 6 is the floor for this map on this domain: its outputs need six products that are independent of each other and of the inputs.
+
+The cell equals the ladder on the domain, not everywhere, so the domain is the proof's content. At a lazy tick's high word:
+
+1. U's two window bits or V's are 0, z = 1 beside bits of U's and z = 0 beside bits of V's, zg = g0 z, g1 = 0. This is `_high_word`'s own contract: the tick's threshold kappa is the joint one, so U and V are not both at 2^kappa or more, and z is the flag [U >= 2^kappa]. With p = 0 the physical V is the true one.
+2. p s = 0 (the section above).
+3. A set p finds z = 0, U's window bits 0 and V's both 1. The carry cw and g0 are left free.
+
+For 3, follow a pending borrow from the subtract that set it, at threshold k0 and cut c0 = k0 + 2. The larger register was H 2^c0 + L with H >= 1, window 0 and L below the smaller one, m; the tick left U = m and the true V = ((H - 1) 2^c0 + 2^c0 - (m - L)) / 2.
+Claim: while p stays set, at each later lazy tick with threshold k and cut c = k + 2, once the tick's crossing bits have met p, physical V = P 2^c + 2^c - d - e with P >= 1, 1 <= d <= u, e the held offset bit, and u = m unchanged with u < 2^k / 9.
+It holds after the setting tick with P = H and d = (m - L) / 2. Each tick halves V once, or twice with a second strip, and the cut drops by one or stays. A strip halves d; a subtract has V > U, so it does not swap, and takes d to (d + u) / 2 <= u; d stays at least 1 because each halving is of an even number. A halving that the cut follows keeps P. One that it does not follow, at a tick that keeps its threshold or strips twice, brings P's low bit to p: a 1 clears p and ends the run, a 0 leaves P / 2 >= 1.
+The true V is at least 2^c - d - 1 >= 3 * 2^k, and the pass's potential bound max^2 min 4^t <= 2 q^2 x < 2^(3 k + 2 t) at a high tick gives u < 2^k / 9.
+So under p: U < 2^k, which is z = 0 and U's window bits 0; V's bits below c are 2^c - d - e > 2^c - 2^k, so its window bits are both 1; and P >= 1 is a 1 from cut up, s = 0 again.
+These are the lazy run's own invariants: `_lazy_plan` states them and `schedule_check.py`'s `lazy_states_ok` asserts them at every lazy tick of the recurrence (`z and (hi or p)`, `p and hi & mask != mask`).
+
+On that domain, 68 points, the cell and the ladder agree on every wire. Outside it they differ (26 of the 28 further points with p s = 0), so the domain is used.
+
+At G: 349 lazy ticks a pass, 2 CCX each: 2,949,164 -> 2,946,372 CCX (-2,792), 4,096 wires; `CARRY_JUNK` stays 1279. `LAZY_CELL = False` restores the ladder.
+
+**Checks.** `scripts/window_check.py`, in four parts.
+The cell against the ladder with both switches off, on all 68 points: 0 wrong; the cell has 6 CCX in 115 gates, none on a scratch wire, and dropping any one gate gives a wrong point.
+The domain as the gates see it: M with a marker in front of each lazy window, every x at q = 4099, 8209, 16411, 32771, 65537 and 65539, all 3,166,842 tuples the windows find on the forward pass: none outside the domain, 827 with p set.
+M and its inverse as gates on the same 16 builds as before, with the cell, with the direct ladder and with both off: 0 bad lanes. Controls: the cell without each one of its CCX fails wherever some x sets p (one of the six only acts where a borrow stays pending, and fails nowhere else), and the three ladder controls fail as before.
+secp256k1 with the plan as built, 519 inputs: 0 bad lanes, and the cell without its first CCX fails.
+`lag_check.py`, `schedule_check.py`, `model_check.py`, `pair_check.py` and the full `accept.py` pass.

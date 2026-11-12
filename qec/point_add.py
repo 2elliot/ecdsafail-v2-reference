@@ -52,6 +52,22 @@ class DialogMultiplier:
     LAG_CLEAR = True
     # A high word's ladder writes its top borrow straight onto g1, a lazy window's onto p.
     TOP_BORROW_DIRECT = True
+    # The lazy window runs as one cell of 6 CCX, found by search, in place of its ladder's 8; see
+    # _high_word. Gates over the window's wires U0 U1 V0 V1, cw, g0, g1, z, zg and the lazy s and p.
+    LAZY_CELL = True
+    _LAZY_CELL = (
+        "cx cw U0; cx z U0; x U0; x g0; ccx U0 g0 g1; x g0; x U0; cx z U0; cx cw U0; cx U0 U1; cx U0 V0; cx "
+        "U0 V1; cx g0 cw; cx g1 cw; cx z cw; cx zg cw; cx z V0; cx zg V0; ccx cw V0 U0; cx zg V0; cx z V0; cx "
+        "zg cw; cx z cw; cx g1 cw; cx g0 cw; cx U1 V1; cx V1 U0; cx z U0; cx zg U0; cx V1 V0; cx p V0; x V0; "
+        "ccx U0 V0 U1; x V0; cx p V0; cx V1 V0; cx zg U0; cx z U0; cx V1 U0; cx U0 V1; cx V0 U1; cx zg U1; cx "
+        "cw V0; cx g0 V0; cx g1 V0; cx z V0; cx p V0; x V0; ccx U1 V0 U0; x V0; cx p V0; cx z V0; cx g1 V0; "
+        "cx g0 V0; cx cw V0; cx zg U1; cx V0 U1; cx U1 p; cx z V1; cx zg V1; cx s V1; cx p V1; x V1; cx V1 "
+        "U0; cx z U0; cx zg U0; cx p U0; x U0; ccx V1 U0 U1; cx p U0; cx zg U0; cx z U0; cx V1 U0; x V1; cx p "
+        "V1; cx s V1; cx V0 V1; cx V0 g1; cx cw U0; cx cw U1; cx g0 U1; cx z U1; cx zg U1; x U1; ccx U0 U1 "
+        "V0; x U1; cx zg U1; cx z U1; cx g0 U1; cx cw U1; x U0; cx zg g1; cx zg V0; cx z g1; cx z V0; cx z "
+        "U0; cx g1 U0; cx g0 g1; cx g0 V0; cx g0 U0; cx cw g1; cx cw V0; cx V1 g1; cx V1 V0; cx V1 U0; cx g1 "
+        "V1; cx V0 g1; cx V0 V1; cx V0 U0; cx V1 V0; cx U1 p; cx U1 g1; cx g1 U1; cx U0 g1; x V0"
+    )
     LAG_MIN_SAVING = 1
     # The Bezout pass's first cells run on unreduced integers, up to this many, then one conversion
     # (rank_one.py); 0 turns it off.
@@ -346,6 +362,15 @@ class DialogMultiplier:
         otherwise stays pending on p, the bits above being left as they are."""
         C = self.C
         z, zg = held
+        if lazy and self.LAZY_CELL:
+            # The same map on the window's domain: U or V is 0 there, z is 1 beside a word of U's
+            # and 0 beside one of V's, p s = 0, and a pending p finds z = 0 and V's two bits set.
+            assert len(U) == 2 and len(V) == 2
+            wires = dict(U0=U[0], U1=U[1], V0=V[0], V1=V[1], cw=cw, g0=g0, g1=g1, z=z, zg=zg, s=lazy[0], p=lazy[1])
+            for gate in self._LAZY_CELL.split(";"):
+                kind, *names = gate.split()
+                getattr(C, kind)(*(wires[name] for name in names))
+            return
         E = scratch[:len(U) + 1]
         for u, v in zip(U, V):
             C.cx(u, v)
