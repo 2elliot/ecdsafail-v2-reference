@@ -430,16 +430,12 @@ class RankOne:
             sub_if_ge(C, U[:w - i], N[i:], Q[i], ctl=small[i] if i else None)
         self._below(C, U, small)
         (ctl,) = C.alloc(1)
-        nz = self._nonzero(C, N)
-        C.ccx(sigma, nz, ctl)
-        self._nonzero(C, N, nz)
+        self._and_nonzero(C, N, sigma, ctl)
         for x in N:
             C.cx(ctl, x)
         inc(C, N, ctl)
         add(C, U, N, ctl=ctl)
-        nz = self._nonzero(C, N)
-        C.ccx(sigma, nz, ctl)
-        self._nonzero(C, N, nz)
+        self._and_nonzero(C, N, sigma, ctl)
         C.free([ctl])
 
     @staticmethod
@@ -463,6 +459,28 @@ class RankOne:
         for x in top[:w - 1]:
             C.x(x)
         return small
+
+    @staticmethod
+    def _and_nonzero(C, x, ctl, t):
+        """t ^= ctl*[x != 0], x and ctl as found. The zero chain is built once, read by one CCX
+        and taken down, where a copy of [x != 0] made and cleared around the CCX builds it twice."""
+        for w in x:
+            C.x(w)
+        chain = []
+        z = x[0]
+        for w in x[1:]:
+            (a,) = C.alloc(1)
+            C.ccx(z, w, a)
+            chain.append(a)
+            z = a
+        C.cx(ctl, t)
+        C.ccx(ctl, z, t)
+        prev = [x[0]] + chain[:-1]
+        for i in reversed(range(len(chain))):
+            C.ccx(prev[i], x[i + 1], chain[i])
+        C.free(chain)
+        for w in x:
+            C.x(w)
 
     def _nonzero(self, C, x, nz=None):
         """A fresh wire holding [x != 0], or with nz given, its clear."""

@@ -745,3 +745,12 @@ The adds commute, so the subtraction of U·s now comes last, and inside it row 0
 `scripts/mulacc_check.py` runs every (a, b) for 1 to 5 wires with acc = a·b: acc ends 0, a and b as found, and all 165 single-CCX mutants fail. `scripts/m_check.py` runs M with the start on.
 
 Changes `rank_one.mul_acc` and the order of two calls in `RankOne.convert`. At G: 2,939,472 -> 2,939,412 CCX (-60), 4,096 wires.
+
+## The residue's nonzero test read once (RankOne._and_nonzero)
+
+`residue` twice needs ctl ^= sigma·[N ≠ 0]. It made a copy of [N ≠ 0] on a fresh wire, which builds the zero chain and takes it down, used it in one CCX, and cleared the copy, which builds and takes down the chain again: 4(w - 1) CCX for one product.
+`_and_nonzero(C, x, ctl, t)` builds the chain once, does t ^= ctl·[x ≠ 0] as a CX and a CCX from the chain's top, and takes it down: 2(w - 1) + 1, and one wire fewer. N does not change between the old copy and its clear, so the product is the same.
+
+`scripts/nonzero_check.py` runs every (x, ctl, t) for 1 to 8 wires, and all 192 single-CCX mutants fail; `scripts/m_check.py` runs M with the start on.
+
+Adds `RankOne._and_nonzero` and changes two three-line stretches of `RankOne.residue`. At G: 2,939,412 -> 2,939,188 CCX (-224), 4,096 wires.
