@@ -17,7 +17,7 @@ no Prefix, low chains, compare or k machinery. One conversion after cell J reduc
 The middle cells use the tree's add-or-shift and held offset on wider words. The last cell is
 semantic (a B1 doubles, adding nothing), so the reduced tick after it starts with no held lane.
 docs/rank-one.md states the premises and the checks."""
-from .arith import _maj, _uma, add_const, cswap
+from .arith import _cuma, _maj, _uma, add_const, cswap
 from .two_bit import Prefix, TwoBitMod
 
 
@@ -106,6 +106,35 @@ def greater(C, a, b, flag, ctl=None):
     for w in b:
         C.x(w)
     C.free(pa + pb)
+
+
+def sub_if_ge(C, a, b, flag, ctl=None):
+    """flag ^= [b >= a] (times ctl), then b -= flag*a mod 2^len(b); flag clean before, len(a) <= len(b).
+    One carry chain serves both: the majority sweep of a + ~b does not read the flag, its top carry
+    is [a > b], and the sweep back down writes the sum under the flag. 3 CCX a bit, where a compare
+    and a controlled subtract are 5."""
+    n = len(b)
+    assert len(a) <= n
+    a = list(a)
+    ext = C.alloc(n - len(a))
+    a = a + ext
+    (c0,) = C.alloc(1)
+    carry = [c0] + a[:-1]
+    for w in b:
+        C.x(w)
+    for i in range(n):
+        _maj(C, carry[i], b[i], a[i])
+    if ctl is None:
+        C.cx(a[n - 1], flag)
+        C.x(flag)
+    else:
+        C.ccx(ctl, a[n - 1], flag)
+        C.cx(ctl, flag)
+    for i in reversed(range(n)):
+        _cuma(C, flag, carry[i], b[i], a[i])
+    for w in b:
+        C.x(w)
+    C.free([c0] + ext)
 
 
 def inc(C, x, ctl):
@@ -389,13 +418,7 @@ class RankOne:
         small = self._below(C, U)
         for i in range(w - 1, -1, -1):
             # Q[i] = [N >> i >= U] = small[i]*[N >> i >= U mod 2^(w - i)], small[i] = [U < 2^(w - i)]
-            if i:
-                greater(C, U[:w - i], N[i:], Q[i], ctl=small[i])
-                C.cx(small[i], Q[i])
-            else:
-                greater(C, U, N, Q[i])
-                C.x(Q[i])
-            sub(C, U[:w - i], N[i:], ctl=Q[i])
+            sub_if_ge(C, U[:w - i], N[i:], Q[i], ctl=small[i] if i else None)
         self._below(C, U, small)
         (ctl,) = C.alloc(1)
         nz = self._nonzero(C, N)
@@ -466,18 +489,14 @@ class RankOne:
         (beta,) = C.alloc(1)
         if ctl is None:
             s[:] = s[-1:] + s[:-1]
-            greater(C, U, s, beta)
-            C.x(beta)
-            sub(C, U, s, ctl=beta)
+            sub_if_ge(C, U, s, beta)
             C.cx(s[0], beta)
         else:
             for i in range(len(s) - 1, 0, -1):
                 C.cx(s[i - 1], s[i])
                 C.ccx(ctl, s[i], s[i - 1])
                 C.cx(s[i - 1], s[i])
-            greater(C, U, s, beta, ctl=ctl)
-            C.cx(ctl, beta)
-            sub(C, U, s, ctl=beta)
+            sub_if_ge(C, U, s, beta, ctl=ctl)
             C.ccx(ctl, s[0], beta)
         C.free([beta])
 
@@ -485,9 +504,7 @@ class RankOne:
         """s = s + ctl*r mod U; the flag is ctl*[s < r] after."""
         (beta,) = C.alloc(1)
         add(C, r, s, ctl=ctl)
-        greater(C, U, s, beta)
-        C.x(beta)
-        sub(C, U, s, ctl=beta)
+        sub_if_ge(C, U, s, beta)
         greater(C, r, s, beta, ctl=ctl)
         C.free([beta])
 

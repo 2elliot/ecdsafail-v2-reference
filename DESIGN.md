@@ -722,3 +722,16 @@ At G: 349 counter steps a pass lose one CCX and the 116 raw ones two more: 2,944
 
 **Checks.** `scripts/window_check.py` runs `_count` alone as gates on 1 to 8 bits, up and down, with one bit and with two: all 6,104 pairs of a register value and a step give the sum with the step bits kept and the scratch clean, each counter has 2 n - 3 CCX, and up to 6 bits no gate can be dropped without a wrong case.
 Its M rows run every build with the switch on and off: 0 bad lanes. `lag_check.py`, whose lazy-run rows end the run with the counter in every state, `schedule_check.py`, `model_check.py`, `pair_check.py` and the full `accept.py` pass.
+
+## One carry chain for a compare and its conditional subtract (rank_one.sub_if_ge)
+
+The rank-one start reduces by U in four places with the same pair: `greater` makes flag = [b ≥ a], 2 CCX a bit, and `sub` under the flag takes a off b, 3 CCX a bit. Both ripple the same carries, those of a + ~b.
+`sub_if_ge(C, a, b, flag, ctl)` ripples them once. The majority sweep of a controlled adder does not read its control, so it runs first on a + ~b; its top carry is [a > b], which a CX and an X (or a CCX and a CX under ctl) turn into the flag; and the sweep back down, `_cuma` under the flag, restores a and writes ~b + flag·a, which the X gates around make b - flag·a.
+That is 3 CCX a bit and the same wires: one carry-in wire and a's zero extension.
+
+It replaces the pair in `_mod_double` (both forms), in `_mod_add`, and in `residue`'s quotient loop; nothing else in those functions changes, and no other function of rank_one.py is touched.
+
+`scripts/subge_check.py` builds the helper and the old pair for len(b) = 1 to 7, len(a) = len(b) and len(b) - 1, with and without ctl, and runs every (a, b, ctl): both leave flag = ctl·[b ≥ a], b - flag·a, a and ctl as found and every other wire 0. Each of the helper's CCX dropped, or turned into a CX from either control, fails: 549 mutants, none unnoticed.
+
+At G: 2,942,652 -> 2,939,472 CCX (-3,180), 4,096 wires; the Bézout pass goes from 888,721 to 887,131.
+`scripts/m_check.py` runs the multiplier itself, M(x, y) = (x, x·y mod q) with every other wire 0, where the rank-one start is on: every (x, y) at q = 61 (J = 3) and 251 (J = 4), and 40,000 sampled pairs with the edges at 4093 (J = 9) and 8191 (J = 12); a flipped bit after each `sub_if_ge` fails 12,750 lanes.
