@@ -178,6 +178,25 @@ def dec(C, x, ctl):
         C.x(w)
 
 
+def _kind(C, g0, b):
+    """A clean wire takes j = [the cell is J] = b AND NOT g0, as b ^ g0*b."""
+    (k,) = C.alloc(1)
+    C.ccx(g0, b, k)
+    C.cx(b, k)
+    return k
+
+
+def _kind_swap(C, b, k):
+    """The wire holding j now holds sw = g0*b = j ^ b, the cell's swap."""
+    C.cx(b, k)
+    return k
+
+
+def _kind_off(C, g0, b, k):
+    C.ccx(g0, b, k)
+    C.free([k])
+
+
 def mul_acc(C, a, b, acc, sign=1, clears=False):
     """acc += a*b (sign -1: acc -= a*b) mod 2^len(acc), row i on acc[i:].
 
@@ -314,28 +333,19 @@ class RankOne:
             for x in S:
                 C.cx(p, x)
             self.nar._drop_after_b1(C, prev, p)
-        (j,) = C.alloc(1)
-        C.x(g0)
-        C.ccx(g0, b, j)
-        C.x(g0)
+        j = _kind(C, g0, b)
         for i in range(len(S) - 1, 0, -1):
             C.cx(S[i - 1], S[i])
             C.ccx(j, S[i], S[i - 1])
             C.cx(S[i - 1], S[i])
-        C.x(g0)
-        C.ccx(g0, b, j)
-        C.x(g0)
-        C.free([j])
         (l0,) = C.alloc(1)
         C.ccx(g0, R[0], l0)
         top = S[-1]
         S[:] = [l0] + S[:-1]
         C.free([top])
-        (sw,) = C.alloc(1)
-        C.ccx(g0, b, sw)
+        sw = _kind_swap(C, b, j)
         cswap(C, sw, R, S)
-        C.ccx(g0, b, sw)
-        C.free([sw])
+        _kind_off(C, g0, b, sw)
 
     # -- the conversion ------------------------------------------------------------------------------
 
@@ -420,23 +430,14 @@ class RankOne:
     def _cof_cell(self, C, g0, b, U, V):
         V[:] = V[-1:] + V[:-1]
         add(C, U, V, ctl=g0)
-        (j,) = C.alloc(1)
-        C.x(g0)
-        C.ccx(g0, b, j)
-        C.x(g0)
+        j = _kind(C, g0, b)
         for i in range(len(V) - 1, 0, -1):
             C.cx(V[i - 1], V[i])
             C.ccx(j, V[i], V[i - 1])
             C.cx(V[i - 1], V[i])
-        C.x(g0)
-        C.ccx(g0, b, j)
-        C.x(g0)
-        C.free([j])
-        (sw,) = C.alloc(1)
-        C.ccx(g0, b, sw)
+        sw = _kind_swap(C, b, j)
         cswap(C, sw, U, V)
-        C.ccx(g0, b, sw)
-        C.free([sw])
+        _kind_off(C, g0, b, sw)
 
     def residue(self, C, U, D, Q):
         """D (w + 1 wires, two's complement) -> D mod U on D[:w] in place, its sign kept on D[w];
@@ -565,20 +566,11 @@ class RankOne:
         for g0, b in cells[1:]:
             self._mod_double(C, U, s)
             self._mod_add(C, U, r, s, g0)
-            (j,) = C.alloc(1)
-            C.x(g0)
-            C.ccx(g0, b, j)
-            C.x(g0)
+            j = _kind(C, g0, b)
             self._mod_double(C, U, s, ctl=j)
-            C.x(g0)
-            C.ccx(g0, b, j)
-            C.x(g0)
-            C.free([j])
-            (sw,) = C.alloc(1)
-            C.ccx(g0, b, sw)
+            sw = _kind_swap(C, b, j)
             cswap(C, sw, r, s[:w])
-            C.ccx(g0, b, sw)
-            C.free([sw])
+            _kind_off(C, g0, b, sw)
 
     def convert(self, C, term, cells, R, S):
         """R, S (L wires each) from (U*y, V*y) to (U*y mod q, V*y mod q) on their low n wires; the

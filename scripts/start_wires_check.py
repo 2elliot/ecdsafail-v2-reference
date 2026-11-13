@@ -1,4 +1,4 @@
-"""The rank-one start's wire changes, checked exhaustively at toy sizes, with mutants that must fail.
+"""The rank-one start's wire and cell changes, checked exhaustively at toy sizes, with mutants that must fail.
 
   units    rank_one.inc (with a control and without) and dec on every input of 1 to 7 bits and
            both control values, every other wire 0 after
@@ -10,7 +10,8 @@
   M        DialogMultiplier's body maps (x, y) to (x, x*y mod q) with every other wire 0, on every
            x in [1, q) and y in [0, q), at primes whose pass takes the start (61: J = 3, 127: J = 6,
            251: J = 4, 509: J = 7)
-  mutants  an incrementer without its lowest bit; one that clears its carries after the sum; and, for each free call in fold
+  mutants  an incrementer without its lowest bit; one that clears its carries after the sum; a
+           cell that swaps on its J wire; a J wire that holds b; and, for each free call in fold
            and convert, the same circuit with the first freed wire flipped just before, at q = 61
            and 127 and in each fold: a wire given back clean must matter, so every one has to fail
 
@@ -194,6 +195,14 @@ def mutant_inc_order(C, x, ctl=None):
     C.free(cs[1:])
 
 
+def mutant_kind(C, g0, b):
+    (k,) = C.alloc(1)
+    C.cx(b, k)
+    return k
+
+
+
+
 def main():
     primes = [int(a) for a in sys.argv[1:]] or [61, 127, 251, 509]
     ok = True
@@ -218,7 +227,9 @@ def main():
         report(f"mutants, a dirty wire at each of {frees} free calls in that fold: all fail"
                + (f" (alive: {alive})" if alive else ""), bool(alive), expect_fail=True)
     for name, attr, owner, mutant in (("incrementer without its low bit", "inc", rank_one, mutant_inc_low),
-                                      ("incrementer clearing after the sum", "inc", rank_one, mutant_inc_order)):
+                                      ("incrementer clearing after the sum", "inc", rank_one, mutant_inc_order),
+                                      ("a swap on the J wire", "_kind_swap", rank_one, lambda C, b, k: k),
+                                      ("a J wire that is b", "_kind", rank_one, mutant_kind)):
         good = owner.__dict__[attr]
         setattr(owner, attr, mutant)
         try:

@@ -798,3 +798,14 @@ At G: M's peak 4,093 -> 4,088 wires at `CARRY_JUNK` 1279; at 1284 the build is 4
 **Checks.** `scripts/start_wires_check.py`: `inc` (with and without a control) and `dec` on every input of 1 to 7 bits with every other wire 0 after; `residue` on every U in [1, 2^w) and D in (-2^w, 2^w) for w = 2 to 6; `fold` on every X < 2^w q at eight (q, w), six of them primes whose f splits with 1 to 4 lent wires (479, 991, 3967); M as gates on every (x, y) at q = 61, 127, 251 and 509, where the start runs with J = 3, 6, 4 and 7.
 Mutants, all caught: an incrementer without its low bit, one that clears its carries after the sum, and a wire flipped just before each `free` call of `fold` and `convert` (in M at q = 61 and 127, and in each fold), which is the claim that every wire these changes give back is clean and needed clean.
 The full `accept.py` passes: 13 pass, 0 fail, 1 pending.
+
+## J and the swap on one wire in the start's semantic cells
+
+A semantic cell of the rank-one start (the cofactors' cells, the small pass's, and the start's last tick) made j = b AND NOT g0 on a wire, used it, cleared it, then made sw = g0*b on a wire, used it and cleared it: 4 CCX.
+Since j = b ^ g0*b, `_kind` makes g0*b once and a CX from b turns it into j; after j's use `_kind_swap` turns it back into sw with the same CX; `_kind_off` clears it with the CCX that made it: 2 CCX.
+The gates between read g0 and b only (the cofactors' controlled double, the small pass's `_mod_double` under j, the last tick's double and its l0 = g0*R_0), so the wire holds exactly j where j was read and exactly sw where sw was read, and each cell's map is the same on every input. Nothing depends on q. The middle cells' `tick` already shared its wire this way.
+
+40 cells a start at n = 256 (13 cofactor cells run forward and back, 13 in the small pass, the last tick), 2 CCX each: 2,938,640 -> 2,938,480 CCX (-160), 4,096 wires, `CARRY_JUNK` stays 1284.
+
+**Checks.** `scripts/start_wires_check.py`'s M rows (every (x, y) at q = 61, 127, 251, 509) run every cell kind in all three places; two mutants are caught there: a cell that swaps on its J wire (no CX back), and a J wire that holds b.
+`scripts/m_check.py` (the start up to q = 8191, J = 12) and the full `accept.py` pass: 13 pass, 0 fail, 1 pending.
