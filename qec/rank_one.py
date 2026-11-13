@@ -41,13 +41,17 @@ def _uma_ctl(C, ctl, c, b, a):
     C.cx(c, a)
 
 
-def add(C, a, b, ctl=None):
-    """b += a (or ctl*a) mod 2^len(b), a zero-extended. 2 CCX a bit, 3 under a control."""
+def add(C, a, b, ctl=None, cin=None):
+    """b += a (or ctl*a) mod 2^len(b), a zero-extended. 2 CCX a bit, 3 under a control. cin is a
+    wire whose bit is the carry in: b += a + cin, or ctl*(a + cin) under a control, which gates only
+    the writes onto b."""
     n = len(b)
     a = list(a)
     ext = C.alloc(n - len(a)) if len(a) < n else []
     a = a + ext
     (c0,) = C.alloc(1)
+    if cin is not None:
+        C.cx(cin, c0)
     carry = [c0] + a[:-1]
     for i in range(n - 1):
         _maj(C, carry[i], b[i], a[i])
@@ -63,6 +67,8 @@ def add(C, a, b, ctl=None):
             _uma(C, carry[i], b[i], a[i])
         else:
             _uma_ctl(C, ctl, carry[i], b[i], a[i])
+    if cin is not None:
+        C.cx(cin, c0)
     C.free([c0] + ext)
 
 
@@ -425,10 +431,10 @@ class RankOne:
         self._below(C, U, small)
         (ctl,) = C.alloc(1)
         self._and_nonzero(C, N, sigma, ctl)
+        # N -> U - N under ctl: ~N + U + 1, the 1 as the add's carry in.
         for x in N:
             C.cx(ctl, x)
-        inc(C, N, ctl)
-        add(C, U, N, ctl=ctl)
+        add(C, U, N, ctl=ctl, cin=ctl)
         self._and_nonzero(C, N, sigma, ctl)
         C.free([ctl])
 

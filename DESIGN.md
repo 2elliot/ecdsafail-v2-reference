@@ -764,3 +764,13 @@ Without high bits the write is the plain CX, as before.
 The toy primes' folds have no high bits, so they run only the uncontrolled write, before and after this change. `scripts/probe_check.py` therefore builds the old stretch and the new call on the same wires for W = 1 to 6 and runs every (prod, lo, top, e): both leave e ⊕ top·carry and everything else as found; the call without its control and all its single-CCX mutants differ, 150 in all. `scripts/m_check.py` runs M with the start on at q = 61, 251, 4093 and 8191, and `accept.py` samples secp256k1.
 
 Changes eight lines of `RankOne.fold` (the c1 stretch) and nothing else; the fold holds one wire fewer there. At G: 2,939,188 -> 2,938,804 CCX (-384), 4,096 wires.
+
+## The residue's U - N with the 1 as a carry in (rank_one.add cin)
+
+`residue` maps N to U - N under ctl as ~N + 1 + U: a complement by CX, an increment under ctl at 2 CCX a bit, and an add of U under ctl at 3.
+The increment is the add's carry in. `rank_one.add` gains `cin`: the wire's bit is copied onto the adder's own carry-in wire by a CX before the ripple and taken off after, and the ripple restores that wire as it does any carry. Under a control only the writes onto b are gated, so with cin = ctl the add writes ~N + U + 1 when ctl is 1 and nothing when it is 0.
+The increment is gone: 2(w - 1) CCX each time.
+
+`scripts/addcin_check.py` builds the old stretch and the new one for 1 to 6 wires and runs every (U, N, ctl): both leave (U - N) mod 2^n under ctl, N otherwise. It also checks the uncontrolled add with a carry in against b + a + c. The stretch without its carry in and all its single-CCX mutants fail: 158, none unnoticed. `scripts/m_check.py` runs M with the start on.
+
+Changes `rank_one.add` (new optional argument, no change without it) and one stretch of `RankOne.residue`. At G: 2,938,804 -> 2,938,692 CCX (-112), 4,096 wires.
