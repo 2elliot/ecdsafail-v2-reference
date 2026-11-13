@@ -774,3 +774,27 @@ The increment is gone: 2(w - 1) CCX each time.
 `scripts/addcin_check.py` builds the old stretch and the new one for 1 to 6 wires and runs every (U, N, ctl): both leave (U - N) mod 2^n under ctl, N otherwise. It also checks the uncontrolled add with a carry in against b + a + c. The stretch without its carry in and all its single-CCX mutants fail: 158, none unnoticed. `scripts/m_check.py` runs M with the start on.
 
 Changes `rank_one.add` (new optional argument, no change without it) and one stretch of `RankOne.residue`. At G: 2,938,804 -> 2,938,692 CCX (-112), 4,096 wires.
+
+## Five wires off M's peak in the rank-one start
+
+M's widest moment is the rank-one start's conversion, not a tick: at `CARRY_JUNK` = 1279 the fold's corrected product, the residue and the small pass all stood within six wires of M's 4,093.
+Three changes in `qec/rank_one.py` take 5 wires off all of them, and `CARRY_JUNK` goes from 1279 to 1284 at the same 4,096 wires. None changes the map of any block, and none depends on q.
+
+**The fold lends its zero wires.** With f = 2^t + c, the product's own wires are c*(hi + 1) on `low` and zero wires from there up to t, 6 at n = 256.
+Those wires are only places for a ripple's carries to pass: `_times` writes `low` alone, and the probe's `carry_into` and the final MAJ/UMA ladder leave their a wires as found.
+So `product()` takes them just before each ripple and the fold frees them after it, and the corrections between the probe and the write, `dec` on hi and the controlled constant add on `low`, the fold's widest steps, run on them.
+
+**The small pass runs before the residue.** `small_pass` acts on (cells, U, mR, sp) and `residue` on (U, D, Q). They share only U, and each leaves U as found on every input, so as permutations of basis states they commute.
+The pass maps (mR, 0) to (0, V*mR mod U), which the tree already relied on when it freed mR and sp's top wire at the end. Run first, it gives mR's w wires and sp's top back before Q is taken, so the pass no longer holds Q and the residue holds sp's w wires in place of mR's.
+The residue, the XOR that clears sp against D mod U and the residue's inverse follow unchanged.
+
+**An incrementer on its own carries.** `inc(x, ctl)` was an adder with a one-wire addend, zero-extended: k - 1 zero wires, a carry-in and a copy of ctl. It is now the chain c_1 = ctl x_0, c_(i+1) = c_i x_i on k - 1 wires.
+From the top down, x_i takes c_i and then c_i is cleared by the AND that made it, whose inputs c_(i-1) and x_(i-1) are still as found; x_0 takes ctl last. 2(k - 1) CCX as before, two wires fewer. `dec` is `inc` between complements, since ~(~x + c) = x - c.
+With no control it adds the constant 1, which the fold's hi + 1 and the conversion's -x = ~x + 1 did with a wire set to 1: x_0 itself is the carry into bit 1, so the chain is one AND shorter, 2 CCX less at each of three places a start.
+
+At G: M's peak 4,093 -> 4,088 wires at `CARRY_JUNK` 1279; at 1284 the build is 4,096 wires again (1285 gives 4,097).
+2,938,692 -> 2,938,640 CCX (-52): -40 from the five junk wires, -12 from the constant increments. The residue's steps (4,088 and 4,087 at 1279) and the fold's constant add (4,087) now sit together, and the small pass is 10 below, so a sixth wire needs the residue's chain of 14 `small` wires, its zero test and the fold's 24 carries all cut.
+
+**Checks.** `scripts/start_wires_check.py`: `inc` (with and without a control) and `dec` on every input of 1 to 7 bits with every other wire 0 after; `residue` on every U in [1, 2^w) and D in (-2^w, 2^w) for w = 2 to 6; `fold` on every X < 2^w q at eight (q, w), six of them primes whose f splits with 1 to 4 lent wires (479, 991, 3967); M as gates on every (x, y) at q = 61, 127, 251 and 509, where the start runs with J = 3, 6, 4 and 7.
+Mutants, all caught: an incrementer without its low bit, one that clears its carries after the sum, and a wire flipped just before each `free` call of `fold` and `convert` (in M at q = 61 and 127, and in each fold), which is the claim that every wire these changes give back is clean and needed clean.
+The full `accept.py` passes: 13 pass, 0 fail, 1 pending.

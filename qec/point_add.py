@@ -24,7 +24,7 @@ class DialogMultiplier:
     # Chain carries the forward pass leaves as junk for the inverse pass. Each is held through the
     # Bezout pass and saves one CCX in each Euclid pass, so this is the one knob that trades wires
     # for CCX; 1,161 puts the climb stack at 4,096 wires at n = 256.
-    CARRY_JUNK = 1279
+    CARRY_JUNK = 1284
     # A junk wire takes two chain bits where the chain has them (_pair_up, _pair_down); False keeps
     # one bit a wire.
     JUNK_PAIRS = True

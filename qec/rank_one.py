@@ -143,20 +143,39 @@ def sub_if_ge(C, a, b, flag, ctl=None):
     C.free([c0] + ext)
 
 
-def inc(C, x, ctl):
-    (one,) = C.alloc(1)
-    C.cx(ctl, one)
-    add(C, [one], x)
-    C.cx(ctl, one)
-    C.free([one])
+def inc(C, x, ctl=None):
+    """x += ctl mod 2^len(x) on len(x) - 1 clean wires: the carry into bit i is ctl*x_0*...*x_(i-1),
+    and each is cleared, top down, while the bit below it still holds what made it. With no ctl,
+    x += 1: the carry into bit 1 is x_0 on its own wire, so the chain is one AND shorter."""
+    k = len(x)
+    if ctl is None:
+        cs = [None, x[0]] + C.alloc(max(k - 2, 0))
+        for i in range(2, k):
+            C.ccx(cs[i - 1], x[i - 1], cs[i])
+        for i in reversed(range(2, k)):
+            C.cx(cs[i], x[i])
+            C.ccx(cs[i - 1], x[i - 1], cs[i])
+        if k > 1:
+            C.cx(x[0], x[1])
+        C.x(x[0])
+        C.free(cs[2:])
+        return
+    cs = [ctl] + C.alloc(k - 1)
+    for i in range(1, k):
+        C.ccx(cs[i - 1], x[i - 1], cs[i])
+    for i in reversed(range(1, k)):
+        C.cx(cs[i], x[i])
+        C.ccx(cs[i - 1], x[i - 1], cs[i])
+    C.cx(ctl, x[0])
+    C.free(cs[1:])
 
 
 def dec(C, x, ctl):
-    (one,) = C.alloc(1)
-    C.cx(ctl, one)
-    sub(C, [one], x)
-    C.cx(ctl, one)
-    C.free([one])
+    for w in x:
+        C.x(w)
+    inc(C, x, ctl)
+    for w in x:
+        C.x(w)
 
 
 def mul_acc(C, a, b, acc, sign=1, clears=False):
@@ -330,21 +349,21 @@ class RankOne:
         hi = X[n:] + spare
         H = lo[W:]
         pre = Prefix(C, H) if H else None
-        (one,) = C.alloc(1)
-        C.x(one)
-        inc(C, hi, one)
-        C.x(one)
-        C.free([one])
+        inc(C, hi)
         cut = split(f, len(hi))
         if cut:
             lo_c, t = cut
             low = C.alloc((lo_c * ((1 << len(hi)) - 1)).bit_length())
-            own = low + C.alloc(t - len(low))
-            prod = own + hi
-            assert len(prod) == W
+            gap = t - len(low)
+            assert len(low) + gap + len(hi) == W
         else:
-            lo_c, low = f, C.alloc(W)
-            own = prod = low
+            lo_c, low, gap = f, C.alloc(W), 0
+
+        def product():
+            """The product's wires: low, then with a cut the zero wires up to t, taken only while a
+            ripple runs over them, and hi."""
+            pad = C.alloc(gap)
+            return (low + pad + hi if cut else low), pad
 
         def times(inverse=False):
             if low:
@@ -353,7 +372,9 @@ class RankOne:
         times()
         (e,) = C.alloc(1)
         # e ^= (the high bits' AND) * [prod + lo >= 2^W], read off the carry sweep's top wire.
+        prod, pad = product()
         carry_into(C, prod, lo[:W], e, ctl=pre.top if H else None)
+        C.free(pad)
         # off e, m = hi - 1 and the product loses lo_c on its own wires (it was lo_c*(m + 1) there)
         C.x(e)
         dec(C, hi, e)
@@ -364,6 +385,7 @@ class RankOne:
             for x in low:
                 C.x(x)
         C.x(e)
+        prod, pad = product()
         a, b = list(prod), lo[:W]
         (c0,) = C.alloc(1)
         carry = [c0] + a[:-1]
@@ -377,9 +399,9 @@ class RankOne:
             C.cx(cw, e)
         for i in reversed(range(W)):
             _uma(C, carry[i], b[i], a[i])
-        C.free([c0, e])
+        C.free([c0, e] + pad)
         times(inverse=True)
-        C.free(own + spare)
+        C.free(low + spare)
 
     def cofactors(self, C, cells, U, V):
         """(U, V) of the cells from (1, 0), semantic: g0: V = 2V + U, swap on b; J: V = 4V;
@@ -582,17 +604,16 @@ class RankOne:
         for x in D:
             C.x(x)
         mul_acc(C, V, mR, D)
-        (one,) = C.alloc(1)
-        C.x(one)
-        add(C, [one], D)
-        C.x(one)
-        C.free([one])
+        inc(C, D)
         del S[n:]
+        # The small pass and the residue share only U, which both read, so they commute: the pass
+        # runs first, on wires the residue's quotient then takes. It leaves mR = 0 and sp < U < 2^w.
+        sp = C.alloc(w + 1)
+        self.small_pass(C, [[term, None]] + cells, U, mR, sp)
+        C.free(mR + [sp.pop()])
         Q = C.alloc(w)
         regs2 = [U, D, Q]
         b2 = C.run(lambda U, D, Q: self.residue(C, U, D, Q), regs2)
-        sp = C.alloc(w + 1)
-        self.small_pass(C, [[term, None]] + cells, U, mR, sp)
         for i in range(w):
             C.cx(D[i], sp[i])
         C.free(sp)
@@ -604,7 +625,7 @@ class RankOne:
         mul_acc(C, V, r[:k], D)
         mul_acc(C, U, s[:k], D, sign=-1, clears=True)
         C.apply(b1, regs1, inverse=True)
-        C.free(U + V + D + mR)
+        C.free(U + V + D)
         del R[n:]
 
 
