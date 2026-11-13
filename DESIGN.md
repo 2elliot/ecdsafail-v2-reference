@@ -754,3 +754,13 @@ Changes `rank_one.mul_acc` and the order of two calls in `RankOne.convert`. At G
 `scripts/nonzero_check.py` runs every (x, ctl, t) for 1 to 8 wires, and all 192 single-CCX mutants fail; `scripts/m_check.py` runs M with the start on.
 
 Adds `RankOne._and_nonzero` and changes two three-line stretches of `RankOne.residue`. At G: 2,939,412 -> 2,939,188 CCX (-224), 4,096 wires.
+
+## The fold's probe read off the carry sweep (RankOne.fold)
+
+The fold's probe needs e ^= top·[prod + lo ≥ 2^W], with top the Prefix's AND of the high bits. It copied the carry onto a fresh wire c1 with `carry_into`, a sweep up and a sweep down, did `ccx(top, c1, e)`, and cleared c1 with a second `carry_into`: 4W CCX.
+`carry_into` already takes a control for its one write, so `carry_into(C, prod, lo[:W], e, ctl=top)` writes the product straight from the sweep's top wire: 2W + 1 CCX and no c1. prod, lo and top do not change between the old copy and its clear, and the sweep reads only prod and lo[:W], which the Prefix's wires are not among, so e takes the same value.
+Without high bits the write is the plain CX, as before.
+
+The toy primes' folds have no high bits, so they run only the uncontrolled write, before and after this change. `scripts/probe_check.py` therefore builds the old stretch and the new call on the same wires for W = 1 to 6 and runs every (prod, lo, top, e): both leave e ⊕ top·carry and everything else as found; the call without its control and all its single-CCX mutants differ, 150 in all. `scripts/m_check.py` runs M with the start on at q = 61, 251, 4093 and 8191, and `accept.py` samples secp256k1.
+
+Changes eight lines of `RankOne.fold` (the c1 stretch) and nothing else; the fold holds one wire fewer there. At G: 2,939,188 -> 2,938,804 CCX (-384), 4,096 wires.

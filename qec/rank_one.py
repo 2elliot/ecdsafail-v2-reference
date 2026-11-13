@@ -346,14 +346,8 @@ class RankOne:
 
         times()
         (e,) = C.alloc(1)
-        (c1,) = C.alloc(1)
-        carry_into(C, prod, lo[:W], c1)
-        if H:
-            C.ccx(pre.top, c1, e)
-        else:
-            C.cx(c1, e)
-        carry_into(C, prod, lo[:W], c1)
-        C.free([c1])
+        # e ^= (the high bits' AND) * [prod + lo >= 2^W], read off the carry sweep's top wire.
+        carry_into(C, prod, lo[:W], e, ctl=pre.top if H else None)
         # off e, m = hi - 1 and the product loses lo_c on its own wires (it was lo_c*(m + 1) there)
         C.x(e)
         dec(C, hi, e)
