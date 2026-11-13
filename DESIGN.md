@@ -723,6 +723,16 @@ At G: 349 counter steps a pass lose one CCX and the 116 raw ones two more: 2,944
 **Checks.** `scripts/window_check.py` runs `_count` alone as gates on 1 to 8 bits, up and down, with one bit and with two: all 6,104 pairs of a register value and a step give the sum with the step bits kept and the scratch clean, each counter has 2 n - 3 CCX, and up to 6 bits no gate can be dropped without a wrong case.
 Its M rows run every build with the switch on and off: 0 bad lanes. `lag_check.py`, whose lazy-run rows end the run with the counter in every state, `schedule_check.py`, `model_check.py`, `pair_check.py` and the full `accept.py` pass.
 
+### The lazy run's end at the lazy tick's new cost
+
+A lazy tick is now 6 CCX cheaper than when `LAZY_END` was set (the window cell, the strip's junk bit, the counter step), and a whole high word only 1. Re-run at the fixed junk width of 2,718, the pass is least with the run ending at 8 bits: 270,317 CCX against 270,344 at 11 (270,318 at 7, 270,322 at 9); the lag blocks (15, 7, 5, 3) stay the best of the sets tried.
+Ending earlier leaves 11 fewer junk wires to the run's ticks, so `CARRY_JUNK` goes from 1279 to 1268 to keep 4,096 wires. No gate is new: the plan's lazy run is 9 ticks longer and 9 whole high words become lazy ticks.
+
+At G: 2,942,652 -> 2,942,544 CCX (-108), 4,096 wires.
+
+**Checks.** `schedule_check.py` checks the plan's lazy fields and states for every `LAZY_END` it is given and for the built plan; `lag_check.py`, `model_check.py`, `pair_check.py` and the full `accept.py` pass.
+`scripts/window_check.py` runs as before and gains a secp256k1 part that does exercise the pending borrow there: none of the sampled or hard inputs sets p at secp256k1, but x = q - 2^j - r with a small r often does. The run draws such x from a seed and keeps the 48 that the model says set p (17 reach a later high word with it set, 10 strip twice under it): 0 bad lanes for M and its inverse on them and on the 519 sampled inputs, and on those 48 all ten controls fail (the cell without each of its six CCX, the two strip controls, and the ladder's no write and no s).
+
 ## One carry chain for a compare and its conditional subtract (rank_one.sub_if_ge)
 
 The rank-one start reduces by U in four places with the same pair: `greater` makes flag = [b ≥ a], 2 CCX a bit, and `sub` under the flag takes a off b, 3 CCX a bit. Both ripple the same carries, those of a + ~b.
@@ -809,3 +819,8 @@ The gates between read g0 and b only (the cofactors' controlled double, the smal
 
 **Checks.** `scripts/start_wires_check.py`'s M rows (every (x, y) at q = 61, 127, 251, 509) run every cell kind in all three places; two mutants are caught there: a cell that swaps on its J wire (no CX back), and a J wire that holds b.
 `scripts/m_check.py` (the start up to q = 8191, J = 12) and the full `accept.py` pass: 13 pass, 0 fail, 1 pending.
+
+### The three branches together
+
+The lazy run ending at 8 bits (`CARRY_JUNK` 1268 on its own branch) and the start's five wires (1279 -> 1284 on theirs) meet at `CARRY_JUNK` = 1273: 4,096 wires, and 1274 gives 4,097.
+At G with the square branch's rank-one commits, the start's wires and cells and the lazy end: 2,938,372 CCX. `start_wires_check.py`, `window_check.py`, `m_check.py` and the full `accept.py` pass on the merge: 13 pass, 0 fail, 1 pending.
